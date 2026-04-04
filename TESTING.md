@@ -95,7 +95,7 @@ print_r(ScoltaWasm::getDebugLog());
 ```bash
 cd packages/scolta-drupal
 composer install
-# Ensure scolta-core has the WASM binary in wasm/
+# Ensure scolta-php has the WASM binary in wasm/
 drush scolta:build  # Should work identically to before
 ```
 

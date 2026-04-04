@@ -382,7 +382,7 @@ pub mod inner {
 /// Output: Resolved prompt string
 #[plugin_fn]
 pub fn resolve_prompt(Json(input): Json<serde_json::Value>) -> FnResult<String> {
-    Ok(inner::resolve_prompt(&input).map_err(|e| e.to_string())?)
+    Ok(inner::resolve_prompt(&input)?)
 }
 
 /// Get raw prompt template by name.
@@ -391,7 +391,7 @@ pub fn resolve_prompt(Json(input): Json<serde_json::Value>) -> FnResult<String> 
 /// Output: Raw template with {SITE_NAME} and {SITE_DESCRIPTION} placeholders
 #[plugin_fn]
 pub fn get_prompt(input: String) -> FnResult<String> {
-    Ok(inner::get_prompt(&input).map_err(|e| e.to_string())?)
+    Ok(inner::get_prompt(&input)?)
 }
 
 /// Clean HTML by removing chrome and extracting main content.
@@ -400,7 +400,7 @@ pub fn get_prompt(input: String) -> FnResult<String> {
 /// Output: Cleaned plain text
 #[plugin_fn]
 pub fn clean_html(Json(input): Json<serde_json::Value>) -> FnResult<String> {
-    Ok(inner::clean_html(&input).map_err(|e| e.to_string())?)
+    Ok(inner::clean_html(&input)?)
 }
 
 /// Build a Pagefind-compatible HTML document.
@@ -409,7 +409,7 @@ pub fn clean_html(Json(input): Json<serde_json::Value>) -> FnResult<String> {
 /// Output: Complete HTML document with data-pagefind-* attributes
 #[plugin_fn]
 pub fn build_pagefind_html(Json(input): Json<serde_json::Value>) -> FnResult<String> {
-    Ok(inner::build_pagefind_html(&input).map_err(|e| e.to_string())?)
+    Ok(inner::build_pagefind_html(&input)?)
 }
 
 /// Export scoring configuration for JavaScript integration.
@@ -422,7 +422,7 @@ pub fn to_js_scoring_config(
 ) -> FnResult<Json<serde_json::Value>> {
     inner::to_js_scoring_config(&input)
         .map(Json)
-        .map_err(|e| e.to_string().into())
+        .map_err(|e| e.into())
 }
 
 /// Score and re-rank search results.
@@ -435,7 +435,7 @@ pub fn score_results(
 ) -> FnResult<Json<serde_json::Value>> {
     inner::score_results(&input)
         .map(Json)
-        .map_err(|e| e.to_string().into())
+        .map_err(|e| e.into())
 }
 
 /// Merge original and expanded search results.
@@ -448,7 +448,7 @@ pub fn merge_results(
 ) -> FnResult<Json<serde_json::Value>> {
     inner::merge_results(&input)
         .map(Json)
-        .map_err(|e| e.to_string().into())
+        .map_err(|e| e.into())
 }
 
 /// Parse LLM expansion response into term array.
@@ -485,12 +485,12 @@ pub fn debug_call(
 ) -> FnResult<Json<serde_json::Value>> {
     let obj = input
         .as_object()
-        .ok_or_else(|| ScoltaError::invalid_json("debug_call", "expected JSON object").to_string())?;
+        .ok_or_else(|| ScoltaError::invalid_json("debug_call", "expected JSON object"))?;
 
     let function = obj
         .get("function")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| ScoltaError::missing_field("debug_call", "function").to_string())?;
+        .ok_or_else(|| ScoltaError::missing_field("debug_call", "function"))?;
 
     let call_input = obj
         .get("input")
@@ -544,7 +544,6 @@ pub fn debug_call(
                 ScoltaError::UnknownFunction {
                     name: function.to_string(),
                 }
-                .to_string()
                 .into(),
             );
         }
