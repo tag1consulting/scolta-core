@@ -1,0 +1,26 @@
+[package]
+name = "scolta-core-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "Scolta search engine core - WebAssembly module for cross-platform search scoring, prompt management, and content processing"
+license = "MIT"
+repository = "https://github.com/tag1consulting/scolta"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+extism-pdk = "1.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+
+[dev-dependencies]
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+codegen-units = 1
+panic = "abort"
