@@ -188,6 +188,16 @@ pub fn build_pagefind_html(
         String::new()
     };
 
+    let date_meta = if !date.is_empty() {
+        format!(
+            r#"<p data-pagefind-meta="date:{}" hidden></p>
+"#,
+            escaped_date
+        )
+    } else {
+        String::new()
+    };
+
     format!(
         r#"<!DOCTYPE html>
 <html>
@@ -198,11 +208,10 @@ pub fn build_pagefind_html(
 <body data-pagefind-body id="{}"{}>
 <h1>{}</h1>
 <p data-pagefind-meta="url:{}" hidden></p>
-<p data-pagefind-meta="date:{}" hidden></p>
-{}
+{}{}
 </body>
 </html>"#,
-        escaped_title, id, site_filter, escaped_title, escaped_url, escaped_date, escaped_body
+        escaped_title, id, site_filter, escaped_title, escaped_url, date_meta, escaped_body
     )
 }
 
@@ -520,7 +529,7 @@ mod tests {
     fn test_find_matching_close_nested() {
         let html = "<div><div>inner</div>outer</div>";
         let pos = find_matching_close(html, 5, "div");
-        assert_eq!(pos, Some(25)); // should find the outer </div>
+        assert_eq!(pos, Some(26)); // position of '<' in outer </div>
     }
 
     #[test]

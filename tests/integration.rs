@@ -268,10 +268,20 @@ mod prompts_module {
     }
 
     #[test]
-    fn all_templates_contain_both_placeholders() {
+    fn all_templates_contain_site_name_placeholder() {
         for name in &["expand_query", "summarize", "follow_up"] {
             let t = prompts::get_template(name).unwrap();
             assert!(t.contains("{SITE_NAME}"), "{} missing {{SITE_NAME}}", name);
+        }
+    }
+
+    #[test]
+    fn expand_and_summarize_contain_site_description() {
+        // expand_query and summarize use {SITE_DESCRIPTION}.
+        // follow_up intentionally does not — it's a conversation
+        // continuation that only needs the site name for context.
+        for name in &["expand_query", "summarize"] {
+            let t = prompts::get_template(name).unwrap();
             assert!(t.contains("{SITE_DESCRIPTION}"), "{} missing {{SITE_DESCRIPTION}}", name);
         }
     }

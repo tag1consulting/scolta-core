@@ -36,9 +36,10 @@ pub fn parse_expansion(response: &str) -> Vec<String> {
                 .filter(|s| common::is_valid_term(s))
                 .collect();
 
-            if !terms.is_empty() {
-                return terms;
-            }
+            // Return even if empty — the JSON was valid, so falling through
+            // to the fallback parser would re-parse the JSON syntax as text
+            // and produce garbage terms from brackets and quotes.
+            return terms;
         }
     }
 
