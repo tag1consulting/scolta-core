@@ -1,4 +1,4 @@
-# Scolta Core WASM — API Reference
+# Scolta Core — API Reference
 
 WebAssembly module for the Scolta search engine. This is the **source of truth** for search scoring, HTML processing, prompt management, and query expansion. All platform adapters (PHP, Python, JS, Rust) call into this WASM module via [Extism](https://extism.org/) to get identical behavior.
 
@@ -343,7 +343,7 @@ This function never errors — it always returns an array (possibly empty).
 
 ```json
 {
-  "name": "scolta-core-wasm",
+  "name": "scolta-core",
   "version": "0.1.0",
   "description": "Scolta search engine core — ...",
   "functions": {
@@ -428,7 +428,7 @@ use Extism\Plugin;
 use Extism\Manifest;
 use Extism\PathWasm;
 
-$wasm = new PathWasm('/path/to/scolta_core_wasm.wasm');
+$wasm = new PathWasm('/path/to/scolta_core.wasm');
 $manifest = new Manifest($wasm);
 $plugin = new Plugin($manifest, true); // true = enable WASI
 ```
@@ -526,7 +526,7 @@ Python adapters use [Extism Python SDK](https://github.com/extism/python-sdk).
 import extism
 import json
 
-manifest = {"wasm": [{"path": "/path/to/scolta_core_wasm.wasm"}]}
+manifest = {"wasm": [{"path": "/path/to/scolta_core.wasm"}]}
 plugin = extism.Plugin(manifest, wasi=True)
 ```
 
@@ -622,7 +622,7 @@ JavaScript adapters use [Extism JS SDK](https://github.com/extism/js-sdk).
 import createPlugin from '@extism/extism';
 
 const plugin = await createPlugin(
-  { wasm: [{ path: './scolta_core_wasm.wasm' }] },
+  { wasm: [{ path: './scolta_core.wasm' }] },
   { useWasi: true }
 );
 ```
@@ -633,7 +633,7 @@ const plugin = await createPlugin(
 import createPlugin from 'https://cdn.jsdelivr.net/npm/@extism/extism/dist/browser/mod.js';
 
 const plugin = await createPlugin(
-  { wasm: [{ url: '/wasm/scolta_core_wasm.wasm' }] },
+  { wasm: [{ url: '/wasm/scolta_core.wasm' }] },
   { useWasi: true }
 );
 ```
@@ -737,14 +737,14 @@ Rust consumers can either call the WASM module via Extism host SDK, or use the c
 Add to `Cargo.toml`:
 ```toml
 [dependencies]
-scolta-core-wasm = { path = "../scolta-core-wasm" }
+scolta-core = { path = "../scolta-core" }
 serde_json = "1"
 ```
 
 Call the `inner::` functions directly — no serialization overhead:
 
 ```rust
-use scolta_core_wasm::inner;
+use scolta_core::inner;
 use serde_json::json;
 
 fn main() {
@@ -809,13 +809,13 @@ fn main() {
 For finer-grained control, use the public modules:
 
 ```rust
-use scolta_core_wasm::scoring::{ScoringConfig, SearchResult, score_results, merge_results};
-use scolta_core_wasm::config::{from_json, from_json_validated, to_js_scoring_config};
-use scolta_core_wasm::html::{clean_html, build_pagefind_html};
-use scolta_core_wasm::expansion::parse_expansion;
-use scolta_core_wasm::prompts::{get_template, resolve_template};
-use scolta_core_wasm::common::{extract_terms, is_stop_word, is_valid_term};
-use scolta_core_wasm::debug::{measure_call, debug_result_to_json};
+use scolta_core::scoring::{ScoringConfig, SearchResult, score_results, merge_results};
+use scolta_core::config::{from_json, from_json_validated, to_js_scoring_config};
+use scolta_core::html::{clean_html, build_pagefind_html};
+use scolta_core::expansion::parse_expansion;
+use scolta_core::prompts::{get_template, resolve_template};
+use scolta_core::common::{extract_terms, is_stop_word, is_valid_term};
+use scolta_core::debug::{measure_call, debug_result_to_json};
 
 // Config with validation
 let config_json = serde_json::json!({"recency_boost_max": 5.0});
@@ -839,7 +839,7 @@ let terms = extract_terms("what is drupal performance tuning");
 use extism::*;
 
 fn main() -> Result<(), Error> {
-    let manifest = Manifest::new([Wasm::file("/path/to/scolta_core_wasm.wasm")]);
+    let manifest = Manifest::new([Wasm::file("/path/to/scolta_core.wasm")]);
     let mut plugin = Plugin::new(&manifest, [], true)?; // true = WASI
 
     // All calls use byte slices
@@ -858,7 +858,7 @@ fn main() -> Result<(), Error> {
 When using `inner::` functions, errors are typed `ScoltaError`:
 
 ```rust
-use scolta_core_wasm::error::ScoltaError;
+use scolta_core::error::ScoltaError;
 
 match inner::resolve_prompt(&input) {
     Ok(prompt) => println!("{}", prompt),
@@ -883,7 +883,7 @@ rustup target add wasm32-wasip1
 # Build the plugin
 cargo build --target wasm32-wasip1 --release
 
-# Output: target/wasm32-wasip1/release/scolta_core_wasm.wasm
+# Output: target/wasm32-wasip1/release/scolta_core.wasm
 
 # Run tests (native target)
 cargo test

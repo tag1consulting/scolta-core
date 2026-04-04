@@ -1,4 +1,4 @@
-//! Typed error handling for scolta-core-wasm.
+//! Typed error handling for scolta-core.
 //!
 //! Every error includes the originating function name so that when an error
 //! propagates through an Extism host (PHP, Python, JS, Go, etc.) and lands
@@ -11,7 +11,7 @@
 
 use std::fmt;
 
-/// Structured error type for all scolta-core-wasm operations.
+/// Structured error type for all scolta-core operations.
 ///
 /// Each variant includes enough context for a platform plugin maintainer
 /// to diagnose the problem without reading the Rust source. The `function`

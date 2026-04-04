@@ -1,4 +1,4 @@
-//! Comprehensive integration tests for scolta-core-wasm.
+//! Comprehensive integration tests for scolta-core.
 //!
 //! Tests the module-level functions and the `inner::` public API.
 //! Does NOT call `#[plugin_fn]` functions — those are `extern "C"` wrappers
@@ -20,7 +20,7 @@
 
 #[cfg(test)]
 mod common_module {
-    use scolta_core_wasm::common;
+    use scolta_core::common;
 
     #[test]
     fn stop_word_hit() {
@@ -121,7 +121,7 @@ mod common_module {
 
 #[cfg(test)]
 mod error_module {
-    use scolta_core_wasm::error::ScoltaError;
+    use scolta_core::error::ScoltaError;
 
     #[test]
     fn invalid_json_display() {
@@ -208,7 +208,7 @@ mod error_module {
 
 #[cfg(test)]
 mod prompts_module {
-    use scolta_core_wasm::prompts;
+    use scolta_core::prompts;
 
     #[test]
     fn get_template_expand_query() {
@@ -279,7 +279,7 @@ mod prompts_module {
 
 #[cfg(test)]
 mod html_module {
-    use scolta_core_wasm::html;
+    use scolta_core::html;
 
     // -- clean_html --
 
@@ -493,7 +493,7 @@ mod html_module {
 
 #[cfg(test)]
 mod scoring_module {
-    use scolta_core_wasm::scoring::*;
+    use scolta_core::scoring::*;
 
     fn days_ago(n: u64) -> String {
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -915,7 +915,7 @@ mod scoring_module {
 
 #[cfg(test)]
 mod config_module {
-    use scolta_core_wasm::config;
+    use scolta_core::config;
     use serde_json::json;
 
     #[test]
@@ -979,7 +979,7 @@ mod config_module {
 
     #[test]
     fn to_js_scoring_config_keys() {
-        let c = scolta_core_wasm::scoring::ScoringConfig::default();
+        let c = scolta_core::scoring::ScoringConfig::default();
         let js = config::to_js_scoring_config(&c, &json!({}));
         // Verify all expected keys exist
         for key in &[
@@ -996,7 +996,7 @@ mod config_module {
 
     #[test]
     fn to_js_scoring_config_default_values() {
-        let c = scolta_core_wasm::scoring::ScoringConfig::default();
+        let c = scolta_core::scoring::ScoringConfig::default();
         let js = config::to_js_scoring_config(&c, &json!({}));
         assert_eq!(js["RECENCY_BOOST_MAX"], 0.5);
         assert_eq!(js["RECENCY_HALF_LIFE_DAYS"], 365);
@@ -1010,7 +1010,7 @@ mod config_module {
 
     #[test]
     fn to_js_scoring_config_ai_toggles_passthrough() {
-        let c = scolta_core_wasm::scoring::ScoringConfig::default();
+        let c = scolta_core::scoring::ScoringConfig::default();
         let js = config::to_js_scoring_config(&c, &json!({
             "ai_expand_query": false,
             "ai_summarize": false,
@@ -1027,7 +1027,7 @@ mod config_module {
 
     #[test]
     fn to_js_scoring_config_custom_scoring_values() {
-        let c = scolta_core_wasm::scoring::ScoringConfig {
+        let c = scolta_core::scoring::ScoringConfig {
             recency_boost_max: 0.8,
             recency_half_life_days: 200,
             ..Default::default()
@@ -1040,7 +1040,7 @@ mod config_module {
 
 #[cfg(test)]
 mod expansion_module {
-    use scolta_core_wasm::expansion;
+    use scolta_core::expansion;
 
     #[test]
     fn parse_json_array() {
@@ -1147,7 +1147,7 @@ mod expansion_module {
 
 #[cfg(test)]
 mod debug_module {
-    use scolta_core_wasm::debug;
+    use scolta_core::debug;
 
     #[test]
     fn measure_call_success() {
@@ -1227,7 +1227,7 @@ mod debug_module {
 #[cfg(test)]
 mod inner_api {
     //! Tests the inner:: JSON interface — the contract that all language adapters depend on.
-    use scolta_core_wasm::inner;
+    use scolta_core::inner;
     use serde_json::json;
 
     fn recent_date() -> String {
@@ -1237,7 +1237,7 @@ mod inner_api {
             .unwrap()
             .as_secs()
             - (30 * 86400);
-        let (y, m, d) = scolta_core_wasm::scoring::civil_from_epoch_secs(secs);
+        let (y, m, d) = scolta_core::scoring::civil_from_epoch_secs(secs);
         format!("{:04}-{:02}-{:02}", y, m, d)
     }
 
@@ -1468,7 +1468,7 @@ mod inner_api {
     #[test]
     fn describe_has_metadata() {
         let d = inner::describe();
-        assert_eq!(d["name"], "scolta-core-wasm");
+        assert_eq!(d["name"], "scolta-core");
         assert_eq!(d["version"], "0.1.0");
         assert!(d["description"].as_str().unwrap().len() > 10);
     }
@@ -1515,7 +1515,7 @@ mod inner_api {
 mod inner_api_errors {
     //! Every error path through the inner:: API. These verify that bad input
     //! produces a useful, function-attributed error message.
-    use scolta_core_wasm::inner;
+    use scolta_core::inner;
     use serde_json::json;
 
     // -- resolve_prompt errors --
@@ -1731,7 +1731,7 @@ mod inner_api_errors {
 #[cfg(test)]
 mod pipeline {
     //! End-to-end workflow tests simulating real adapter usage patterns.
-    use scolta_core_wasm::*;
+    use scolta_core::*;
     use serde_json::json;
 
     fn recent_date() -> String {

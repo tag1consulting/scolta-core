@@ -1,5 +1,5 @@
 [package]
-name = "scolta-core-wasm"
+name = "scolta-core"
 version = "0.1.0"
 edition = "2021"
 description = "Scolta search engine core - WebAssembly module for cross-platform search scoring, prompt management, and content processing"

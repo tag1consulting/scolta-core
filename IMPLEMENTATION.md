@@ -1,11 +1,11 @@
-# Scolta Core WASM - Implementation Summary
+# Scolta Core - Implementation Summary
 
-Complete Rust WebAssembly crate for the Scolta search engine core, replacing PHP scolta-core library logic with cross-platform WASM module via Extism PDK.
+Complete Rust WebAssembly crate for the Scolta search engine core, replacing PHP scolta-php library logic with cross-platform WASM module via Extism PDK.
 
 ## Project Structure
 
 ```
-scolta-core-wasm/
+scolta-core/
 ├── Cargo.toml              # Package manifest (edition 2021, extism-pdk 1.2)
 ├── rustfmt.toml            # Formatting config (edition 2021)
 ├── README.md               # Usage and build instructions
@@ -32,7 +32,7 @@ scolta-core-wasm/
 ## File-by-File Implementation
 
 ### Cargo.toml
-- Package name: `scolta-core-wasm`
+- Package name: `scolta-core`
 - Version: `0.1.0`
 - Edition: `2021`
 - Library type: `cdylib` (WebAssembly module)
@@ -421,7 +421,7 @@ Documentation of expected cleaned output for both fixtures
 
 ### Native Build
 ```bash
-cd packages/scolta-core-wasm
+cd packages/scolta-core
 cargo build --release
 cargo test --release
 ```
@@ -431,7 +431,7 @@ cargo test --release
 cargo build --target wasm32-wasip1 --release
 ```
 
-Output: `target/wasm32-wasip1/release/scolta_core_wasm.wasm`
+Output: `target/wasm32-wasip1/release/scolta_core.wasm`
 
 ### Formatting
 ```bash

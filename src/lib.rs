@@ -264,7 +264,7 @@ pub mod inner {
     /// for platform adapter developers.
     pub fn describe() -> serde_json::Value {
         json!({
-            "name": "scolta-core-wasm",
+            "name": "scolta-core",
             "version": VERSION,
             "description": "Scolta search engine core — scoring, HTML processing, prompt management, and query expansion",
             "functions": {
@@ -712,7 +712,7 @@ mod tests {
     #[test]
     fn test_describe() {
         let desc = inner::describe();
-        assert_eq!(desc["name"], "scolta-core-wasm");
+        assert_eq!(desc["name"], "scolta-core");
         assert_eq!(desc["version"], "0.1.0");
         let functions = desc["functions"].as_object().unwrap();
         assert!(functions.contains_key("score_results"));

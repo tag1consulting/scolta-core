@@ -1,4 +1,4 @@
-# Scolta Core WASM: Build and Test Instructions
+# Scolta Core: Build and Test Instructions
 
 ## Prerequisites
 
@@ -11,7 +11,7 @@
 ## Build the WASM Module
 
 ```bash
-cd packages/scolta-core-wasm
+cd packages/scolta-php
 
 # Debug build (faster compilation, larger binary)
 cargo build --target wasm32-wasip1
@@ -20,16 +20,16 @@ cargo build --target wasm32-wasip1
 cargo build --release --target wasm32-wasip1
 
 # The binary is at:
-# target/wasm32-wasip1/debug/scolta_core_wasm.wasm (debug)
-# target/wasm32-wasip1/release/scolta_core_wasm.wasm (release)
+# target/wasm32-wasip1/debug/scolta_core.wasm (debug)
+# target/wasm32-wasip1/release/scolta_core.wasm (release)
 ```
 
 ## Deploy WASM to PHP Package
 
 ```bash
 # Copy the release binary to the PHP package
-cp target/wasm32-wasip1/release/scolta_core_wasm.wasm \
-   ../scolta-core/wasm/scolta-core.wasm
+cp target/wasm32-wasip1/release/scolta_core.wasm \
+   ../scolta-php/wasm/scolta_core.wasm
 ```
 
 ## Run Rust Tests
@@ -50,24 +50,24 @@ cargo clippy --target wasm32-wasip1 -- -D warnings
 ```bash
 # Test prompt resolution
 echo '{"template":"expand_query","site_name":"Acme Corp","site_description":"corporate website"}' | \
-  extism call target/wasm32-wasip1/release/scolta_core_wasm.wasm resolve_prompt --wasi --input=-
+  extism call target/wasm32-wasip1/release/scolta_core.wasm resolve_prompt --wasi --input=-
 
 # Test HTML cleaning
 echo '{"html":"<nav>skip</nav><main id=\"main-content\"><p>Hello world</p></main><footer>skip</footer>","title":"Test"}' | \
-  extism call target/wasm32-wasip1/release/scolta_core_wasm.wasm clean_html --wasi --input=-
+  extism call target/wasm32-wasip1/release/scolta_core.wasm clean_html --wasi --input=-
 
 # Test version
-extism call target/wasm32-wasip1/release/scolta_core_wasm.wasm version --wasi --input=""
+extism call target/wasm32-wasip1/release/scolta_core.wasm version --wasi --input=""
 
 # Test debug call
 echo '{"function":"version","input":""}' | \
-  extism call target/wasm32-wasip1/release/scolta_core_wasm.wasm debug_call --wasi --input=-
+  extism call target/wasm32-wasip1/release/scolta_core.wasm debug_call --wasi --input=-
 ```
 
 ## PHP Integration Test
 
 ```bash
-cd packages/scolta-core
+cd packages/scolta-php
 
 # Install dependencies (including extism/extism)
 composer install
@@ -147,8 +147,8 @@ foreach (ScoltaWasm::getDebugLog() as $entry) {
 ## Troubleshooting
 
 ### "Scolta WASM module not found"
-- Build the WASM module and copy to `packages/scolta-core/wasm/scolta-core.wasm`
-- Or set a custom path: `ScoltaWasm::setWasmPath('/path/to/scolta-core.wasm')`
+- Build the WASM module and copy to `packages/scolta-php/wasm/scolta_core.wasm`
+- Or set a custom path: `ScoltaWasm::setWasmPath('/path/to/scolta_core.wasm')`
 
 ### "Class Extism\Plugin not found"
 - Install the Extism PHP SDK: `composer require extism/extism`

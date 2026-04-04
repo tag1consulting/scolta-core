@@ -1,4 +1,4 @@
-# Scolta Core WASM
+# Scolta Core
 
 WebAssembly module for the Scolta search engine, providing cross-platform search scoring, prompt management, and content processing.
 
@@ -42,7 +42,7 @@ cargo build --target wasm32-wasip1 --release
 
 The compiled module is located at:
 ```
-target/wasm32-wasip1/release/scolta_core_wasm.wasm
+target/wasm32-wasip1/release/scolta_core.wasm
 ```
 
 ## Module Structure
