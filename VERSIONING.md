@@ -40,7 +40,11 @@ Minor and patch versions are independent. Each package ships features and bug fi
 
 ## Development Versions (-dev Suffix)
 
-Between releases, the version in the repo always carries a `-dev` pre-release suffix. This is standard practice across Cargo, Composer, npm, and pip — the `-dev` suffix is a semver pre-release identifier that sorts lower than the bare version (`0.2.0-dev < 0.2.0`).
+Between releases, the version in the repo carries a `-dev` pre-release suffix. The `-dev` suffix is a [semver pre-release identifier](https://semver.org/#spec-item-9) that sorts lower than the bare version (`0.2.0-dev < 0.2.0`).
+
+**Why we use it:** Scolta is a multi-package project with multiple contributors (human and automated). When someone opens `Cargo.toml` or `composer.json` in the repo, `-dev` makes the state self-documenting — you can immediately tell whether you're looking at a tagged release or unreleased work in progress, without cross-referencing git tags.
+
+**Ecosystem notes:** The `-dev` suffix is a first-class concept in Composer (PHP), where it maps to a stability level that prevents accidental installation in production (requires `minimum-stability: dev` or an explicit `@dev` flag). In Cargo (Rust), pre-release identifiers are valid semver and work correctly, but most Rust crates don't use them between releases — we do because of the multi-package coordination benefit. For scolta.js (npm), `-dev` is a valid pre-release identifier but npm's default behavior will tag a published pre-release as `latest` unless you explicitly use `--tag dev` or `--tag next` — **always use `npm publish --tag dev`** to prevent users from accidentally installing a pre-release via `npm install scolta.js`.
 
 **The workflow:**
 
@@ -68,6 +72,8 @@ For patch-only work on a released version: `0.1.1-dev` → `0.1.1`.
    - Only bug fixes since last release → next patch (`0.3.1-dev`)
    - New features or deprecations → next minor (`0.4.0-dev`)
    - Breaking changes → next major (`1.0.0-dev`) — coordinated across all packages
+
+6. **npm publish safety (scolta.js only):** Always publish pre-release versions with an explicit dist-tag: `npm publish --tag dev`. Never publish a `-dev` version without a tag — npm's default is `latest`, which would make the pre-release the default install for all users.
 
 **Where the version lives:**
 
