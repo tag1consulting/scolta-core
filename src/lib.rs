@@ -40,6 +40,13 @@ use serde_json::json;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// WASM interface version — tracks binary compatibility between scolta-core
+/// and its host wrappers (scolta-php, scolta-python, scolta.js).
+///
+/// Increment this when function signatures or calling conventions change
+/// in a way that requires wrapper updates. See VERSIONING.md.
+pub const WASM_INTERFACE_VERSION: u32 = 1;
+
 // ---------------------------------------------------------------------------
 // Inner functions: plain Rust, callable from tests and debug_call.
 // ---------------------------------------------------------------------------
@@ -266,10 +273,13 @@ pub mod inner {
         json!({
             "name": "scolta-core",
             "version": VERSION,
+            "wasm_interface_version": WASM_INTERFACE_VERSION,
             "description": "Scolta search engine core — scoring, HTML processing, prompt management, and query expansion",
             "functions": {
                 "resolve_prompt": {
                     "description": "Resolve a prompt template with site-specific variable substitution",
+                    "since": "0.1.0",
+                    "stability": "stable",
                     "input_type": "json",
                     "input_fields": {
                         "prompt_name": {"type": "string", "required": true, "values": ["expand_query", "summarize", "follow_up"]},
@@ -281,6 +291,8 @@ pub mod inner {
                 },
                 "get_prompt": {
                     "description": "Get a raw prompt template by name without substitution",
+                    "since": "0.1.0",
+                    "stability": "stable",
                     "input_type": "string",
                     "input_description": "Prompt name: expand_query, summarize, or follow_up",
                     "output_type": "string",
@@ -288,6 +300,8 @@ pub mod inner {
                 },
                 "clean_html": {
                     "description": "Strip page chrome and extract main content as plain text",
+                    "since": "0.1.0",
+                    "stability": "stable",
                     "input_type": "json",
                     "input_fields": {
                         "html": {"type": "string", "required": true},
@@ -298,6 +312,8 @@ pub mod inner {
                 },
                 "build_pagefind_html": {
                     "description": "Generate Pagefind-compatible HTML for search indexing",
+                    "since": "0.1.0",
+                    "stability": "stable",
                     "input_type": "json",
                     "input_fields": {
                         "id": {"type": "string", "required": true},
@@ -312,6 +328,8 @@ pub mod inner {
                 },
                 "score_results": {
                     "description": "Score and re-rank search results by relevance",
+                    "since": "0.1.0",
+                    "stability": "stable",
                     "input_type": "json",
                     "input_fields": {
                         "query": {"type": "string", "required": true},
@@ -323,6 +341,8 @@ pub mod inner {
                 },
                 "merge_results": {
                     "description": "Merge original and expanded search results with deduplication",
+                    "since": "0.1.0",
+                    "stability": "stable",
                     "input_type": "json",
                     "input_fields": {
                         "original": {"type": "array<SearchResult>", "required": true},
@@ -334,14 +354,17 @@ pub mod inner {
                 },
                 "to_js_scoring_config": {
                     "description": "Export scoring config as SCREAMING_SNAKE_CASE JSON for JavaScript frontends",
+                    "since": "0.1.0",
+                    "stability": "stable",
                     "input_type": "json",
                     "input_description": "ScoringConfig fields plus optional AI toggle flags",
                     "output_type": "json",
-                    "output_description": "Config object with uppercase keys for window.scolta",
-                    "note": "Convenience function for JS consumers. Other language adapters should use config fields directly."
+                    "output_description": "Config object with uppercase keys for window.scolta"
                 },
                 "parse_expansion": {
                     "description": "Parse an LLM expansion response into a term array",
+                    "since": "0.1.0",
+                    "stability": "stable",
                     "input_type": "string",
                     "input_description": "Raw LLM response (JSON array, markdown-wrapped, or newline/comma separated)",
                     "output_type": "json",
@@ -349,16 +372,22 @@ pub mod inner {
                 },
                 "version": {
                     "description": "Get the crate version",
+                    "since": "0.1.0",
+                    "stability": "stable",
                     "input_type": "none",
                     "output_type": "string"
                 },
                 "describe": {
                     "description": "Describe all exported functions (this output)",
+                    "since": "0.1.0",
+                    "stability": "stable",
                     "input_type": "none",
                     "output_type": "json"
                 },
                 "debug_call": {
                     "description": "Profile any function with timing and size metrics",
+                    "since": "0.1.0",
+                    "stability": "stable",
                     "input_type": "json",
                     "input_fields": {
                         "function": {"type": "string", "required": true},
@@ -380,6 +409,10 @@ pub mod inner {
 ///
 /// Input JSON: `{"prompt_name": "expand_query", "site_name": "...", "site_description": "..."}`
 /// Output: Resolved prompt string
+///
+/// # Stability
+/// - **Status:** stable
+/// - **Since:** 0.1.0
 #[plugin_fn]
 pub fn resolve_prompt(Json(input): Json<serde_json::Value>) -> FnResult<String> {
     Ok(inner::resolve_prompt(&input)?)
@@ -389,6 +422,10 @@ pub fn resolve_prompt(Json(input): Json<serde_json::Value>) -> FnResult<String> 
 ///
 /// Input: Plain string prompt name (e.g., "expand_query")
 /// Output: Raw template with {SITE_NAME} and {SITE_DESCRIPTION} placeholders
+///
+/// # Stability
+/// - **Status:** stable
+/// - **Since:** 0.1.0
 #[plugin_fn]
 pub fn get_prompt(input: String) -> FnResult<String> {
     Ok(inner::get_prompt(&input)?)
@@ -398,6 +435,10 @@ pub fn get_prompt(input: String) -> FnResult<String> {
 ///
 /// Input JSON: `{"html": "...", "title": "..."}`
 /// Output: Cleaned plain text
+///
+/// # Stability
+/// - **Status:** stable
+/// - **Since:** 0.1.0
 #[plugin_fn]
 pub fn clean_html(Json(input): Json<serde_json::Value>) -> FnResult<String> {
     Ok(inner::clean_html(&input)?)
@@ -407,6 +448,10 @@ pub fn clean_html(Json(input): Json<serde_json::Value>) -> FnResult<String> {
 ///
 /// Input JSON: `{"id": "...", "title": "...", "body": "...", "url": "...", "date": "...", "site_name": "..."}`
 /// Output: Complete HTML document with data-pagefind-* attributes
+///
+/// # Stability
+/// - **Status:** stable
+/// - **Since:** 0.1.0
 #[plugin_fn]
 pub fn build_pagefind_html(Json(input): Json<serde_json::Value>) -> FnResult<String> {
     Ok(inner::build_pagefind_html(&input)?)
@@ -416,6 +461,10 @@ pub fn build_pagefind_html(Json(input): Json<serde_json::Value>) -> FnResult<Str
 ///
 /// Input JSON: scoring config fields + AI toggle fields
 /// Output: Configuration object with SCREAMING_SNAKE_CASE keys
+///
+/// # Stability
+/// - **Status:** stable
+/// - **Since:** 0.1.0
 #[plugin_fn]
 pub fn to_js_scoring_config(
     Json(input): Json<serde_json::Value>,
@@ -429,6 +478,10 @@ pub fn to_js_scoring_config(
 ///
 /// Input JSON: `{"query": "...", "results": [...], "config": {...}}`
 /// Output: Scored and sorted results array
+///
+/// # Stability
+/// - **Status:** stable
+/// - **Since:** 0.1.0
 #[plugin_fn]
 pub fn score_results(
     Json(input): Json<serde_json::Value>,
@@ -442,6 +495,10 @@ pub fn score_results(
 ///
 /// Input JSON: `{"original": [...], "expanded": [...], "config": {...}}`
 /// Output: Merged and deduplicated results array
+///
+/// # Stability
+/// - **Status:** stable
+/// - **Since:** 0.1.0
 #[plugin_fn]
 pub fn merge_results(
     Json(input): Json<serde_json::Value>,
@@ -455,12 +512,20 @@ pub fn merge_results(
 ///
 /// Input: Plain text (JSON array, markdown-wrapped, or newline-separated)
 /// Output: JSON array of cleaned search terms
+///
+/// # Stability
+/// - **Status:** stable
+/// - **Since:** 0.1.0
 #[plugin_fn]
 pub fn parse_expansion(input: String) -> FnResult<Json<Vec<String>>> {
     Ok(Json(inner::parse_expansion(&input)))
 }
 
 /// Get current crate version.
+///
+/// # Stability
+/// - **Status:** stable
+/// - **Since:** 0.1.0
 #[plugin_fn]
 pub fn version(_: ()) -> FnResult<String> {
     Ok(inner::version())
@@ -468,8 +533,13 @@ pub fn version(_: ()) -> FnResult<String> {
 
 /// Describe all exported functions.
 ///
-/// Output: JSON object with function names, descriptions, input/output formats.
+/// Output: JSON object with function names, descriptions, input/output formats,
+/// lifecycle status (since, stability), and WASM interface version.
 /// Enables self-discovery for platform adapter developers.
+///
+/// # Stability
+/// - **Status:** stable
+/// - **Since:** 0.1.0
 #[plugin_fn]
 pub fn describe(_: ()) -> FnResult<Json<serde_json::Value>> {
     Ok(Json(inner::describe()))
@@ -479,6 +549,10 @@ pub fn describe(_: ()) -> FnResult<Json<serde_json::Value>> {
 ///
 /// Input JSON: `{"function": "clean_html", "input": "{...}"}`
 /// Output JSON: `{"output": "..." | null, "error": "..." | null, "time_us": N, "input_size": N, "output_size": N}`
+///
+/// # Stability
+/// - **Status:** stable
+/// - **Since:** 0.1.0
 #[plugin_fn]
 pub fn debug_call(
     Json(input): Json<serde_json::Value>,
@@ -713,9 +787,15 @@ mod tests {
         let desc = inner::describe();
         assert_eq!(desc["name"], "scolta-core");
         assert_eq!(desc["version"], "0.1.0");
+        assert_eq!(desc["wasm_interface_version"], 1);
         let functions = desc["functions"].as_object().unwrap();
         assert!(functions.contains_key("score_results"));
         assert!(functions.contains_key("describe"));
         assert!(functions.contains_key("debug_call"));
+        // Every function must have lifecycle metadata per VERSIONING.md.
+        for (name, info) in functions {
+            assert!(info.get("since").is_some(), "{} missing 'since'", name);
+            assert!(info.get("stability").is_some(), "{} missing 'stability'", name);
+        }
     }
 }

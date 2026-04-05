@@ -1480,6 +1480,7 @@ mod inner_api {
         let d = inner::describe();
         assert_eq!(d["name"], "scolta-core");
         assert_eq!(d["version"], "0.1.0");
+        assert_eq!(d["wasm_interface_version"], 1);
         assert!(d["description"].as_str().unwrap().len() > 10);
     }
 
@@ -1505,6 +1506,8 @@ mod inner_api {
         for (name, info) in fns {
             assert!(info.get("description").is_some(), "{} missing 'description'", name);
             assert!(info.get("output_type").is_some(), "{} missing 'output_type'", name);
+            assert!(info.get("since").is_some(), "{} missing 'since' (VERSIONING.md requirement)", name);
+            assert!(info.get("stability").is_some(), "{} missing 'stability' (VERSIONING.md requirement)", name);
         }
     }
 
@@ -1908,5 +1911,121 @@ mod pipeline {
         assert_eq!(js["EXPAND_PRIMARY_WEIGHT"], 0.5);
         assert_eq!(js["AI_EXPAND_QUERY"], false);
         assert_eq!(js["AI_MAX_FOLLOWUPS"], 7);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle validation — enforces VERSIONING.md rules via CI.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod versioning {
+    //! These tests enforce the rules in VERSIONING.md.
+    //!
+    //! - Every exported function has `since` and `stability` in describe().
+    //! - Valid stability values are: experimental, stable, deprecated.
+    //! - Deprecated functions must have `deprecated_in` and `replacement`.
+    //! - WASM interface version is present and is a positive integer.
+    //! - Version string is valid semver.
+
+    use scolta_core::inner;
+    use scolta_core::WASM_INTERFACE_VERSION;
+
+    const VALID_STABILITY: &[&str] = &["experimental", "stable", "deprecated"];
+
+    #[test]
+    fn wasm_interface_version_is_positive() {
+        assert!(WASM_INTERFACE_VERSION > 0);
+    }
+
+    #[test]
+    fn describe_includes_wasm_interface_version() {
+        let d = inner::describe();
+        let v = d["wasm_interface_version"].as_u64().unwrap();
+        assert_eq!(v, WASM_INTERFACE_VERSION as u64);
+    }
+
+    #[test]
+    fn version_is_valid_semver() {
+        let v = inner::version();
+        let parts: Vec<&str> = v.split('.').collect();
+        assert_eq!(parts.len(), 3, "Version must be MAJOR.MINOR.PATCH: {}", v);
+        for part in &parts {
+            assert!(part.parse::<u32>().is_ok(), "Non-numeric version part: {}", part);
+        }
+    }
+
+    #[test]
+    fn all_functions_have_since_and_stability() {
+        let d = inner::describe();
+        let fns = d["functions"].as_object().unwrap();
+
+        for (name, info) in fns {
+            let since = info.get("since")
+                .and_then(|v| v.as_str())
+                .unwrap_or_else(|| panic!("{} missing 'since' field — VERSIONING.md requires it", name));
+            assert!(!since.is_empty(), "{} has empty 'since'", name);
+
+            let stability = info.get("stability")
+                .and_then(|v| v.as_str())
+                .unwrap_or_else(|| panic!("{} missing 'stability' field — VERSIONING.md requires it", name));
+            assert!(
+                VALID_STABILITY.contains(&stability),
+                "{} has invalid stability '{}' — must be one of {:?}",
+                name, stability, VALID_STABILITY
+            );
+        }
+    }
+
+    #[test]
+    fn since_values_are_valid_semver() {
+        let d = inner::describe();
+        let fns = d["functions"].as_object().unwrap();
+
+        for (name, info) in fns {
+            let since = info["since"].as_str().unwrap();
+            let parts: Vec<&str> = since.split('.').collect();
+            assert_eq!(parts.len(), 3,
+                "{} has invalid 'since' version '{}' — must be MAJOR.MINOR.PATCH", name, since);
+        }
+    }
+
+    #[test]
+    fn deprecated_functions_have_required_metadata() {
+        let d = inner::describe();
+        let fns = d["functions"].as_object().unwrap();
+
+        for (name, info) in fns {
+            if info.get("stability").and_then(|v| v.as_str()) == Some("deprecated") {
+                assert!(
+                    info.get("deprecated_in").is_some(),
+                    "Deprecated function '{}' missing 'deprecated_in' — VERSIONING.md requires it",
+                    name
+                );
+                assert!(
+                    info.get("replacement").is_some(),
+                    "Deprecated function '{}' missing 'replacement' — VERSIONING.md requires it",
+                    name
+                );
+                assert!(
+                    info.get("removal").is_some(),
+                    "Deprecated function '{}' missing 'removal' — VERSIONING.md requires it",
+                    name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn no_function_lacks_description() {
+        let d = inner::describe();
+        let fns = d["functions"].as_object().unwrap();
+
+        for (name, info) in fns {
+            let desc = info.get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            assert!(!desc.is_empty(), "{} has empty description", name);
+        }
     }
 }
