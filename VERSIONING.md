@@ -38,6 +38,49 @@ Minor and patch versions are independent. Each package ships features and bug fi
 
 **PATCH** (1.3.0 → 1.3.1): Bug fixes, security patches, performance improvements. No API changes. Each package increments independently.
 
+## Development Versions (-dev Suffix)
+
+Between releases, the version in the repo always carries a `-dev` pre-release suffix. This is standard practice across Cargo, Composer, npm, and pip — the `-dev` suffix is a semver pre-release identifier that sorts lower than the bare version (`0.2.0-dev < 0.2.0`).
+
+**The workflow:**
+
+```
+0.1.0          ← tagged release
+0.2.0-dev      ← immediately after release, bump to next target + "-dev"
+  ... commits, features, fixes ...
+0.2.0          ← strip "-dev" to release
+0.3.0-dev      ← immediately bump again
+```
+
+For patch-only work on a released version: `0.1.1-dev` → `0.1.1`.
+
+**Rules:**
+
+1. **After tagging a release**, immediately bump the version to the next target with `-dev` appended. If you just released `0.3.0`, the repo should show `0.4.0-dev` (or `0.3.1-dev` if you expect only patches).
+
+2. **Multiple commits happen on a `-dev` version.** The `-dev` suffix means "this is unreleased work in progress." You do not increment the version for every commit during development.
+
+3. **To release**, remove the `-dev` suffix, tag, publish. The version `0.4.0-dev` becomes `0.4.0`.
+
+4. **The version in the repo is always either a tagged release or a `-dev` pre-release.** A bare version like `0.4.0` in the repo means it has been (or is about to be) tagged. If the tag doesn't exist yet, the version should still have `-dev`.
+
+5. **Decide the target version based on what changed:**
+   - Only bug fixes since last release → next patch (`0.3.1-dev`)
+   - New features or deprecations → next minor (`0.4.0-dev`)
+   - Breaking changes → next major (`1.0.0-dev`) — coordinated across all packages
+
+**Where the version lives:**
+
+| Package | File | Field |
+|---|---|---|
+| scolta-core | `Cargo.toml` | `version = "0.1.0"` |
+| scolta-php | `composer.json` | `"version": "0.1.0"` |
+| scolta-drupal | `composer.json` | `"version": "0.1.0"` |
+| scolta-wp | `composer.json` + `scolta.php` | `"version"` + `SCOLTA_VERSION` constant + plugin header |
+| scolta-laravel | `composer.json` | `"version": "0.1.0"` |
+
+For WordPress, the version appears in three places (composer.json, the plugin header comment, and the `SCOLTA_VERSION` constant). All three must match.
+
 ## Dependency Constraints
 
 Each package declares what it needs from the tier above using caret constraints:
