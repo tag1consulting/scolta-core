@@ -1470,7 +1470,7 @@ mod inner_api {
 
     #[test]
     fn version_matches_cargo() {
-        assert_eq!(inner::version(), "0.1.0");
+        assert_eq!(inner::version(), env!("CARGO_PKG_VERSION"));
     }
 
     // -- describe --
@@ -1479,7 +1479,7 @@ mod inner_api {
     fn describe_has_metadata() {
         let d = inner::describe();
         assert_eq!(d["name"], "scolta-core");
-        assert_eq!(d["version"], "0.1.0");
+        assert_eq!(d["version"], env!("CARGO_PKG_VERSION"));
         assert_eq!(d["wasm_interface_version"], 1);
         assert!(d["description"].as_str().unwrap().len() > 10);
     }
@@ -1948,10 +1948,16 @@ mod versioning {
     #[test]
     fn version_is_valid_semver() {
         let v = inner::version();
-        let parts: Vec<&str> = v.split('.').collect();
-        assert_eq!(parts.len(), 3, "Version must be MAJOR.MINOR.PATCH: {}", v);
+        // Strip pre-release suffix (e.g., "-dev") before checking MAJOR.MINOR.PATCH.
+        let base = v.split('-').next().unwrap();
+        let parts: Vec<&str> = base.split('.').collect();
+        assert_eq!(parts.len(), 3, "Version must be MAJOR.MINOR.PATCH[-prerelease]: {}", v);
         for part in &parts {
-            assert!(part.parse::<u32>().is_ok(), "Non-numeric version part: {}", part);
+            assert!(part.parse::<u32>().is_ok(), "Non-numeric version part '{}' in: {}", part, v);
+        }
+        // If there's a pre-release, it must be non-empty.
+        if let Some(pre) = v.split('-').nth(1) {
+            assert!(!pre.is_empty(), "Empty pre-release suffix in: {}", v);
         }
     }
 

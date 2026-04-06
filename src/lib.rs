@@ -636,7 +636,7 @@ mod tests {
 
     #[test]
     fn test_version() {
-        assert_eq!(inner::version(), "0.1.0");
+        assert_eq!(inner::version(), env!("CARGO_PKG_VERSION"));
     }
 
     #[test]
@@ -786,7 +786,7 @@ mod tests {
     fn test_describe() {
         let desc = inner::describe();
         assert_eq!(desc["name"], "scolta-core");
-        assert_eq!(desc["version"], "0.1.0");
+        assert_eq!(desc["version"], env!("CARGO_PKG_VERSION"));
         assert_eq!(desc["wasm_interface_version"], 1);
         let functions = desc["functions"].as_object().unwrap();
         assert!(functions.contains_key("score_results"));
