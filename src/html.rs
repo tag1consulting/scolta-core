@@ -538,4 +538,100 @@ mod tests {
         assert_eq!(extract_tag_name("<main id=\"main-content\">"), Some("main"));
         assert_eq!(extract_tag_name("<article>"), Some("article"));
     }
+
+    // --- Edge cases (Task 6) ---
+
+    #[test]
+    fn test_clean_html_nested_nav_in_article() {
+        // Nav inside an article should be removed, article content kept
+        let html = r#"<article><nav>Skip nav</nav><p>Article content</p></article>"#;
+        let cleaned = clean_html(html, "");
+        assert!(cleaned.contains("Article content"));
+        assert!(!cleaned.contains("Skip nav"));
+    }
+
+    #[test]
+    fn test_clean_html_whitespace_only_after_cleaning() {
+        let html = "<nav>only nav</nav>";
+        let cleaned = clean_html(html, "");
+        assert!(cleaned.trim().is_empty() || cleaned.is_empty());
+    }
+
+    #[test]
+    fn test_clean_html_script_and_style_stripped() {
+        let html = r#"
+            <div>
+                <script>alert('xss')</script>
+                <style>body { color: red; }</style>
+                <p>Content</p>
+            </div>
+        "#;
+        let cleaned = clean_html(html, "");
+        assert!(cleaned.contains("Content"));
+        assert!(!cleaned.contains("alert"));
+        assert!(!cleaned.contains("body"));
+        assert!(!cleaned.contains("color"));
+    }
+
+    #[test]
+    fn test_clean_html_malformed_unclosed_tags() {
+        // Should not panic on malformed HTML
+        let html = "<div><p>Unclosed paragraph<div>Another div";
+        let cleaned = clean_html(html, "");
+        assert!(cleaned.contains("Unclosed paragraph"));
+    }
+
+    #[test]
+    fn test_clean_html_empty_input() {
+        let cleaned = clean_html("", "");
+        assert!(cleaned.is_empty());
+    }
+
+    #[test]
+    fn test_clean_html_only_tags_no_content() {
+        let html = "<div><span></span></div>";
+        let cleaned = clean_html(html, "");
+        assert!(cleaned.trim().is_empty());
+    }
+
+    #[test]
+    fn test_clean_html_preserves_text_between_tags() {
+        let html = "<p>First</p> middle <p>Second</p>";
+        let cleaned = clean_html(html, "");
+        assert!(cleaned.contains("First"));
+        assert!(cleaned.contains("middle"));
+        assert!(cleaned.contains("Second"));
+    }
+
+    #[test]
+    fn test_clean_html_footer_by_class_removed() {
+        let html = r#"<div class="site-footer">Footer</div><p>Content</p>"#;
+        let cleaned = clean_html(html, "");
+        assert!(cleaned.contains("Content"));
+        assert!(!cleaned.contains("Footer"));
+    }
+
+    #[test]
+    fn test_clean_html_footer_by_id_removed() {
+        let html = r#"<div id="footer-section">Footer</div><p>Content</p>"#;
+        let cleaned = clean_html(html, "");
+        assert!(cleaned.contains("Content"));
+        assert!(!cleaned.contains("Footer"));
+    }
+
+    #[test]
+    fn test_build_pagefind_html_special_chars_in_title() {
+        let html = build_pagefind_html(
+            "doc-1",
+            "Title with \"quotes\" & <brackets>",
+            "Normal content",
+            "https://example.com",
+            "2024-01-01",
+            "Test Site",
+        );
+        // Title should be HTML-escaped
+        assert!(html.contains("&amp;"));
+        assert!(html.contains("&lt;brackets&gt;"));
+        assert!(!html.contains("<brackets>"));
+    }
 }
