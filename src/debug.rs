@@ -42,6 +42,7 @@ pub struct DebugResult {
 ///
 /// # Returns
 /// [`DebugResult`] with timing, sizes, and either output or error
+#[allow(unused_variables)]
 pub fn measure_call<F>(name: &str, input: &str, f: F) -> DebugResult
 where
     F: FnOnce() -> Result<String, String>,

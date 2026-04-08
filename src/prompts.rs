@@ -1,4 +1,4 @@
-/// Prompt templates for query expansion, summarization, and follow-up responses.
+// Prompt templates for query expansion, summarization, and follow-up responses.
 
 /// Template for expanding user search queries into alternative terms.
 pub const EXPAND_QUERY: &str = r#"You expand search queries for {SITE_NAME} {SITE_DESCRIPTION}.

@@ -355,7 +355,7 @@ pub fn score_result(result: &SearchResult, query: &str, config: &ScoringConfig) 
 }
 
 /// Score all results and sort by relevance (highest first).
-pub fn score_results(results: &mut Vec<SearchResult>, query: &str, config: &ScoringConfig) {
+pub fn score_results(results: &mut [SearchResult], query: &str, config: &ScoringConfig) {
     for result in results.iter_mut() {
         result.score = score_result(result, query, config);
     }

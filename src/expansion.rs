@@ -78,7 +78,7 @@ fn extract_json_from_markdown(text: &str) -> Option<String> {
 ///
 /// Splits by newlines and commas, cleans whitespace and quotes.
 fn fallback_parse(text: &str) -> Vec<String> {
-    text.split(|c| c == '\n' || c == ',')
+    text.split(['\n', ','])
         .map(|s| s.trim())
         .map(|s| s.trim_matches('"').trim_matches('\'').trim())
         .map(|s| s.to_string())
