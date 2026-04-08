@@ -571,6 +571,10 @@ pub fn debug_call(
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
+    // IMPORTANT: This match must cover all #[plugin_fn] exports except debug_call itself.
+    // When adding a new export, add its case here too.
+    // Current exports: resolve_prompt, get_prompt, clean_html, build_pagefind_html,
+    // to_js_scoring_config, score_results, merge_results, parse_expansion, version, describe
     let result = match function {
         "resolve_prompt" => debug::measure_call(function, call_input, || {
             let parsed = serde_json::from_str(call_input).unwrap_or(json!({}));

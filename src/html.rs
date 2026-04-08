@@ -31,25 +31,25 @@ use std::sync::OnceLock;
 /// Match `<script>...</script>` including multiline content.
 fn re_script() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?is)<script\b[^>]*>.*?</script\s*>").unwrap())
+    RE.get_or_init(|| Regex::new(r"(?is)<script\b[^>]*>.*?</script\s*>").expect("static regex pattern is valid"))
 }
 
 /// Match `<style>...</style>` including multiline content.
 fn re_style() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?is)<style\b[^>]*>.*?</style\s*>").unwrap())
+    RE.get_or_init(|| Regex::new(r"(?is)<style\b[^>]*>.*?</style\s*>").expect("static regex pattern is valid"))
 }
 
 /// Match `<nav>...</nav>` including multiline content.
 fn re_nav() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?is)<nav\b[^>]*>.*?</nav\s*>").unwrap())
+    RE.get_or_init(|| Regex::new(r"(?is)<nav\b[^>]*>.*?</nav\s*>").expect("static regex pattern is valid"))
 }
 
 /// Match `<footer>...</footer>` including multiline content.
 fn re_footer() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?is)<footer\b[^>]*>.*?</footer\s*>").unwrap())
+    RE.get_or_init(|| Regex::new(r"(?is)<footer\b[^>]*>.*?</footer\s*>").expect("static regex pattern is valid"))
 }
 
 /// Match elements with footer-related IDs (e.g., `id="footer"`, `id="site-footer"`).
@@ -57,7 +57,7 @@ fn re_footer_id() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(r#"(?is)<[^>]*\sid\s*=\s*["'][^"']*footer[^"']*["'][^>]*>.*?</[^>]*>"#)
-            .unwrap()
+            .expect("static regex pattern is valid")
     })
 }
 
@@ -66,7 +66,7 @@ fn re_footer_class() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(r#"(?is)<[^>]*\sclass\s*=\s*["'][^"']*footer[^"']*["'][^>]*>.*?</[^>]*>"#)
-            .unwrap()
+            .expect("static regex pattern is valid")
     })
 }
 
@@ -77,26 +77,26 @@ fn re_region_footer() -> &'static Regex {
         Regex::new(
             r#"(?is)<[^>]*\sclass\s*=\s*["'][^"']*region-footer[^"']*["'][^>]*>.*?</[^>]*>"#,
         )
-        .unwrap()
+        .expect("static regex pattern is valid")
     })
 }
 
 /// Match any HTML tag.
 fn re_tags() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"<[^>]+>").unwrap())
+    RE.get_or_init(|| Regex::new(r"<[^>]+>").expect("static regex pattern is valid"))
 }
 
 /// Match whitespace runs (for normalization).
 fn re_whitespace() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\s+").unwrap())
+    RE.get_or_init(|| Regex::new(r"\s+").expect("static regex pattern is valid"))
 }
 
 /// Match HTML comments.
 fn re_comments() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?s)<!--.*?-->").unwrap())
+    RE.get_or_init(|| Regex::new(r"(?s)<!--.*?-->").expect("static regex pattern is valid"))
 }
 
 /// Match an element with `id="main-content"` (case-insensitive, handles
@@ -105,7 +105,7 @@ fn re_main_content_open() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(r#"(?i)<(div|main|article|section)\b[^>]*\sid\s*=\s*["']main-content["'][^>]*>"#)
-            .unwrap()
+            .expect("static regex pattern is valid")
     })
 }
 
