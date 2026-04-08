@@ -17,6 +17,8 @@ use std::time::Instant;
 /// Result of a measured function call with timing and size metrics.
 #[derive(Debug, Clone)]
 pub struct DebugResult {
+    /// Name of the function that was measured.
+    pub function_name: String,
     /// Function output (on success) or `None` (on error).
     pub output: Option<String>,
     /// Error message, if the function failed.
@@ -42,7 +44,6 @@ pub struct DebugResult {
 ///
 /// # Returns
 /// [`DebugResult`] with timing, sizes, and either output or error
-#[allow(unused_variables)]
 pub fn measure_call<F>(name: &str, input: &str, f: F) -> DebugResult
 where
     F: FnOnce() -> Result<String, String>,
@@ -77,6 +78,7 @@ where
     }
 
     DebugResult {
+        function_name: name.to_string(),
         output,
         error,
         time_us,
@@ -136,6 +138,7 @@ mod tests {
     #[test]
     fn test_debug_result_to_json_success() {
         let result = DebugResult {
+            function_name: "test_fn".to_string(),
             output: Some("test".to_string()),
             error: None,
             time_us: 1000,
@@ -152,6 +155,7 @@ mod tests {
     #[test]
     fn test_debug_result_to_json_error() {
         let result = DebugResult {
+            function_name: "test_fn".to_string(),
             output: None,
             error: Some("bad input".to_string()),
             time_us: 500,
