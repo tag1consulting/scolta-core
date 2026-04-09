@@ -135,6 +135,15 @@ pub fn to_js_scoring_config(
         .and_then(|o| o.get("ai_max_followups"))
         .and_then(|v| v.as_u64())
         .unwrap_or(3);
+    let ai_languages = obj
+        .and_then(|o| o.get("ai_languages"))
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| serde_json::Value::String(s.to_string())))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| vec![serde_json::Value::String("en".to_string())]);
 
     json!({
         "RECENCY_BOOST_MAX": config.recency_boost_max,
@@ -153,7 +162,8 @@ pub fn to_js_scoring_config(
         "AI_SUMMARY_TOP_N": ai_summary_top_n,
         "AI_SUMMARY_MAX_CHARS": ai_summary_max_chars,
         "EXPAND_PRIMARY_WEIGHT": config.expand_primary_weight,
-        "AI_MAX_FOLLOWUPS": ai_max_followups
+        "AI_MAX_FOLLOWUPS": ai_max_followups,
+        "AI_LANGUAGES": ai_languages
     })
 }
 
@@ -174,6 +184,7 @@ mod tests {
         assert_eq!(result["AI_SUMMARIZE"], true);
         assert_eq!(result["AI_SUMMARY_TOP_N"], 5);
         assert_eq!(result["AI_MAX_FOLLOWUPS"], 3);
+        assert_eq!(result["AI_LANGUAGES"], json!(["en"]));
     }
 
     #[test]
@@ -198,6 +209,7 @@ mod tests {
             "ai_summary_top_n": 3,
             "ai_summary_max_chars": 1000,
             "ai_max_followups": 5,
+            "ai_languages": ["en", "es", "fr"],
         });
         let result = to_js_scoring_config(&config, &input);
         assert_eq!(result["AI_EXPAND_QUERY"], false);
@@ -205,6 +217,7 @@ mod tests {
         assert_eq!(result["AI_SUMMARY_TOP_N"], 3);
         assert_eq!(result["AI_SUMMARY_MAX_CHARS"], 1000);
         assert_eq!(result["AI_MAX_FOLLOWUPS"], 5);
+        assert_eq!(result["AI_LANGUAGES"], json!(["en", "es", "fr"]));
     }
 
     #[test]
