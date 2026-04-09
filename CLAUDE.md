@@ -62,3 +62,13 @@ The version in the repo is always either a tagged release (`0.2.0`) or a dev pre
 - `#[plugin_fn]` functions are thin Extism wrappers — keep logic in `inner::` module.
 - `inner::` functions are the testable API surface.
 - `describe()` is the single source of truth for the function manifest.
+
+## Documentation Rules
+
+Documentation follows code. When a PR changes behavior, the same PR must update the relevant docs.
+
+- **CHANGELOG.md**: Every PR that changes code (not docs-only) MUST add an entry under `## [Unreleased]`. CI enforces this.
+- **README.md**: Update if the change affects installation, usage examples, or the function list.
+- **describe()**: New or changed functions MUST update their `describe()` entry — this is the runtime documentation.
+- **VERSIONING.md**: Only update when the versioning policy itself changes.
+- Do not create separate documentation files unless explicitly requested. Keep docs in README.md and code comments.
