@@ -1,5 +1,8 @@
 # Scolta Core
 
+<!-- TODO: Add CI badge once repo is on GitHub -->
+<!-- [![CI](https://github.com/tag1consulting/scolta-core/actions/workflows/ci.yml/badge.svg)](https://github.com/tag1consulting/scolta-core/actions/workflows/ci.yml) -->
+
 WebAssembly module for the Scolta search engine, providing cross-platform search scoring, prompt management, and content processing.
 
 ## Overview
