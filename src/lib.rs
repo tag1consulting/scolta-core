@@ -63,29 +63,28 @@ pub mod inner {
     /// - `site_name` (optional): Site name to substitute
     /// - `site_description` (optional): Site description to substitute
     pub fn resolve_prompt(input: &serde_json::Value) -> Result<String, ScoltaError> {
-        let obj = input
-            .as_object()
-            .ok_or(ScoltaError::invalid_json("resolve_prompt", "expected JSON object"))?;
+        let obj = input.as_object().ok_or(ScoltaError::invalid_json(
+            "resolve_prompt",
+            "expected JSON object",
+        ))?;
 
         let prompt_name = obj
             .get("prompt_name")
             .and_then(|v| v.as_str())
             .ok_or(ScoltaError::missing_field("resolve_prompt", "prompt_name"))?;
 
-        let site_name = obj
-            .get("site_name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let site_name = obj.get("site_name").and_then(|v| v.as_str()).unwrap_or("");
 
         let site_description = obj
             .get("site_description")
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        prompts::resolve_template(prompt_name, site_name, site_description)
-            .ok_or_else(|| ScoltaError::UnknownPrompt {
+        prompts::resolve_template(prompt_name, site_name, site_description).ok_or_else(|| {
+            ScoltaError::UnknownPrompt {
                 name: prompt_name.to_string(),
-            })
+            }
+        })
     }
 
     /// Get a raw prompt template by name (without variable substitution).
@@ -102,28 +101,27 @@ pub mod inner {
 
     /// Clean HTML by removing chrome and extracting main content.
     pub fn clean_html(input: &serde_json::Value) -> Result<String, ScoltaError> {
-        let obj = input
-            .as_object()
-            .ok_or(ScoltaError::invalid_json("clean_html", "expected JSON object"))?;
+        let obj = input.as_object().ok_or(ScoltaError::invalid_json(
+            "clean_html",
+            "expected JSON object",
+        ))?;
 
         let raw_html = obj
             .get("html")
             .and_then(|v| v.as_str())
             .ok_or(ScoltaError::missing_field("clean_html", "html"))?;
 
-        let title = obj
-            .get("title")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let title = obj.get("title").and_then(|v| v.as_str()).unwrap_or("");
 
         Ok(html::clean_html(raw_html, title))
     }
 
     /// Build a Pagefind-compatible HTML document.
     pub fn build_pagefind_html(input: &serde_json::Value) -> Result<String, ScoltaError> {
-        let obj = input
-            .as_object()
-            .ok_or(ScoltaError::invalid_json("build_pagefind_html", "expected JSON object"))?;
+        let obj = input.as_object().ok_or(ScoltaError::invalid_json(
+            "build_pagefind_html",
+            "expected JSON object",
+        ))?;
 
         let id = obj
             .get("id")
@@ -145,15 +143,9 @@ pub mod inner {
             .and_then(|v| v.as_str())
             .ok_or(ScoltaError::missing_field("build_pagefind_html", "url"))?;
 
-        let date = obj
-            .get("date")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let date = obj.get("date").and_then(|v| v.as_str()).unwrap_or("");
 
-        let site_name = obj
-            .get("site_name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let site_name = obj.get("site_name").and_then(|v| v.as_str()).unwrap_or("");
 
         Ok(html::build_pagefind_html(
             id, title, body, url, date, site_name,
@@ -177,12 +169,11 @@ pub mod inner {
     /// - `query` (required): Search query string
     /// - `results` (required): Array of SearchResult objects
     /// - `config` (optional): ScoringConfig overrides
-    pub fn score_results(
-        input: &serde_json::Value,
-    ) -> Result<serde_json::Value, ScoltaError> {
-        let obj = input
-            .as_object()
-            .ok_or(ScoltaError::invalid_json("score_results", "expected JSON object"))?;
+    pub fn score_results(input: &serde_json::Value) -> Result<serde_json::Value, ScoltaError> {
+        let obj = input.as_object().ok_or(ScoltaError::invalid_json(
+            "score_results",
+            "expected JSON object",
+        ))?;
 
         let query = obj
             .get("query")
@@ -193,8 +184,8 @@ pub mod inner {
             .get("results")
             .ok_or(ScoltaError::missing_field("score_results", "results"))?;
 
-        let mut results: Vec<scoring::SearchResult> =
-            serde_json::from_value(results_json.clone()).map_err(|e| {
+        let mut results: Vec<scoring::SearchResult> = serde_json::from_value(results_json.clone())
+            .map_err(|e| {
                 ScoltaError::parse_error("score_results", format!("failed to parse results: {}", e))
             })?;
 
@@ -204,8 +195,7 @@ pub mod inner {
 
         scoring::score_results(&mut results, query, &cfg);
 
-        serde_json::to_value(&results)
-            .map_err(|e| ScoltaError::parse_error("score_results", e))
+        serde_json::to_value(&results).map_err(|e| ScoltaError::parse_error("score_results", e))
     }
 
     /// Merge original and expanded search results with deduplication.
@@ -214,12 +204,11 @@ pub mod inner {
     /// - `original` (required): Results from primary search
     /// - `expanded` (required): Results from expanded query
     /// - `config` (optional): ScoringConfig overrides (includes `expand_primary_weight`)
-    pub fn merge_results(
-        input: &serde_json::Value,
-    ) -> Result<serde_json::Value, ScoltaError> {
-        let obj = input
-            .as_object()
-            .ok_or(ScoltaError::invalid_json("merge_results", "expected JSON object"))?;
+    pub fn merge_results(input: &serde_json::Value) -> Result<serde_json::Value, ScoltaError> {
+        let obj = input.as_object().ok_or(ScoltaError::invalid_json(
+            "merge_results",
+            "expected JSON object",
+        ))?;
 
         let original_json = obj
             .get("original")
@@ -229,16 +218,16 @@ pub mod inner {
             .get("expanded")
             .ok_or(ScoltaError::missing_field("merge_results", "expanded"))?;
 
-        let original: Vec<scoring::SearchResult> =
-            serde_json::from_value(original_json.clone()).map_err(|e| {
+        let original: Vec<scoring::SearchResult> = serde_json::from_value(original_json.clone())
+            .map_err(|e| {
                 ScoltaError::parse_error(
                     "merge_results",
                     format!("failed to parse original results: {}", e),
                 )
             })?;
 
-        let expanded: Vec<scoring::SearchResult> =
-            serde_json::from_value(expanded_json.clone()).map_err(|e| {
+        let expanded: Vec<scoring::SearchResult> = serde_json::from_value(expanded_json.clone())
+            .map_err(|e| {
                 ScoltaError::parse_error(
                     "merge_results",
                     format!("failed to parse expanded results: {}", e),
@@ -250,8 +239,7 @@ pub mod inner {
         let cfg = config::from_json(config_json);
 
         let merged = scoring::merge_results(original, expanded, &cfg);
-        serde_json::to_value(&merged)
-            .map_err(|e| ScoltaError::parse_error("merge_results", e))
+        serde_json::to_value(&merged).map_err(|e| ScoltaError::parse_error("merge_results", e))
     }
 
     /// Parse an LLM expansion response into a term array.
@@ -483,12 +471,8 @@ pub fn to_js_scoring_config(
 /// - **Status:** stable
 /// - **Since:** 0.1.0
 #[plugin_fn]
-pub fn score_results(
-    Json(input): Json<serde_json::Value>,
-) -> FnResult<Json<serde_json::Value>> {
-    inner::score_results(&input)
-        .map(Json)
-        .map_err(|e| e.into())
+pub fn score_results(Json(input): Json<serde_json::Value>) -> FnResult<Json<serde_json::Value>> {
+    inner::score_results(&input).map(Json).map_err(|e| e.into())
 }
 
 /// Merge original and expanded search results.
@@ -500,12 +484,8 @@ pub fn score_results(
 /// - **Status:** stable
 /// - **Since:** 0.1.0
 #[plugin_fn]
-pub fn merge_results(
-    Json(input): Json<serde_json::Value>,
-) -> FnResult<Json<serde_json::Value>> {
-    inner::merge_results(&input)
-        .map(Json)
-        .map_err(|e| e.into())
+pub fn merge_results(Json(input): Json<serde_json::Value>) -> FnResult<Json<serde_json::Value>> {
+    inner::merge_results(&input).map(Json).map_err(|e| e.into())
 }
 
 /// Parse LLM expansion response into term array.
@@ -554,9 +534,7 @@ pub fn describe(_: ()) -> FnResult<Json<serde_json::Value>> {
 /// - **Status:** stable
 /// - **Since:** 0.1.0
 #[plugin_fn]
-pub fn debug_call(
-    Json(input): Json<serde_json::Value>,
-) -> FnResult<Json<serde_json::Value>> {
+pub fn debug_call(Json(input): Json<serde_json::Value>) -> FnResult<Json<serde_json::Value>> {
     let obj = input
         .as_object()
         .ok_or_else(|| ScoltaError::invalid_json("debug_call", "expected JSON object"))?;
@@ -566,10 +544,7 @@ pub fn debug_call(
         .and_then(|v| v.as_str())
         .ok_or_else(|| ScoltaError::missing_field("debug_call", "function"))?;
 
-    let call_input = obj
-        .get("input")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let call_input = obj.get("input").and_then(|v| v.as_str()).unwrap_or("");
 
     // IMPORTANT: This match must cover all #[plugin_fn] exports except debug_call itself.
     // When adding a new export, add its case here too.
@@ -610,20 +585,17 @@ pub fn debug_call(
                 .map_err(|e| e.to_string())
         }),
         "parse_expansion" => debug::measure_call(function, call_input, || {
-            Ok(serde_json::to_string(&inner::parse_expansion(call_input))
-                .unwrap_or_default())
+            Ok(serde_json::to_string(&inner::parse_expansion(call_input)).unwrap_or_default())
         }),
         "version" => debug::measure_call(function, call_input, || Ok(inner::version())),
-        "describe" => debug::measure_call(function, call_input, || {
-            Ok(inner::describe().to_string())
-        }),
+        "describe" => {
+            debug::measure_call(function, call_input, || Ok(inner::describe().to_string()))
+        }
         _ => {
-            return Err(
-                ScoltaError::UnknownFunction {
-                    name: function.to_string(),
-                }
-                .into(),
-            );
+            return Err(ScoltaError::UnknownFunction {
+                name: function.to_string(),
+            }
+            .into());
         }
     };
 
@@ -799,7 +771,11 @@ mod tests {
         // Every function must have lifecycle metadata per VERSIONING.md.
         for (name, info) in functions {
             assert!(info.get("since").is_some(), "{} missing 'since'", name);
-            assert!(info.get("stability").is_some(), "{} missing 'stability'", name);
+            assert!(
+                info.get("stability").is_some(),
+                "{} missing 'stability'",
+                name
+            );
         }
     }
 }

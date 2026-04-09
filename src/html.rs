@@ -31,25 +31,33 @@ use std::sync::OnceLock;
 /// Match `<script>...</script>` including multiline content.
 fn re_script() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?is)<script\b[^>]*>.*?</script\s*>").expect("static regex pattern is valid"))
+    RE.get_or_init(|| {
+        Regex::new(r"(?is)<script\b[^>]*>.*?</script\s*>").expect("static regex pattern is valid")
+    })
 }
 
 /// Match `<style>...</style>` including multiline content.
 fn re_style() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?is)<style\b[^>]*>.*?</style\s*>").expect("static regex pattern is valid"))
+    RE.get_or_init(|| {
+        Regex::new(r"(?is)<style\b[^>]*>.*?</style\s*>").expect("static regex pattern is valid")
+    })
 }
 
 /// Match `<nav>...</nav>` including multiline content.
 fn re_nav() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?is)<nav\b[^>]*>.*?</nav\s*>").expect("static regex pattern is valid"))
+    RE.get_or_init(|| {
+        Regex::new(r"(?is)<nav\b[^>]*>.*?</nav\s*>").expect("static regex pattern is valid")
+    })
 }
 
 /// Match `<footer>...</footer>` including multiline content.
 fn re_footer() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?is)<footer\b[^>]*>.*?</footer\s*>").expect("static regex pattern is valid"))
+    RE.get_or_init(|| {
+        Regex::new(r"(?is)<footer\b[^>]*>.*?</footer\s*>").expect("static regex pattern is valid")
+    })
 }
 
 /// Match elements with footer-related IDs (e.g., `id="footer"`, `id="site-footer"`).
@@ -74,10 +82,8 @@ fn re_footer_class() -> &'static Regex {
 fn re_region_footer() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(
-            r#"(?is)<[^>]*\sclass\s*=\s*["'][^"']*region-footer[^"']*["'][^>]*>.*?</[^>]*>"#,
-        )
-        .expect("static regex pattern is valid")
+        Regex::new(r#"(?is)<[^>]*\sclass\s*=\s*["'][^"']*region-footer[^"']*["'][^>]*>.*?</[^>]*>"#)
+            .expect("static regex pattern is valid")
     })
 }
 
@@ -267,13 +273,14 @@ fn find_matching_close(html: &str, start_pos: usize, tag_name: &str) -> Option<u
         let remaining = &search[pos..];
 
         // Find next opening or closing tag of this type
-        let next_open = remaining
-            .find(&open_pattern)
-            .filter(|&p| {
-                // Ensure it's actually a tag start, not middle of text
-                let after = remaining.as_bytes().get(p + open_pattern.len());
-                matches!(after, Some(b' ') | Some(b'>') | Some(b'/') | Some(b'\t') | Some(b'\n'))
-            });
+        let next_open = remaining.find(&open_pattern).filter(|&p| {
+            // Ensure it's actually a tag start, not middle of text
+            let after = remaining.as_bytes().get(p + open_pattern.len());
+            matches!(
+                after,
+                Some(b' ') | Some(b'>') | Some(b'/') | Some(b'\t') | Some(b'\n')
+            )
+        });
         let next_close = remaining.find(&close_pattern);
 
         match (next_open, next_close) {

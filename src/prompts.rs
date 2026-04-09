@@ -108,11 +108,7 @@ pub fn get_template(name: &str) -> Option<&'static str> {
 ///
 /// # Returns
 /// The resolved template with placeholders replaced, or None if the name is not recognized.
-pub fn resolve_template(
-    name: &str,
-    site_name: &str,
-    site_description: &str,
-) -> Option<String> {
+pub fn resolve_template(name: &str, site_name: &str, site_description: &str) -> Option<String> {
     get_template(name).map(|template| {
         template
             .replace("{SITE_NAME}", site_name)
@@ -156,8 +152,7 @@ mod tests {
     #[test]
     fn test_resolve_template_expand_query() {
         let resolved =
-            resolve_template("expand_query", "ACME Corp", "the premier widget supplier")
-                .unwrap();
+            resolve_template("expand_query", "ACME Corp", "the premier widget supplier").unwrap();
         assert!(resolved.contains("ACME Corp"));
         assert!(resolved.contains("premier widget supplier"));
         assert!(!resolved.contains("{SITE_NAME}"));

@@ -38,14 +38,10 @@ pub enum ScoltaError {
     },
 
     /// The requested prompt template name does not exist.
-    UnknownPrompt {
-        name: String,
-    },
+    UnknownPrompt { name: String },
 
     /// The function name passed to `debug_call` is not recognized.
-    UnknownFunction {
-        name: String,
-    },
+    UnknownFunction { name: String },
 
     /// Failed to parse or process input data.
     ParseError {

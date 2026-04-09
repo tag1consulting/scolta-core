@@ -51,7 +51,16 @@ fn run_pagefind(site_dir: &Path, output_dir: &Path) -> (bool, String) {
 }
 
 /// Write a scolta-generated HTML file into the build directory.
-fn write_page(dir: &Path, filename: &str, id: &str, title: &str, body: &str, url: &str, date: &str, site: &str) {
+fn write_page(
+    dir: &Path,
+    filename: &str,
+    id: &str,
+    title: &str,
+    body: &str,
+    url: &str,
+    date: &str,
+    site: &str,
+) {
     let html = html::build_pagefind_html(id, title, body, url, date, site);
     fs::write(dir.join(filename), html).unwrap();
 }
@@ -87,7 +96,10 @@ fn pagefind_indexes_single_page() {
     assert!(success, "Pagefind failed:\n{}", output);
 
     // Pagefind should produce its JS entry point.
-    assert!(index.join("pagefind.js").exists(), "pagefind.js not generated");
+    assert!(
+        index.join("pagefind.js").exists(),
+        "pagefind.js not generated"
+    );
     // And a WASM file for client-side search (pagefind 1.4+ uses .pagefind extension).
     let has_wasm = fs::read_dir(&index)
         .unwrap()
@@ -112,19 +124,34 @@ fn pagefind_indexes_multiple_pages() {
     fs::create_dir_all(&site).unwrap();
 
     write_page(
-        &site, "page1.html", "doc-1",
-        "Database Optimization", "Learn how to optimize your database queries for production workloads.",
-        "https://example.com/db-optimize", "2024-03-10", "Tech Blog",
+        &site,
+        "page1.html",
+        "doc-1",
+        "Database Optimization",
+        "Learn how to optimize your database queries for production workloads.",
+        "https://example.com/db-optimize",
+        "2024-03-10",
+        "Tech Blog",
     );
     write_page(
-        &site, "page2.html", "doc-2",
-        "Caching Strategies", "Explore different caching strategies including Redis, Memcached, and CDN layers.",
-        "https://example.com/caching", "2024-05-20", "Tech Blog",
+        &site,
+        "page2.html",
+        "doc-2",
+        "Caching Strategies",
+        "Explore different caching strategies including Redis, Memcached, and CDN layers.",
+        "https://example.com/caching",
+        "2024-05-20",
+        "Tech Blog",
     );
     write_page(
-        &site, "page3.html", "doc-3",
-        "Performance Monitoring", "Set up monitoring dashboards with Grafana and Prometheus for your infrastructure.",
-        "https://example.com/monitoring", "2024-07-01", "Tech Blog",
+        &site,
+        "page3.html",
+        "doc-3",
+        "Performance Monitoring",
+        "Set up monitoring dashboards with Grafana and Prometheus for your infrastructure.",
+        "https://example.com/monitoring",
+        "2024-07-01",
+        "Tech Blog",
     );
 
     let (success, output) = run_pagefind(&site, &index);
@@ -180,7 +207,9 @@ fn pagefind_indexes_page_without_site_filter() {
 
     // Empty site_name means no data-pagefind-filter attribute.
     write_page(
-        &site, "nofilter.html", "nf-1",
+        &site,
+        "nofilter.html",
+        "nf-1",
         "No Filter Page",
         "This page has no site filter attribute.",
         "https://example.com/no-filter",
@@ -207,7 +236,9 @@ fn pagefind_indexes_page_without_date() {
 
     // Empty date should produce valid HTML without the date meta tag.
     write_page(
-        &site, "nodate.html", "nd-1",
+        &site,
+        "nodate.html",
+        "nd-1",
         "Undated Content",
         "This page has no publication date set.",
         "https://example.com/undated",
@@ -233,7 +264,9 @@ fn pagefind_indexes_unicode_content() {
     fs::create_dir_all(&site).unwrap();
 
     write_page(
-        &site, "unicode.html", "uni-1",
+        &site,
+        "unicode.html",
+        "uni-1",
         "Ünïcödé Tëst Pägé",
         "日本語のテスト。Ñoño résumé café naïve über Straße. Ελληνικά العربية",
         "https://example.com/unicode",
@@ -259,12 +292,15 @@ fn pagefind_indexes_long_content() {
     fs::create_dir_all(&site).unwrap();
 
     // Generate a large body to verify pagefind handles bulk content.
-    let long_body = "This is paragraph number N. It contains enough words to contribute to the search index. "
-        .repeat(500)
-        .replace("number N", &format!("number {}", 1));
+    let long_body =
+        "This is paragraph number N. It contains enough words to contribute to the search index. "
+            .repeat(500)
+            .replace("number N", &format!("number {}", 1));
 
     write_page(
-        &site, "long.html", "long-1",
+        &site,
+        "long.html",
+        "long-1",
         "Very Long Article",
         &long_body,
         "https://example.com/long-article",
@@ -292,16 +328,38 @@ fn pagefind_indexes_fixture_drupal_page() {
     // Load the Drupal fixture, clean it, then build pagefind HTML.
     let raw_html = include_str!("fixtures/drupal-page.html");
     let cleaned = html::clean_html(raw_html, "Building Scalable Drupal Sites");
-    assert!(!cleaned.is_empty(), "clean_html produced empty output from drupal fixture");
-    assert!(cleaned.contains("Drupal"), "Cleaned Drupal fixture should contain 'Drupal'");
-    assert!(cleaned.contains("Database optimization"), "Cleaned Drupal fixture should contain list items");
-    assert!(!cleaned.contains("<nav"), "Cleaned output should not contain nav");
-    assert!(!cleaned.contains("Copyright"), "Cleaned output should not contain footer text");
-    assert!(!cleaned.contains("console.log"), "Cleaned output should not contain script");
+    assert!(
+        !cleaned.is_empty(),
+        "clean_html produced empty output from drupal fixture"
+    );
+    assert!(
+        cleaned.contains("Drupal"),
+        "Cleaned Drupal fixture should contain 'Drupal'"
+    );
+    assert!(
+        cleaned.contains("Database optimization"),
+        "Cleaned Drupal fixture should contain list items"
+    );
+    assert!(
+        !cleaned.contains("<nav"),
+        "Cleaned output should not contain nav"
+    );
+    assert!(
+        !cleaned.contains("Copyright"),
+        "Cleaned output should not contain footer text"
+    );
+    assert!(
+        !cleaned.contains("console.log"),
+        "Cleaned output should not contain script"
+    );
 
     let pagefind_html = html::build_pagefind_html(
-        "drupal-1", "Building Scalable Drupal Sites", &cleaned,
-        "https://example.com/scalable-drupal", "2024-01-01", "Example Corp",
+        "drupal-1",
+        "Building Scalable Drupal Sites",
+        &cleaned,
+        "https://example.com/scalable-drupal",
+        "2024-01-01",
+        "Example Corp",
     );
     fs::write(site.join("drupal.html"), &pagefind_html).unwrap();
 
@@ -324,16 +382,38 @@ fn pagefind_indexes_fixture_wordpress_post() {
 
     let raw_html = include_str!("fixtures/wordpress-post.html");
     let cleaned = html::clean_html(raw_html, "WordPress Security Best Practices");
-    assert!(!cleaned.is_empty(), "clean_html produced empty output from WP fixture");
-    assert!(cleaned.contains("WordPress"), "Cleaned WP fixture should contain 'WordPress'");
-    assert!(cleaned.contains("Strong Passwords"), "Cleaned WP fixture should contain section heading");
-    assert!(!cleaned.contains("tracking.js"), "Cleaned output should not contain script src");
-    assert!(!cleaned.contains("pageInfo"), "Cleaned output should not contain inline JS");
-    assert!(!cleaned.contains("All rights reserved"), "Cleaned output should not contain footer");
+    assert!(
+        !cleaned.is_empty(),
+        "clean_html produced empty output from WP fixture"
+    );
+    assert!(
+        cleaned.contains("WordPress"),
+        "Cleaned WP fixture should contain 'WordPress'"
+    );
+    assert!(
+        cleaned.contains("Strong Passwords"),
+        "Cleaned WP fixture should contain section heading"
+    );
+    assert!(
+        !cleaned.contains("tracking.js"),
+        "Cleaned output should not contain script src"
+    );
+    assert!(
+        !cleaned.contains("pageInfo"),
+        "Cleaned output should not contain inline JS"
+    );
+    assert!(
+        !cleaned.contains("All rights reserved"),
+        "Cleaned output should not contain footer"
+    );
 
     let pagefind_html = html::build_pagefind_html(
-        "wp-1", "WordPress Security Best Practices", &cleaned,
-        "https://example.com/wp-security", "2024-01-15", "Example Blog",
+        "wp-1",
+        "WordPress Security Best Practices",
+        &cleaned,
+        "https://example.com/wp-security",
+        "2024-01-15",
+        "Example Blog",
     );
     fs::write(site.join("wordpress.html"), &pagefind_html).unwrap();
 
@@ -400,8 +480,12 @@ fn pagefind_end_to_end_pipeline() {
 #[test]
 fn build_pagefind_html_has_valid_structure() {
     let html = html::build_pagefind_html(
-        "test-1", "Test Title", "Test body content.",
-        "https://example.com/test", "2024-01-15", "My Site",
+        "test-1",
+        "Test Title",
+        "Test body content.",
+        "https://example.com/test",
+        "2024-01-15",
+        "My Site",
     );
 
     assert!(html.starts_with("<!DOCTYPE html>"));
@@ -423,16 +507,19 @@ fn build_pagefind_html_has_valid_structure() {
 
 #[test]
 fn build_pagefind_html_date_omitted_when_empty() {
-    let html = html::build_pagefind_html(
-        "test-2", "No Date", "Body.", "https://x.com", "", "Site",
-    );
+    let html = html::build_pagefind_html("test-2", "No Date", "Body.", "https://x.com", "", "Site");
     assert!(!html.contains("data-pagefind-meta=\"date:"));
 }
 
 #[test]
 fn build_pagefind_html_filter_omitted_when_no_site() {
     let html = html::build_pagefind_html(
-        "test-3", "No Site", "Body.", "https://x.com", "2024-01-01", "",
+        "test-3",
+        "No Site",
+        "Body.",
+        "https://x.com",
+        "2024-01-01",
+        "",
     );
     assert!(!html.contains("data-pagefind-filter"));
 }
@@ -454,13 +541,13 @@ fn clean_drupal_fixture_extracts_main_content() {
     assert!(cleaned.contains("Performance monitoring"));
 
     // Should not contain chrome.
-    assert!(!cleaned.contains("Home"));         // nav link
-    assert!(!cleaned.contains("Services"));     // nav link
-    assert!(!cleaned.contains("Copyright"));    // footer
-    assert!(!cleaned.contains("Privacy Policy"));// footer
-    assert!(!cleaned.contains("console.log"));  // script
-    assert!(!cleaned.contains("ga("));          // script
-    assert!(!cleaned.contains("font-family"));  // style
+    assert!(!cleaned.contains("Home")); // nav link
+    assert!(!cleaned.contains("Services")); // nav link
+    assert!(!cleaned.contains("Copyright")); // footer
+    assert!(!cleaned.contains("Privacy Policy")); // footer
+    assert!(!cleaned.contains("console.log")); // script
+    assert!(!cleaned.contains("ga(")); // script
+    assert!(!cleaned.contains("font-family")); // style
 
     // Title should be removed from the beginning (it's in h1).
     assert!(!cleaned.starts_with("Building Scalable Drupal Sites"));
@@ -479,11 +566,11 @@ fn clean_wordpress_fixture_extracts_main_content() {
     assert!(cleaned.contains("rate limiting"));
 
     // Should not contain chrome.
-    assert!(!cleaned.contains("Main Menu"));         // nav
-    assert!(!cleaned.contains("Blog"));              // nav link
-    assert!(!cleaned.contains("tracking.js"));       // script
-    assert!(!cleaned.contains("pageInfo"));           // inline script
-    assert!(!cleaned.contains("All rights reserved"));// footer
+    assert!(!cleaned.contains("Main Menu")); // nav
+    assert!(!cleaned.contains("Blog")); // nav link
+    assert!(!cleaned.contains("tracking.js")); // script
+    assert!(!cleaned.contains("pageInfo")); // inline script
+    assert!(!cleaned.contains("All rights reserved")); // footer
 
     // Title should be removed from the beginning.
     assert!(!cleaned.starts_with("WordPress Security Best Practices"));

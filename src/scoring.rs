@@ -248,8 +248,8 @@ pub fn recency_boost(date: &str, config: &ScoringConfig) -> f64 {
         // Exponential decay boost for content newer than penalty threshold.
         // Formula matches Tag1 reference: MAX_BOOST * exp(-ageDays / HALF_LIFE * ln2)
         let half_life = config.recency_half_life_days as f64;
-        let boost = config.recency_boost_max
-            * (-days_old / half_life * std::f64::consts::LN_2).exp();
+        let boost =
+            config.recency_boost_max * (-days_old / half_life * std::f64::consts::LN_2).exp();
         boost.max(0.0)
     } else {
         // Linear penalty for very old content, capped at max_penalty.
@@ -277,7 +277,10 @@ pub fn title_match_score(query: &str, title: &str, config: &ScoringConfig) -> f6
     }
 
     let title_lower = title.to_lowercase();
-    let matching_count = terms.iter().filter(|t| title_lower.contains(t.as_str())).count();
+    let matching_count = terms
+        .iter()
+        .filter(|t| title_lower.contains(t.as_str()))
+        .count();
 
     if matching_count == 0 {
         return 0.0;
@@ -543,15 +546,27 @@ mod tests {
         let config = ScoringConfig::default();
         let recent = days_ago(30);
         let boost = recency_boost(&recent, &config);
-        assert!(boost > 0.0, "Recent content should get positive boost, got {}", boost);
-        assert!(boost <= config.recency_boost_max, "Boost should not exceed max, got {}", boost);
+        assert!(
+            boost > 0.0,
+            "Recent content should get positive boost, got {}",
+            boost
+        );
+        assert!(
+            boost <= config.recency_boost_max,
+            "Boost should not exceed max, got {}",
+            boost
+        );
     }
 
     #[test]
     fn test_recency_boost_old() {
         let config = ScoringConfig::default();
         let boost = recency_boost("2000-01-01", &config);
-        assert!(boost < 0.0, "Old content should get negative penalty, got {}", boost);
+        assert!(
+            boost < 0.0,
+            "Old content should get negative penalty, got {}",
+            boost
+        );
     }
 
     #[test]
@@ -592,7 +607,9 @@ mod tests {
         let expected = config.title_match_boost * config.title_all_terms_multiplier;
         assert!(
             (score - expected).abs() < 0.001,
-            "Expected {}, got {}", expected, score
+            "Expected {}, got {}",
+            expected,
+            score
         );
     }
 
@@ -604,7 +621,9 @@ mod tests {
         let expected = config.title_match_boost * 0.5;
         assert!(
             (score - expected).abs() < 0.001,
-            "Expected {}, got {}", expected, score
+            "Expected {}, got {}",
+            expected,
+            score
         );
     }
 
@@ -623,7 +642,9 @@ mod tests {
         let expected = config.content_all_terms_multiplier;
         assert!(
             (score - expected).abs() < 0.001,
-            "Expected {}, got {}", expected, score
+            "Expected {}, got {}",
+            expected,
+            score
         );
     }
 
@@ -635,7 +656,9 @@ mod tests {
         let expected = config.content_match_boost * 0.5;
         assert!(
             (score - expected).abs() < 0.001,
-            "Expected {}, got {}", expected, score
+            "Expected {}, got {}",
+            expected,
+            score
         );
     }
 

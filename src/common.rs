@@ -13,23 +13,16 @@
 /// auxiliary verbs, question words, and common filler words.
 pub const STOP_WORDS: &[&str] = &[
     // Articles
-    "a", "an", "the",
-    // Conjunctions
-    "and", "but", "or", "nor",
-    // Common prepositions
-    "about", "as", "at", "by", "during", "for", "from", "if", "in", "into",
-    "of", "on", "out", "through", "to", "up", "with",
-    // Pronouns
-    "he", "i", "it", "she", "that", "these", "they", "this", "those", "we",
-    "what", "which", "who", "you",
-    // Auxiliary/modal verbs
-    "are", "be", "can", "could", "did", "do", "does", "has", "have", "is",
-    "may", "might", "should", "was", "were", "will", "would",
-    // Question words
-    "how", "when", "where", "why",
-    // Common filler
-    "also", "just", "more", "most", "no", "not", "only", "same", "than",
-    "very",
+    "a", "an", "the", // Conjunctions
+    "and", "but", "or", "nor", // Common prepositions
+    "about", "as", "at", "by", "during", "for", "from", "if", "in", "into", "of", "on", "out",
+    "through", "to", "up", "with", // Pronouns
+    "he", "i", "it", "she", "that", "these", "they", "this", "those", "we", "what", "which", "who",
+    "you", // Auxiliary/modal verbs
+    "are", "be", "can", "could", "did", "do", "does", "has", "have", "is", "may", "might",
+    "should", "was", "were", "will", "would", // Question words
+    "how", "when", "where", "why", // Common filler
+    "also", "just", "more", "most", "no", "not", "only", "same", "than", "very",
 ];
 
 /// Check whether a term is a stop word (case-insensitive).

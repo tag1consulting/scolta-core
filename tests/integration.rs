@@ -25,7 +25,11 @@ mod common_module {
     #[test]
     fn stop_word_hit() {
         for word in &["the", "a", "an", "is", "are", "what", "how", "of", "in"] {
-            assert!(common::is_stop_word(word), "'{}' should be a stop word", word);
+            assert!(
+                common::is_stop_word(word),
+                "'{}' should be a stop word",
+                word
+            );
         }
     }
 
@@ -39,7 +43,11 @@ mod common_module {
     #[test]
     fn stop_word_miss() {
         for word in &["drupal", "search", "performance", "rust", "wasm"] {
-            assert!(!common::is_stop_word(word), "'{}' should not be a stop word", word);
+            assert!(
+                !common::is_stop_word(word),
+                "'{}' should not be a stop word",
+                word
+            );
         }
     }
 
@@ -126,13 +134,19 @@ mod error_module {
     #[test]
     fn invalid_json_display() {
         let err = ScoltaError::invalid_json("clean_html", "expected object");
-        assert_eq!(err.to_string(), "clean_html: invalid JSON input: expected object");
+        assert_eq!(
+            err.to_string(),
+            "clean_html: invalid JSON input: expected object"
+        );
     }
 
     #[test]
     fn missing_field_display() {
         let err = ScoltaError::missing_field("score_results", "query");
-        assert_eq!(err.to_string(), "score_results: missing required field 'query'");
+        assert_eq!(
+            err.to_string(),
+            "score_results: missing required field 'query'"
+        );
     }
 
     #[test]
@@ -142,7 +156,10 @@ mod error_module {
             field: "id",
             expected: "a string",
         };
-        assert_eq!(err.to_string(), "build_pagefind_html: field 'id' must be a string");
+        assert_eq!(
+            err.to_string(),
+            "build_pagefind_html: field 'id' must be a string"
+        );
     }
 
     #[test]
@@ -167,7 +184,10 @@ mod error_module {
 
     #[test]
     fn parse_error_display() {
-        let err = ScoltaError::parse_error("merge_results", "failed to parse original results: missing field `url`");
+        let err = ScoltaError::parse_error(
+            "merge_results",
+            "failed to parse original results: missing field `url`",
+        );
         let msg = err.to_string();
         assert!(msg.contains("merge_results"));
         assert!(msg.contains("missing field `url`"));
@@ -262,7 +282,8 @@ mod prompts_module {
 
     #[test]
     fn resolve_template_special_chars_in_values() {
-        let resolved = prompts::resolve_template("expand_query", "Site <&> \"Co\"", "it's great").unwrap();
+        let resolved =
+            prompts::resolve_template("expand_query", "Site <&> \"Co\"", "it's great").unwrap();
         assert!(resolved.contains("Site <&> \"Co\""));
         assert!(resolved.contains("it's great"));
     }
@@ -282,7 +303,11 @@ mod prompts_module {
         // continuation that only needs the site name for context.
         for name in &["expand_query", "summarize"] {
             let t = prompts::get_template(name).unwrap();
-            assert!(t.contains("{SITE_DESCRIPTION}"), "{} missing {{SITE_DESCRIPTION}}", name);
+            assert!(
+                t.contains("{SITE_DESCRIPTION}"),
+                "{} missing {{SITE_DESCRIPTION}}",
+                name
+            );
         }
     }
 }
@@ -448,8 +473,12 @@ mod html_module {
     #[test]
     fn pagefind_html_structure() {
         let result = html::build_pagefind_html(
-            "doc-123", "Test Page", "Test content", "https://example.com/page",
-            "2024-01-15", "Example Site",
+            "doc-123",
+            "Test Page",
+            "Test content",
+            "https://example.com/page",
+            "2024-01-15",
+            "Example Site",
         );
         assert!(result.contains("<!DOCTYPE html>"));
         assert!(result.contains("<html>"));
@@ -467,8 +496,12 @@ mod html_module {
     #[test]
     fn pagefind_html_escapes_html_chars() {
         let result = html::build_pagefind_html(
-            "doc-1", "<Script>", "Content & more < > \"quotes\"",
-            "https://example.com?a=1&b=2", "2024-01-15", "Site & Co.",
+            "doc-1",
+            "<Script>",
+            "Content & more < > \"quotes\"",
+            "https://example.com?a=1&b=2",
+            "2024-01-15",
+            "Site & Co.",
         );
         assert!(result.contains("&lt;Script&gt;"));
         assert!(result.contains("Content &amp; more &lt; &gt;"));
@@ -478,25 +511,27 @@ mod html_module {
 
     #[test]
     fn pagefind_html_omits_empty_date() {
-        let result = html::build_pagefind_html(
-            "doc-1", "Title", "Body", "https://example.com", "", "Site",
-        );
+        let result =
+            html::build_pagefind_html("doc-1", "Title", "Body", "https://example.com", "", "Site");
         assert!(!result.contains("data-pagefind-meta=\"date:\""));
     }
 
     #[test]
     fn pagefind_html_omits_empty_site_name() {
         let result = html::build_pagefind_html(
-            "doc-1", "Title", "Body", "https://example.com", "2024-01-01", "",
+            "doc-1",
+            "Title",
+            "Body",
+            "https://example.com",
+            "2024-01-01",
+            "",
         );
         assert!(!result.contains("data-pagefind-filter"));
     }
 
     #[test]
     fn pagefind_html_includes_charset() {
-        let result = html::build_pagefind_html(
-            "id", "T", "B", "https://x.com", "", "",
-        );
+        let result = html::build_pagefind_html("id", "T", "B", "https://x.com", "", "");
         assert!(result.contains("charset=\"utf-8\"") || result.contains("charset=utf-8"));
     }
 }
@@ -555,63 +590,111 @@ mod scoring_module {
 
     #[test]
     fn config_validation_warns_boost_too_high() {
-        let c = ScoringConfig { recency_boost_max: 10.0, ..Default::default() };
+        let c = ScoringConfig {
+            recency_boost_max: 10.0,
+            ..Default::default()
+        };
         let w = c.validate();
         assert!(w.iter().any(|w| w.field == "recency_boost_max"));
     }
 
     #[test]
     fn config_validation_warns_boost_negative() {
-        let c = ScoringConfig { recency_boost_max: -1.0, ..Default::default() };
+        let c = ScoringConfig {
+            recency_boost_max: -1.0,
+            ..Default::default()
+        };
         assert!(!c.validate().is_empty());
     }
 
     #[test]
     fn config_validation_warns_half_life_zero() {
-        let c = ScoringConfig { recency_half_life_days: 0, ..Default::default() };
-        assert!(c.validate().iter().any(|w| w.field == "recency_half_life_days"));
+        let c = ScoringConfig {
+            recency_half_life_days: 0,
+            ..Default::default()
+        };
+        assert!(c
+            .validate()
+            .iter()
+            .any(|w| w.field == "recency_half_life_days"));
     }
 
     #[test]
     fn config_validation_warns_half_life_too_large() {
-        let c = ScoringConfig { recency_half_life_days: 5000, ..Default::default() };
-        assert!(c.validate().iter().any(|w| w.field == "recency_half_life_days"));
+        let c = ScoringConfig {
+            recency_half_life_days: 5000,
+            ..Default::default()
+        };
+        assert!(c
+            .validate()
+            .iter()
+            .any(|w| w.field == "recency_half_life_days"));
     }
 
     #[test]
     fn config_validation_warns_penalty_too_high() {
-        let c = ScoringConfig { recency_max_penalty: 1.5, ..Default::default() };
-        assert!(c.validate().iter().any(|w| w.field == "recency_max_penalty"));
+        let c = ScoringConfig {
+            recency_max_penalty: 1.5,
+            ..Default::default()
+        };
+        assert!(c
+            .validate()
+            .iter()
+            .any(|w| w.field == "recency_max_penalty"));
     }
 
     #[test]
     fn config_validation_warns_primary_weight_out_of_range() {
-        let c = ScoringConfig { expand_primary_weight: 1.5, ..Default::default() };
-        assert!(c.validate().iter().any(|w| w.field == "expand_primary_weight"));
+        let c = ScoringConfig {
+            expand_primary_weight: 1.5,
+            ..Default::default()
+        };
+        assert!(c
+            .validate()
+            .iter()
+            .any(|w| w.field == "expand_primary_weight"));
     }
 
     #[test]
     fn config_validation_warns_results_per_page_zero() {
-        let c = ScoringConfig { results_per_page: 0, ..Default::default() };
+        let c = ScoringConfig {
+            results_per_page: 0,
+            ..Default::default()
+        };
         assert!(c.validate().iter().any(|w| w.field == "results_per_page"));
     }
 
     #[test]
     fn config_validation_warns_results_per_page_too_large() {
-        let c = ScoringConfig { results_per_page: 200, ..Default::default() };
+        let c = ScoringConfig {
+            results_per_page: 200,
+            ..Default::default()
+        };
         assert!(c.validate().iter().any(|w| w.field == "results_per_page"));
     }
 
     #[test]
     fn config_validation_warns_max_pagefind_zero() {
-        let c = ScoringConfig { max_pagefind_results: 0, ..Default::default() };
-        assert!(c.validate().iter().any(|w| w.field == "max_pagefind_results"));
+        let c = ScoringConfig {
+            max_pagefind_results: 0,
+            ..Default::default()
+        };
+        assert!(c
+            .validate()
+            .iter()
+            .any(|w| w.field == "max_pagefind_results"));
     }
 
     #[test]
     fn config_validation_warns_max_pagefind_too_large() {
-        let c = ScoringConfig { max_pagefind_results: 1000, ..Default::default() };
-        assert!(c.validate().iter().any(|w| w.field == "max_pagefind_results"));
+        let c = ScoringConfig {
+            max_pagefind_results: 1000,
+            ..Default::default()
+        };
+        assert!(c
+            .validate()
+            .iter()
+            .any(|w| w.field == "max_pagefind_results"));
     }
 
     #[test]
@@ -631,23 +714,43 @@ mod scoring_module {
     fn recency_recent_content_boosted() {
         let c = ScoringConfig::default();
         let b = recency_boost(&days_ago(30), &c);
-        assert!(b > 0.0, "Recent content (30 days) should get positive boost, got {}", b);
-        assert!(b <= c.recency_boost_max, "Should not exceed max boost, got {}", b);
+        assert!(
+            b > 0.0,
+            "Recent content (30 days) should get positive boost, got {}",
+            b
+        );
+        assert!(
+            b <= c.recency_boost_max,
+            "Should not exceed max boost, got {}",
+            b
+        );
     }
 
     #[test]
     fn recency_very_recent_gets_near_max_boost() {
         let c = ScoringConfig::default();
         let b = recency_boost(&days_ago(1), &c);
-        assert!(b > 0.4, "Very recent content should get near-max boost, got {}", b);
+        assert!(
+            b > 0.4,
+            "Very recent content should get near-max boost, got {}",
+            b
+        );
     }
 
     #[test]
     fn recency_old_content_penalized() {
         let c = ScoringConfig::default();
         let b = recency_boost("2000-01-01", &c);
-        assert!(b < 0.0, "Old content should get negative penalty, got {}", b);
-        assert!(b >= -c.recency_max_penalty, "Should not exceed max penalty, got {}", b);
+        assert!(
+            b < 0.0,
+            "Old content should get negative penalty, got {}",
+            b
+        );
+        assert!(
+            b >= -c.recency_max_penalty,
+            "Should not exceed max penalty, got {}",
+            b
+        );
     }
 
     #[test]
@@ -676,7 +779,10 @@ mod scoring_module {
 
     #[test]
     fn recency_half_life_zero_safe() {
-        let c = ScoringConfig { recency_half_life_days: 0, ..Default::default() };
+        let c = ScoringConfig {
+            recency_half_life_days: 0,
+            ..Default::default()
+        };
         let b = recency_boost(&days_ago(30), &c);
         assert_eq!(b, 0.0, "Zero half-life should return neutral");
     }
@@ -689,7 +795,12 @@ mod scoring_module {
         // All terms match with >1 term: boost * multiplier * (2/2)
         let expected = c.title_match_boost * c.title_all_terms_multiplier;
         let score = title_match_score("hello world", "Hello World Page", &c);
-        assert!((score - expected).abs() < 0.001, "Expected {}, got {}", expected, score);
+        assert!(
+            (score - expected).abs() < 0.001,
+            "Expected {}, got {}",
+            expected,
+            score
+        );
     }
 
     #[test]
@@ -698,7 +809,12 @@ mod scoring_module {
         // 1 of 2 terms match: boost * (1/2)
         let expected = c.title_match_boost * 0.5;
         let score = title_match_score("hello world", "Hello there", &c);
-        assert!((score - expected).abs() < 0.001, "Expected {}, got {}", expected, score);
+        assert!(
+            (score - expected).abs() < 0.001,
+            "Expected {}, got {}",
+            expected,
+            score
+        );
     }
 
     #[test]
@@ -734,7 +850,12 @@ mod scoring_module {
         // All terms match with >1 term: content_all_terms_multiplier * (2/2)
         let expected = c.content_all_terms_multiplier;
         let score = content_match_score("test page", "This is a test page with content", &c);
-        assert!((score - expected).abs() < 0.001, "Expected {}, got {}", expected, score);
+        assert!(
+            (score - expected).abs() < 0.001,
+            "Expected {}, got {}",
+            expected,
+            score
+        );
     }
 
     #[test]
@@ -743,13 +864,21 @@ mod scoring_module {
         // 1 of 2 terms match: boost * (1/2)
         let expected = c.content_match_boost * 0.5;
         let score = content_match_score("test xyz", "This is a test page", &c);
-        assert!((score - expected).abs() < 0.001, "Expected {}, got {}", expected, score);
+        assert!(
+            (score - expected).abs() < 0.001,
+            "Expected {}, got {}",
+            expected,
+            score
+        );
     }
 
     #[test]
     fn content_match_none() {
         let c = ScoringConfig::default();
-        assert_eq!(content_match_score("xyz abc", "No matching words here", &c), 0.0);
+        assert_eq!(
+            content_match_score("xyz abc", "No matching words here", &c),
+            0.0
+        );
     }
 
     // -- Composite score --
@@ -759,7 +888,10 @@ mod scoring_module {
         let c = ScoringConfig::default();
         let r = make_result("https://a.com", "Test", "Test content", &days_ago(30), 0.0);
         let s = score_result(&r, "test", &c);
-        assert!(s > 0.0, "Should produce a positive score even with 0.0 upstream");
+        assert!(
+            s > 0.0,
+            "Should produce a positive score even with 0.0 upstream"
+        );
     }
 
     #[test]
@@ -777,7 +909,13 @@ mod scoring_module {
         let date = days_ago(30);
         let mut results = vec![
             make_result("https://a.com", "Unrelated", "No match here", &date, 0.0),
-            make_result("https://b.com", "Drupal Guide", "All about drupal performance", &date, 0.0),
+            make_result(
+                "https://b.com",
+                "Drupal Guide",
+                "All about drupal performance",
+                &date,
+                0.0,
+            ),
         ];
         score_results(&mut results, "drupal performance", &c);
         assert!(results[0].score >= results[1].score);
@@ -848,13 +986,19 @@ mod scoring_module {
 
     #[test]
     fn merge_respects_primary_weight() {
-        let c = ScoringConfig { expand_primary_weight: 0.9, ..Default::default() };
+        let c = ScoringConfig {
+            expand_primary_weight: 0.9,
+            ..Default::default()
+        };
         let original = vec![make_result("https://a.com", "A", "a", "2026-01-01", 10.0)];
         let expanded = vec![make_result("https://b.com", "B", "b", "2026-01-01", 10.0)];
         let merged = merge_results(original, expanded, &c);
         let a = merged.iter().find(|r| r.url == "https://a.com").unwrap();
         let b = merged.iter().find(|r| r.url == "https://b.com").unwrap();
-        assert!(a.score > b.score, "With weight 0.9, original should dominate");
+        assert!(
+            a.score > b.score,
+            "With weight 0.9, original should dominate"
+        );
     }
 
     #[test]
@@ -976,7 +1120,8 @@ mod config_module {
 
     #[test]
     fn from_json_validated_returns_warnings() {
-        let (c, w) = config::from_json_validated(&json!({"recency_boost_max": 10.0, "results_per_page": 0}));
+        let (c, w) =
+            config::from_json_validated(&json!({"recency_boost_max": 10.0, "results_per_page": 0}));
         assert_eq!(c.recency_boost_max, 10.0); // Still uses the value
         assert!(w.len() >= 2);
     }
@@ -993,12 +1138,23 @@ mod config_module {
         let js = config::to_js_scoring_config(&c, &json!({}));
         // Verify all expected keys exist
         for key in &[
-            "RECENCY_BOOST_MAX", "RECENCY_HALF_LIFE_DAYS", "RECENCY_PENALTY_AFTER_DAYS",
-            "RECENCY_MAX_PENALTY", "TITLE_MATCH_BOOST", "TITLE_ALL_TERMS_MULTIPLIER",
-            "CONTENT_MATCH_BOOST", "CONTENT_ALL_TERMS_MULTIPLIER", "EXPAND_PRIMARY_WEIGHT",
-            "EXCERPT_LENGTH", "RESULTS_PER_PAGE", "MAX_PAGEFIND_RESULTS",
-            "AI_EXPAND_QUERY", "AI_SUMMARIZE", "AI_SUMMARY_TOP_N",
-            "AI_SUMMARY_MAX_CHARS", "AI_MAX_FOLLOWUPS",
+            "RECENCY_BOOST_MAX",
+            "RECENCY_HALF_LIFE_DAYS",
+            "RECENCY_PENALTY_AFTER_DAYS",
+            "RECENCY_MAX_PENALTY",
+            "TITLE_MATCH_BOOST",
+            "TITLE_ALL_TERMS_MULTIPLIER",
+            "CONTENT_MATCH_BOOST",
+            "CONTENT_ALL_TERMS_MULTIPLIER",
+            "EXPAND_PRIMARY_WEIGHT",
+            "EXCERPT_LENGTH",
+            "RESULTS_PER_PAGE",
+            "MAX_PAGEFIND_RESULTS",
+            "AI_EXPAND_QUERY",
+            "AI_SUMMARIZE",
+            "AI_SUMMARY_TOP_N",
+            "AI_SUMMARY_MAX_CHARS",
+            "AI_MAX_FOLLOWUPS",
         ] {
             assert!(js.get(key).is_some(), "Missing key: {}", key);
         }
@@ -1021,13 +1177,16 @@ mod config_module {
     #[test]
     fn to_js_scoring_config_ai_toggles_passthrough() {
         let c = scolta_core::scoring::ScoringConfig::default();
-        let js = config::to_js_scoring_config(&c, &json!({
-            "ai_expand_query": false,
-            "ai_summarize": false,
-            "ai_summary_top_n": 3,
-            "ai_summary_max_chars": 1000,
-            "ai_max_followups": 5,
-        }));
+        let js = config::to_js_scoring_config(
+            &c,
+            &json!({
+                "ai_expand_query": false,
+                "ai_summarize": false,
+                "ai_summary_top_n": 3,
+                "ai_summary_max_chars": 1000,
+                "ai_max_followups": 5,
+            }),
+        );
         assert_eq!(js["AI_EXPAND_QUERY"], false);
         assert_eq!(js["AI_SUMMARIZE"], false);
         assert_eq!(js["AI_SUMMARY_TOP_N"], 3);
@@ -1161,9 +1320,7 @@ mod debug_module {
 
     #[test]
     fn measure_call_success() {
-        let result = debug::measure_call("test_fn", "input text", || {
-            Ok("output text".to_string())
-        });
+        let result = debug::measure_call("test_fn", "input text", || Ok("output text".to_string()));
         assert_eq!(result.output, Some("output text".to_string()));
         assert!(result.error.is_none());
         assert_eq!(result.input_size, "input text".len());
@@ -1173,9 +1330,7 @@ mod debug_module {
 
     #[test]
     fn measure_call_error() {
-        let result = debug::measure_call("test_fn", "input", || {
-            Err("something broke".to_string())
-        });
+        let result = debug::measure_call("test_fn", "input", || Err("something broke".to_string()));
         assert!(result.output.is_none());
         assert_eq!(result.error, Some("something broke".to_string()));
         assert_eq!(result.output_size, 0);
@@ -1269,7 +1424,11 @@ mod inner_api {
     fn resolve_prompt_all_template_names() {
         for name in &["expand_query", "summarize", "follow_up"] {
             let input = json!({"prompt_name": name, "site_name": "S", "site_description": "D"});
-            assert!(inner::resolve_prompt(&input).is_ok(), "Should resolve '{}'", name);
+            assert!(
+                inner::resolve_prompt(&input).is_ok(),
+                "Should resolve '{}'",
+                name
+            );
         }
     }
 
@@ -1444,9 +1603,18 @@ mod inner_api {
         });
         let result = inner::merge_results(&input).unwrap();
         let arr = result.as_array().unwrap();
-        let a_score = arr.iter().find(|r| r["url"] == "https://a.com").unwrap()["score"].as_f64().unwrap();
-        let b_score = arr.iter().find(|r| r["url"] == "https://b.com").unwrap()["score"].as_f64().unwrap();
-        assert!(a_score > b_score, "0.9 weight should favor original: {} vs {}", a_score, b_score);
+        let a_score = arr.iter().find(|r| r["url"] == "https://a.com").unwrap()["score"]
+            .as_f64()
+            .unwrap();
+        let b_score = arr.iter().find(|r| r["url"] == "https://b.com").unwrap()["score"]
+            .as_f64()
+            .unwrap();
+        assert!(
+            a_score > b_score,
+            "0.9 weight should favor original: {} vs {}",
+            a_score,
+            b_score
+        );
     }
 
     // -- parse_expansion --
@@ -1489,14 +1657,26 @@ mod inner_api {
         let d = inner::describe();
         let fns = d["functions"].as_object().unwrap();
         let expected = [
-            "resolve_prompt", "get_prompt", "clean_html", "build_pagefind_html",
-            "score_results", "merge_results", "to_js_scoring_config",
-            "parse_expansion", "version", "describe", "debug_call",
+            "resolve_prompt",
+            "get_prompt",
+            "clean_html",
+            "build_pagefind_html",
+            "score_results",
+            "merge_results",
+            "to_js_scoring_config",
+            "parse_expansion",
+            "version",
+            "describe",
+            "debug_call",
         ];
         for name in expected {
             assert!(fns.contains_key(name), "describe() missing: {}", name);
         }
-        assert_eq!(fns.len(), expected.len(), "Extra unexpected functions in describe()");
+        assert_eq!(
+            fns.len(),
+            expected.len(),
+            "Extra unexpected functions in describe()"
+        );
     }
 
     #[test]
@@ -1504,10 +1684,26 @@ mod inner_api {
         let d = inner::describe();
         let fns = d["functions"].as_object().unwrap();
         for (name, info) in fns {
-            assert!(info.get("description").is_some(), "{} missing 'description'", name);
-            assert!(info.get("output_type").is_some(), "{} missing 'output_type'", name);
-            assert!(info.get("since").is_some(), "{} missing 'since' (VERSIONING.md requirement)", name);
-            assert!(info.get("stability").is_some(), "{} missing 'stability' (VERSIONING.md requirement)", name);
+            assert!(
+                info.get("description").is_some(),
+                "{} missing 'description'",
+                name
+            );
+            assert!(
+                info.get("output_type").is_some(),
+                "{} missing 'output_type'",
+                name
+            );
+            assert!(
+                info.get("since").is_some(),
+                "{} missing 'since' (VERSIONING.md requirement)",
+                name
+            );
+            assert!(
+                info.get("stability").is_some(),
+                "{} missing 'stability' (VERSIONING.md requirement)",
+                name
+            );
         }
     }
 
@@ -1536,8 +1732,16 @@ mod inner_api_errors {
     #[test]
     fn resolve_prompt_not_object() {
         let err = inner::resolve_prompt(&json!("string")).unwrap_err();
-        assert!(err.to_string().contains("resolve_prompt"), "Should name function: {}", err);
-        assert!(err.to_string().contains("JSON"), "Should mention JSON: {}", err);
+        assert!(
+            err.to_string().contains("resolve_prompt"),
+            "Should name function: {}",
+            err
+        );
+        assert!(
+            err.to_string().contains("JSON"),
+            "Should mention JSON: {}",
+            err
+        );
     }
 
     #[test]
@@ -1622,25 +1826,29 @@ mod inner_api_errors {
 
     #[test]
     fn build_pagefind_html_missing_id() {
-        let err = inner::build_pagefind_html(&json!({"title": "T", "body": "B", "url": "U"})).unwrap_err();
+        let err = inner::build_pagefind_html(&json!({"title": "T", "body": "B", "url": "U"}))
+            .unwrap_err();
         assert!(err.to_string().contains("id"));
     }
 
     #[test]
     fn build_pagefind_html_missing_title() {
-        let err = inner::build_pagefind_html(&json!({"id": "1", "body": "B", "url": "U"})).unwrap_err();
+        let err =
+            inner::build_pagefind_html(&json!({"id": "1", "body": "B", "url": "U"})).unwrap_err();
         assert!(err.to_string().contains("title"));
     }
 
     #[test]
     fn build_pagefind_html_missing_body() {
-        let err = inner::build_pagefind_html(&json!({"id": "1", "title": "T", "url": "U"})).unwrap_err();
+        let err =
+            inner::build_pagefind_html(&json!({"id": "1", "title": "T", "url": "U"})).unwrap_err();
         assert!(err.to_string().contains("body"));
     }
 
     #[test]
     fn build_pagefind_html_missing_url() {
-        let err = inner::build_pagefind_html(&json!({"id": "1", "title": "T", "body": "B"})).unwrap_err();
+        let err =
+            inner::build_pagefind_html(&json!({"id": "1", "title": "T", "body": "B"})).unwrap_err();
         assert!(err.to_string().contains("url"));
     }
 
@@ -1672,7 +1880,8 @@ mod inner_api_errors {
 
     #[test]
     fn score_results_results_not_array() {
-        let err = inner::score_results(&json!({"query": "test", "results": "not an array"})).unwrap_err();
+        let err =
+            inner::score_results(&json!({"query": "test", "results": "not an array"})).unwrap_err();
         assert!(err.to_string().contains("score_results"));
     }
 
@@ -1681,9 +1890,14 @@ mod inner_api_errors {
         let err = inner::score_results(&json!({
             "query": "test",
             "results": [{"not_url": "missing required fields"}]
-        })).unwrap_err();
+        }))
+        .unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("score_results"), "Error should name function: {}", msg);
+        assert!(
+            msg.contains("score_results"),
+            "Error should name function: {}",
+            msg
+        );
     }
 
     #[test]
@@ -1717,7 +1931,8 @@ mod inner_api_errors {
         let err = inner::merge_results(&json!({
             "original": [{"bad": "data"}],
             "expanded": []
-        })).unwrap_err();
+        }))
+        .unwrap_err();
         assert!(err.to_string().contains("merge_results"));
     }
 
@@ -1726,7 +1941,8 @@ mod inner_api_errors {
         let err = inner::merge_results(&json!({
             "original": [],
             "expanded": [{"bad": "data"}]
-        })).unwrap_err();
+        }))
+        .unwrap_err();
         assert!(err.to_string().contains("merge_results"));
     }
 
@@ -1782,7 +1998,12 @@ mod pipeline {
 
         // 5. Build Pagefind document
         let pagefind = html::build_pagefind_html(
-            "doc-1", "Drupal Guide", &cleaned, "https://example.com/drupal", "2026-03-01", "TestSite",
+            "doc-1",
+            "Drupal Guide",
+            &cleaned,
+            "https://example.com/drupal",
+            "2026-03-01",
+            "TestSite",
         );
         assert!(pagefind.contains("data-pagefind-body"));
 
@@ -1951,9 +2172,19 @@ mod versioning {
         // Strip pre-release suffix (e.g., "-dev") before checking MAJOR.MINOR.PATCH.
         let base = v.split('-').next().unwrap();
         let parts: Vec<&str> = base.split('.').collect();
-        assert_eq!(parts.len(), 3, "Version must be MAJOR.MINOR.PATCH[-prerelease]: {}", v);
+        assert_eq!(
+            parts.len(),
+            3,
+            "Version must be MAJOR.MINOR.PATCH[-prerelease]: {}",
+            v
+        );
         for part in &parts {
-            assert!(part.parse::<u32>().is_ok(), "Non-numeric version part '{}' in: {}", part, v);
+            assert!(
+                part.parse::<u32>().is_ok(),
+                "Non-numeric version part '{}' in: {}",
+                part,
+                v
+            );
         }
         // If there's a pre-release, it must be non-empty.
         if let Some(pre) = v.split('-').nth(1) {
@@ -1967,18 +2198,29 @@ mod versioning {
         let fns = d["functions"].as_object().unwrap();
 
         for (name, info) in fns {
-            let since = info.get("since")
+            let since = info
+                .get("since")
                 .and_then(|v| v.as_str())
-                .unwrap_or_else(|| panic!("{} missing 'since' field — VERSIONING.md requires it", name));
+                .unwrap_or_else(|| {
+                    panic!("{} missing 'since' field — VERSIONING.md requires it", name)
+                });
             assert!(!since.is_empty(), "{} has empty 'since'", name);
 
-            let stability = info.get("stability")
+            let stability = info
+                .get("stability")
                 .and_then(|v| v.as_str())
-                .unwrap_or_else(|| panic!("{} missing 'stability' field — VERSIONING.md requires it", name));
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{} missing 'stability' field — VERSIONING.md requires it",
+                        name
+                    )
+                });
             assert!(
                 VALID_STABILITY.contains(&stability),
                 "{} has invalid stability '{}' — must be one of {:?}",
-                name, stability, VALID_STABILITY
+                name,
+                stability,
+                VALID_STABILITY
             );
         }
     }
@@ -1991,8 +2233,13 @@ mod versioning {
         for (name, info) in fns {
             let since = info["since"].as_str().unwrap();
             let parts: Vec<&str> = since.split('.').collect();
-            assert_eq!(parts.len(), 3,
-                "{} has invalid 'since' version '{}' — must be MAJOR.MINOR.PATCH", name, since);
+            assert_eq!(
+                parts.len(),
+                3,
+                "{} has invalid 'since' version '{}' — must be MAJOR.MINOR.PATCH",
+                name,
+                since
+            );
         }
     }
 
@@ -2028,7 +2275,8 @@ mod versioning {
         let fns = d["functions"].as_object().unwrap();
 
         for (name, info) in fns {
-            let desc = info.get("description")
+            let desc = info
+                .get("description")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             assert!(!desc.is_empty(), "{} has empty description", name);
