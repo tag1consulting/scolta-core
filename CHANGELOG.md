@@ -6,16 +6,19 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased] (0.2.0-dev)
 
+### Changed
+
+- **BREAKING:** Removed server-side Extism/WASI target entirely — scolta-core is now browser-only WASM
+- Removed `clean_html` and `build_pagefind_html` (ported to pure PHP in scolta-php)
+- Removed `debug_call` (server-side profiling tool)
+- Removed feature flags (`extism`/`browser`) — single target, no flags needed
+- Removed `extism-pdk` and `regex` dependencies
+- WASM interface version bumped to 2
+
 ### Added
 
-- Browser WASM target (`wasm32-unknown-unknown` via wasm-bindgen) for client-side search scoring
-- Feature flags: `extism` (default, server-side) and `browser` (client-side) — mutually exclusive
-- Browser exports: `score_results`, `merge_results`, `parse_expansion`, `resolve_prompt`, `get_prompt`, `to_js_scoring_config`, `version`, `describe`
-- Build script: `scripts/build-browser.sh` (wasm-pack wrapper)
-- Makefile with `build-server`, `build-browser`, `build-all` targets
-- CI job: browser WASM build verification with binary size check
-- `to_js_scoring_config` now passes through `AI_LANGUAGES` array from input for frontend multilingual support
-- 11 WASM plugin functions exported via Extism PDK: `resolve_prompt`, `get_prompt`, `clean_html`, `build_pagefind_html`, `score_results`, `merge_results`, `to_js_scoring_config`, `parse_expansion`, `version`, `describe`, `debug_call`
+- 8 wasm-bindgen exports: `score_results`, `merge_results`, `parse_expansion`, `resolve_prompt`, `get_prompt`, `to_js_scoring_config`, `version`, `describe`
+- `to_js_scoring_config` passes through `AI_LANGUAGES` array for frontend multilingual support
 - Search scoring algorithm with recency decay (exponential half-life), title/content match boosting, and expanded-term weight decay
 - Result merging with Jaccard deduplication and configurable primary/expanded weight split
 - HTML cleaner that strips page chrome and extracts main content

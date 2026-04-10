@@ -2,29 +2,21 @@
 name = "scolta-core"
 version = "0.2.0-dev"
 edition = "2021"
-description = "Scolta search engine core - WebAssembly module for cross-platform search scoring, prompt management, and content processing"
+description = "Scolta search engine core - browser WASM module for client-side search scoring, prompt management, and query expansion"
 license = "MIT"
 repository = "https://github.com/tag1consulting/scolta"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[features]
-default = ["extism"]
-extism = ["dep:extism-pdk", "dep:regex"]
-browser = ["dep:wasm-bindgen", "dep:js-sys"]
-
 [dependencies]
-extism-pdk = { version = "1.2", optional = true }
-wasm-bindgen = { version = "0.2", optional = true }
-js-sys = { version = "0.3", optional = true }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-regex = { version = "1", optional = true }
 
 [dev-dependencies]
 serde_json = "1"
-tempfile = "3"
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false

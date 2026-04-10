@@ -1,8 +1,7 @@
-//! Browser-side wasm-bindgen exports.
+//! wasm-bindgen exports — the public API of scolta-core.
 //!
-//! These functions wrap `inner::` functions with wasm-bindgen serialization
-//! instead of Extism PDK serialization. The business logic is identical —
-//! only the boundary layer differs.
+//! These functions wrap `inner::` functions with wasm-bindgen serialization.
+//! The business logic lives in `inner::` — this module is the boundary layer.
 //!
 //! # Exported functions
 //!

@@ -4,114 +4,94 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 jobs:
-  test:
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-wasip1
-          components: clippy, rustfmt
+          components: rustfmt, clippy
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy -- -D warnings
 
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/bin/
             ~/.cargo/registry/
             ~/.cargo/git/
             target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+      - run: cargo test --lib
 
-      - name: Check formatting
-        run: cargo fmt --check
-
-      - name: Lint
-        run: cargo clippy --target wasm32-wasip1 -- -D warnings
-
-      - name: Run tests
-        run: cargo test --lib
-
-      - name: Build server WASM
-        run: cargo build --release --target wasm32-wasip1
-
-      - name: Verify server WASM binary
-        run: test -f target/wasm32-wasip1/release/scolta_core.wasm
-
-  browser-build:
-    name: Browser WASM build
+  build:
+    name: WASM build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-
       - name: Cache cargo
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/bin/
             ~/.cargo/registry/
             ~/.cargo/git/
             target/
-          key: ${{ runner.os }}-cargo-browser-${{ hashFiles('**/Cargo.lock') }}
-
+          key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-
-      - name: Build browser WASM
-        run: wasm-pack build --target web --release --no-default-features --features browser
-
-      - name: Verify output files exist
+      - name: Build WASM
+        run: wasm-pack build --target web --release
+      - name: Verify output files
         run: |
           test -f pkg/scolta_core_bg.wasm
           test -f pkg/scolta_core.js
           test -f pkg/scolta_core.d.ts
-
-      - name: Check binary size (warn if >500KB)
+      - name: Check binary size
         run: |
           SIZE=$(wc -c < pkg/scolta_core_bg.wasm)
-          echo "Browser WASM size: $SIZE bytes"
+          echo "WASM size: $SIZE bytes"
           if [ "$SIZE" -gt 512000 ]; then
-            echo "::warning::Browser WASM binary exceeds 500KB ($SIZE bytes)"
+            echo "::warning::WASM binary exceeds 500KB ($SIZE bytes)"
           fi
 
-  docs-check:
+  changelog:
+    name: CHANGELOG enforcement
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Check CHANGELOG.md updated when code changes
+      - name: Check CHANGELOG updated
         run: |
           CODE_CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- \
-            'src/' 'Cargo.toml' 'Cargo.lock' 'tests/' | head -1)
+            'src/' 'Cargo.toml' 'tests/' | head -1)
           if [ -n "$CODE_CHANGED" ]; then
             CHANGELOG_CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- CHANGELOG.md)
             if [ -z "$CHANGELOG_CHANGED" ]; then
               echo "FAIL: Code changed but CHANGELOG.md was not updated."
-              echo "Please add an entry under ## [Unreleased] in CHANGELOG.md."
               exit 1
             fi
-            echo "PASS: CHANGELOG.md updated alongside code changes."
-          else
-            echo "SKIP: No code changes detected."
           fi
 
   version-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Validate version format
         run: |
           VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')

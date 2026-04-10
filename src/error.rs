@@ -1,13 +1,12 @@
 //! Typed error handling for scolta-core.
 //!
 //! Every error includes the originating function name so that when an error
-//! propagates through an Extism host (PHP, Python, JS, Go, etc.) and lands
-//! in a log file, the developer can immediately identify which WASM function
-//! produced it without tracing the call stack.
+//! propagates to the calling JavaScript and lands in the browser console, the
+//! developer can immediately identify which WASM function produced it.
 //!
 //! The [`ScoltaError`] enum covers all error categories the crate can produce.
 //! Its [`Display`] implementation generates human-readable messages suitable
-//! for both log files and Extism host error handling.
+//! for logging and error display.
 
 use std::fmt;
 
@@ -91,7 +90,7 @@ impl fmt::Display for ScoltaError {
 
 impl std::error::Error for ScoltaError {}
 
-/// Convenience constructor for JSON parse errors at the plugin_fn boundary.
+/// Convenience constructors for common error patterns.
 impl ScoltaError {
     pub fn invalid_json(function: &'static str, err: impl fmt::Display) -> Self {
         Self::InvalidJson {
