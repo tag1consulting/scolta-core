@@ -67,7 +67,7 @@ jobs:
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       - name: Build browser WASM
-        run: wasm-pack build --target web --release --no-default-features --features browser --out-dir pkg
+        run: wasm-pack build --target web --release --no-default-features --features browser
 
       - name: Verify output files exist
         run: |
