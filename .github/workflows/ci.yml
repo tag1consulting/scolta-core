@@ -37,11 +37,51 @@ jobs:
       - name: Run tests
         run: cargo test --lib
 
-      - name: Build WASM
+      - name: Build server WASM
         run: cargo build --release --target wasm32-wasip1
 
-      - name: Verify WASM binary
+      - name: Verify server WASM binary
         run: test -f target/wasm32-wasip1/release/scolta_core.wasm
+
+  browser-build:
+    name: Browser WASM build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/
+            ~/.cargo/git/
+            target/
+          key: ${{ runner.os }}-cargo-browser-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build browser WASM
+        run: wasm-pack build --target web --release --no-default-features --features browser --out-dir pkg --out-name scolta_core
+
+      - name: Verify output files exist
+        run: |
+          test -f pkg/scolta_core_bg.wasm
+          test -f pkg/scolta_core.js
+          test -f pkg/scolta_core.d.ts
+
+      - name: Check binary size (warn if >500KB)
+        run: |
+          SIZE=$(wc -c < pkg/scolta_core_bg.wasm)
+          echo "Browser WASM size: $SIZE bytes"
+          if [ "$SIZE" -gt 512000 ]; then
+            echo "::warning::Browser WASM binary exceeds 500KB ($SIZE bytes)"
+          fi
 
   docs-check:
     runs-on: ubuntu-latest

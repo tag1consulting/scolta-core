@@ -1,3 +1,4 @@
+#![cfg(feature = "extism")]
 //! Pagefind integration tests for scolta-core.
 //!
 //! These tests verify that scolta-core's HTML output is correctly indexed

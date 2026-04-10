@@ -313,6 +313,7 @@ mod prompts_module {
 }
 
 #[cfg(test)]
+#[cfg(feature = "extism")]
 mod html_module {
     use scolta_core::html;
 
@@ -1315,6 +1316,7 @@ mod expansion_module {
 }
 
 #[cfg(test)]
+#[cfg(feature = "extism")]
 mod debug_module {
     use scolta_core::debug;
 
@@ -1455,8 +1457,9 @@ mod inner_api {
         assert!(result.is_ok());
     }
 
-    // -- clean_html --
+    // -- clean_html (server-only) --
 
+    #[cfg(feature = "extism")]
     #[test]
     fn clean_html_success() {
         let input = json!({
@@ -1468,6 +1471,7 @@ mod inner_api {
         assert!(!result.contains("evil"));
     }
 
+    #[cfg(feature = "extism")]
     #[test]
     fn clean_html_title_optional() {
         let input = json!({"html": "<p>Content</p>"});
@@ -1475,8 +1479,9 @@ mod inner_api {
         assert!(result.contains("Content"));
     }
 
-    // -- build_pagefind_html --
+    // -- build_pagefind_html (server-only) --
 
+    #[cfg(feature = "extism")]
     #[test]
     fn build_pagefind_html_success() {
         let input = json!({
@@ -1492,6 +1497,7 @@ mod inner_api {
         assert!(result.contains("doc-42"));
     }
 
+    #[cfg(feature = "extism")]
     #[test]
     fn build_pagefind_html_optional_fields() {
         let input = json!({
@@ -1789,14 +1795,16 @@ mod inner_api_errors {
         assert!(result.is_err(), "Empty string should produce an error");
     }
 
-    // -- clean_html errors --
+    // -- clean_html errors (server-only) --
 
+    #[cfg(feature = "extism")]
     #[test]
     fn clean_html_not_object() {
         let err = inner::clean_html(&json!("string")).unwrap_err();
         assert!(err.to_string().contains("clean_html"));
     }
 
+    #[cfg(feature = "extism")]
     #[test]
     fn clean_html_missing_html_field() {
         let err = inner::clean_html(&json!({"title": "T"})).unwrap_err();
@@ -1804,26 +1812,30 @@ mod inner_api_errors {
         assert!(err.to_string().contains("clean_html"));
     }
 
+    #[cfg(feature = "extism")]
     #[test]
     fn clean_html_html_field_not_string() {
         let err = inner::clean_html(&json!({"html": 42})).unwrap_err();
         assert!(err.to_string().contains("html"));
     }
 
+    #[cfg(feature = "extism")]
     #[test]
     fn clean_html_null_input() {
         let err = inner::clean_html(&json!(null)).unwrap_err();
         assert!(err.to_string().contains("clean_html"));
     }
 
-    // -- build_pagefind_html errors --
+    // -- build_pagefind_html errors (server-only) --
 
+    #[cfg(feature = "extism")]
     #[test]
     fn build_pagefind_html_not_object() {
         let err = inner::build_pagefind_html(&json!("string")).unwrap_err();
         assert!(err.to_string().contains("build_pagefind_html"));
     }
 
+    #[cfg(feature = "extism")]
     #[test]
     fn build_pagefind_html_missing_id() {
         let err = inner::build_pagefind_html(&json!({"title": "T", "body": "B", "url": "U"}))
@@ -1831,6 +1843,7 @@ mod inner_api_errors {
         assert!(err.to_string().contains("id"));
     }
 
+    #[cfg(feature = "extism")]
     #[test]
     fn build_pagefind_html_missing_title() {
         let err =
@@ -1838,6 +1851,7 @@ mod inner_api_errors {
         assert!(err.to_string().contains("title"));
     }
 
+    #[cfg(feature = "extism")]
     #[test]
     fn build_pagefind_html_missing_body() {
         let err =
@@ -1845,6 +1859,7 @@ mod inner_api_errors {
         assert!(err.to_string().contains("body"));
     }
 
+    #[cfg(feature = "extism")]
     #[test]
     fn build_pagefind_html_missing_url() {
         let err =
@@ -1852,6 +1867,7 @@ mod inner_api_errors {
         assert!(err.to_string().contains("url"));
     }
 
+    #[cfg(feature = "extism")]
     #[test]
     fn build_pagefind_html_null_input() {
         let err = inner::build_pagefind_html(&json!(null)).unwrap_err();

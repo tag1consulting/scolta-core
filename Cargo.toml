@@ -9,15 +9,25 @@ repository = "https://github.com/tag1consulting/scolta"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+default = ["extism"]
+extism = ["dep:extism-pdk", "dep:regex"]
+browser = ["dep:wasm-bindgen", "dep:js-sys"]
+
 [dependencies]
-extism-pdk = "1.2"
+extism-pdk = { version = "1.2", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-regex = "1"
+regex = { version = "1", optional = true }
 
 [dev-dependencies]
 serde_json = "1"
 tempfile = "3"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
 
 [profile.release]
 opt-level = "s"

@@ -438,13 +438,17 @@ fn parse_date(date_str: &str) -> Option<(i32, i32, i32)> {
 
 /// Get the current date as (year, month, day).
 ///
-/// Uses `SystemTime::now()` which works on native targets and wasm32-wasip1
-/// (WASI provides `clock_time_get`).
+/// On native and `wasm32-wasip1`: uses `SystemTime::now()` (WASI provides
+/// `clock_time_get`).
+///
+/// On `wasm32-unknown-unknown` (browser): uses `js_sys::Date::now()` since
+/// `SystemTime` is not available.
 ///
 /// The date algorithm is Howard Hinnant's `civil_from_days`, implemented
 /// inline to avoid a chrono dependency (which would add ~400KB to the WASM
 /// binary). The same algorithm is used in `tests/integration.rs` — if you
 /// change this, update that too.
+#[cfg(not(feature = "browser"))]
 fn today() -> (i32, i32, i32) {
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -457,6 +461,16 @@ fn today() -> (i32, i32, i32) {
         return (2026, 4, 2); // Fallback — should not happen on WASI or native
     }
 
+    civil_from_epoch_secs(secs)
+}
+
+#[cfg(feature = "browser")]
+fn today() -> (i32, i32, i32) {
+    let millis = js_sys::Date::now();
+    let secs = (millis / 1000.0) as u64;
+    if secs == 0 {
+        return (2026, 4, 2);
+    }
     civil_from_epoch_secs(secs)
 }
 

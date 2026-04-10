@@ -14,27 +14,52 @@
 //! `#[plugin_fn]` replaces the function signature with
 //! `extern "C" fn() -> i32` (not callable from Rust).
 //!
+//! ## Features
+//!
+//! - `extism` (default) — Server-side Extism PDK exports for `wasm32-wasip1`.
+//!   Includes HTML processing (`clean_html`, `build_pagefind_html`) which
+//!   requires the `regex` crate.
+//! - `browser` — Client-side wasm-bindgen exports for `wasm32-unknown-unknown`.
+//!   Exposes scoring, merging, expansion parsing, prompts, and config to JS.
+//!
+//! These features are mutually exclusive.
+//!
 //! ## Modules
 //!
 //! - [`common`] — Shared constants (stop words, term extraction)
 //! - [`error`] — Typed error handling ([`ScoltaError`](error::ScoltaError))
 //! - [`prompts`] — Prompt template management
-//! - [`html`] — HTML cleaning and Pagefind integration
+//! - [`html`] — HTML cleaning and Pagefind integration (server-only)
 //! - [`scoring`] — Search result scoring and ranking
 //! - [`config`] — Configuration parsing and export
 //! - [`expansion`] — LLM response parsing
-//! - [`debug`] — Performance monitoring
+//! - [`debug`] — Performance monitoring (server-only)
+//! - [`browser`] — Browser wasm-bindgen exports (browser-only)
+
+// Mutual exclusion guard: extism and browser features cannot be combined.
+#[cfg(all(feature = "extism", feature = "browser"))]
+compile_error!(
+    "Features 'extism' and 'browser' are mutually exclusive. \
+     Build with --features extism (server) OR --no-default-features --features browser (client)."
+);
 
 pub mod common;
 pub mod config;
-pub mod debug;
 pub mod error;
 pub mod expansion;
-pub mod html;
 pub mod prompts;
 pub mod scoring;
 
+#[cfg(feature = "extism")]
+pub mod debug;
+#[cfg(feature = "extism")]
+pub mod html;
+
+#[cfg(feature = "browser")]
+pub mod browser;
+
 use error::ScoltaError;
+#[cfg(feature = "extism")]
 use extism_pdk::*;
 use serde_json::json;
 
@@ -100,6 +125,7 @@ pub mod inner {
     }
 
     /// Clean HTML by removing chrome and extracting main content.
+    #[cfg(feature = "extism")]
     pub fn clean_html(input: &serde_json::Value) -> Result<String, ScoltaError> {
         let obj = input.as_object().ok_or(ScoltaError::invalid_json(
             "clean_html",
@@ -117,6 +143,7 @@ pub mod inner {
     }
 
     /// Build a Pagefind-compatible HTML document.
+    #[cfg(feature = "extism")]
     pub fn build_pagefind_html(input: &serde_json::Value) -> Result<String, ScoltaError> {
         let obj = input.as_object().ok_or(ScoltaError::invalid_json(
             "build_pagefind_html",
@@ -290,6 +317,7 @@ pub mod inner {
                     "description": "Strip page chrome and extract main content as plain text",
                     "since": "0.1.0",
                     "stability": "stable",
+                    "target": "server",
                     "input_type": "json",
                     "input_fields": {
                         "html": {"type": "string", "required": true},
@@ -302,6 +330,7 @@ pub mod inner {
                     "description": "Generate Pagefind-compatible HTML for search indexing",
                     "since": "0.1.0",
                     "stability": "stable",
+                    "target": "server",
                     "input_type": "json",
                     "input_fields": {
                         "id": {"type": "string", "required": true},
@@ -376,6 +405,7 @@ pub mod inner {
                     "description": "Profile any function with timing and size metrics",
                     "since": "0.1.0",
                     "stability": "stable",
+                    "target": "server",
                     "input_type": "json",
                     "input_fields": {
                         "function": {"type": "string", "required": true},
@@ -390,216 +420,223 @@ pub mod inner {
 }
 
 // ---------------------------------------------------------------------------
-// Extism plugin exports
+// Extism plugin exports (server-side only)
 // ---------------------------------------------------------------------------
 
-/// Resolve a prompt template with site-specific details.
-///
-/// Input JSON: `{"prompt_name": "expand_query", "site_name": "...", "site_description": "..."}`
-/// Output: Resolved prompt string
-///
-/// # Stability
-/// - **Status:** stable
-/// - **Since:** 0.1.0
-#[plugin_fn]
-pub fn resolve_prompt(Json(input): Json<serde_json::Value>) -> FnResult<String> {
-    Ok(inner::resolve_prompt(&input)?)
-}
+#[cfg(feature = "extism")]
+mod extism_exports {
+    use super::*;
 
-/// Get raw prompt template by name.
-///
-/// Input: Plain string prompt name (e.g., "expand_query")
-/// Output: Raw template with {SITE_NAME} and {SITE_DESCRIPTION} placeholders
-///
-/// # Stability
-/// - **Status:** stable
-/// - **Since:** 0.1.0
-#[plugin_fn]
-pub fn get_prompt(input: String) -> FnResult<String> {
-    Ok(inner::get_prompt(&input)?)
-}
+    /// Resolve a prompt template with site-specific details.
+    ///
+    /// Input JSON: `{"prompt_name": "expand_query", "site_name": "...", "site_description": "..."}`
+    /// Output: Resolved prompt string
+    ///
+    /// # Stability
+    /// - **Status:** stable
+    /// - **Since:** 0.1.0
+    #[plugin_fn]
+    pub fn resolve_prompt(Json(input): Json<serde_json::Value>) -> FnResult<String> {
+        Ok(inner::resolve_prompt(&input)?)
+    }
 
-/// Clean HTML by removing chrome and extracting main content.
-///
-/// Input JSON: `{"html": "...", "title": "..."}`
-/// Output: Cleaned plain text
-///
-/// # Stability
-/// - **Status:** stable
-/// - **Since:** 0.1.0
-#[plugin_fn]
-pub fn clean_html(Json(input): Json<serde_json::Value>) -> FnResult<String> {
-    Ok(inner::clean_html(&input)?)
-}
+    /// Get raw prompt template by name.
+    ///
+    /// Input: Plain string prompt name (e.g., "expand_query")
+    /// Output: Raw template with {SITE_NAME} and {SITE_DESCRIPTION} placeholders
+    ///
+    /// # Stability
+    /// - **Status:** stable
+    /// - **Since:** 0.1.0
+    #[plugin_fn]
+    pub fn get_prompt(input: String) -> FnResult<String> {
+        Ok(inner::get_prompt(&input)?)
+    }
 
-/// Build a Pagefind-compatible HTML document.
-///
-/// Input JSON: `{"id": "...", "title": "...", "body": "...", "url": "...", "date": "...", "site_name": "..."}`
-/// Output: Complete HTML document with data-pagefind-* attributes
-///
-/// # Stability
-/// - **Status:** stable
-/// - **Since:** 0.1.0
-#[plugin_fn]
-pub fn build_pagefind_html(Json(input): Json<serde_json::Value>) -> FnResult<String> {
-    Ok(inner::build_pagefind_html(&input)?)
-}
+    /// Clean HTML by removing chrome and extracting main content.
+    ///
+    /// Input JSON: `{"html": "...", "title": "..."}`
+    /// Output: Cleaned plain text
+    ///
+    /// # Stability
+    /// - **Status:** stable
+    /// - **Since:** 0.1.0
+    #[plugin_fn]
+    pub fn clean_html(Json(input): Json<serde_json::Value>) -> FnResult<String> {
+        Ok(inner::clean_html(&input)?)
+    }
 
-/// Export scoring configuration for JavaScript integration.
-///
-/// Input JSON: scoring config fields + AI toggle fields
-/// Output: Configuration object with SCREAMING_SNAKE_CASE keys
-///
-/// # Stability
-/// - **Status:** stable
-/// - **Since:** 0.1.0
-#[plugin_fn]
-pub fn to_js_scoring_config(
-    Json(input): Json<serde_json::Value>,
-) -> FnResult<Json<serde_json::Value>> {
-    inner::to_js_scoring_config(&input)
-        .map(Json)
-        .map_err(|e| e.into())
-}
+    /// Build a Pagefind-compatible HTML document.
+    ///
+    /// Input JSON: `{"id": "...", "title": "...", "body": "...", "url": "...", "date": "...", "site_name": "..."}`
+    /// Output: Complete HTML document with data-pagefind-* attributes
+    ///
+    /// # Stability
+    /// - **Status:** stable
+    /// - **Since:** 0.1.0
+    #[plugin_fn]
+    pub fn build_pagefind_html(Json(input): Json<serde_json::Value>) -> FnResult<String> {
+        Ok(inner::build_pagefind_html(&input)?)
+    }
 
-/// Score and re-rank search results.
-///
-/// Input JSON: `{"query": "...", "results": [...], "config": {...}}`
-/// Output: Scored and sorted results array
-///
-/// # Stability
-/// - **Status:** stable
-/// - **Since:** 0.1.0
-#[plugin_fn]
-pub fn score_results(Json(input): Json<serde_json::Value>) -> FnResult<Json<serde_json::Value>> {
-    inner::score_results(&input).map(Json).map_err(|e| e.into())
-}
+    /// Export scoring configuration for JavaScript integration.
+    ///
+    /// Input JSON: scoring config fields + AI toggle fields
+    /// Output: Configuration object with SCREAMING_SNAKE_CASE keys
+    ///
+    /// # Stability
+    /// - **Status:** stable
+    /// - **Since:** 0.1.0
+    #[plugin_fn]
+    pub fn to_js_scoring_config(
+        Json(input): Json<serde_json::Value>,
+    ) -> FnResult<Json<serde_json::Value>> {
+        inner::to_js_scoring_config(&input)
+            .map(Json)
+            .map_err(|e| e.into())
+    }
 
-/// Merge original and expanded search results.
-///
-/// Input JSON: `{"original": [...], "expanded": [...], "config": {...}}`
-/// Output: Merged and deduplicated results array
-///
-/// # Stability
-/// - **Status:** stable
-/// - **Since:** 0.1.0
-#[plugin_fn]
-pub fn merge_results(Json(input): Json<serde_json::Value>) -> FnResult<Json<serde_json::Value>> {
-    inner::merge_results(&input).map(Json).map_err(|e| e.into())
-}
+    /// Score and re-rank search results.
+    ///
+    /// Input JSON: `{"query": "...", "results": [...], "config": {...}}`
+    /// Output: Scored and sorted results array
+    ///
+    /// # Stability
+    /// - **Status:** stable
+    /// - **Since:** 0.1.0
+    #[plugin_fn]
+    pub fn score_results(
+        Json(input): Json<serde_json::Value>,
+    ) -> FnResult<Json<serde_json::Value>> {
+        inner::score_results(&input).map(Json).map_err(|e| e.into())
+    }
 
-/// Parse LLM expansion response into term array.
-///
-/// Input: Plain text (JSON array, markdown-wrapped, or newline-separated)
-/// Output: JSON array of cleaned search terms
-///
-/// # Stability
-/// - **Status:** stable
-/// - **Since:** 0.1.0
-#[plugin_fn]
-pub fn parse_expansion(input: String) -> FnResult<Json<Vec<String>>> {
-    Ok(Json(inner::parse_expansion(&input)))
-}
+    /// Merge original and expanded search results.
+    ///
+    /// Input JSON: `{"original": [...], "expanded": [...], "config": {...}}`
+    /// Output: Merged and deduplicated results array
+    ///
+    /// # Stability
+    /// - **Status:** stable
+    /// - **Since:** 0.1.0
+    #[plugin_fn]
+    pub fn merge_results(
+        Json(input): Json<serde_json::Value>,
+    ) -> FnResult<Json<serde_json::Value>> {
+        inner::merge_results(&input).map(Json).map_err(|e| e.into())
+    }
 
-/// Get current crate version.
-///
-/// # Stability
-/// - **Status:** stable
-/// - **Since:** 0.1.0
-#[plugin_fn]
-pub fn version(_: ()) -> FnResult<String> {
-    Ok(inner::version())
-}
+    /// Parse LLM expansion response into term array.
+    ///
+    /// Input: Plain text (JSON array, markdown-wrapped, or newline-separated)
+    /// Output: JSON array of cleaned search terms
+    ///
+    /// # Stability
+    /// - **Status:** stable
+    /// - **Since:** 0.1.0
+    #[plugin_fn]
+    pub fn parse_expansion(input: String) -> FnResult<Json<Vec<String>>> {
+        Ok(Json(inner::parse_expansion(&input)))
+    }
 
-/// Describe all exported functions.
-///
-/// Output: JSON object with function names, descriptions, input/output formats,
-/// lifecycle status (since, stability), and WASM interface version.
-/// Enables self-discovery for platform adapter developers.
-///
-/// # Stability
-/// - **Status:** stable
-/// - **Since:** 0.1.0
-#[plugin_fn]
-pub fn describe(_: ()) -> FnResult<Json<serde_json::Value>> {
-    Ok(Json(inner::describe()))
-}
+    /// Get current crate version.
+    ///
+    /// # Stability
+    /// - **Status:** stable
+    /// - **Since:** 0.1.0
+    #[plugin_fn]
+    pub fn version(_: ()) -> FnResult<String> {
+        Ok(inner::version())
+    }
 
-/// Debug call wrapper for performance profiling.
-///
-/// Input JSON: `{"function": "clean_html", "input": "{...}"}`
-/// Output JSON: `{"output": "..." | null, "error": "..." | null, "time_us": N, "input_size": N, "output_size": N}`
-///
-/// # Stability
-/// - **Status:** stable
-/// - **Since:** 0.1.0
-#[plugin_fn]
-pub fn debug_call(Json(input): Json<serde_json::Value>) -> FnResult<Json<serde_json::Value>> {
-    let obj = input
-        .as_object()
-        .ok_or_else(|| ScoltaError::invalid_json("debug_call", "expected JSON object"))?;
+    /// Describe all exported functions.
+    ///
+    /// Output: JSON object with function names, descriptions, input/output formats,
+    /// lifecycle status (since, stability), and WASM interface version.
+    /// Enables self-discovery for platform adapter developers.
+    ///
+    /// # Stability
+    /// - **Status:** stable
+    /// - **Since:** 0.1.0
+    #[plugin_fn]
+    pub fn describe(_: ()) -> FnResult<Json<serde_json::Value>> {
+        Ok(Json(inner::describe()))
+    }
 
-    let function = obj
-        .get("function")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| ScoltaError::missing_field("debug_call", "function"))?;
+    /// Debug call wrapper for performance profiling.
+    ///
+    /// Input JSON: `{"function": "clean_html", "input": "{...}"}`
+    /// Output JSON: `{"output": "..." | null, "error": "..." | null, "time_us": N, "input_size": N, "output_size": N}`
+    ///
+    /// # Stability
+    /// - **Status:** stable
+    /// - **Since:** 0.1.0
+    #[plugin_fn]
+    pub fn debug_call(Json(input): Json<serde_json::Value>) -> FnResult<Json<serde_json::Value>> {
+        let obj = input
+            .as_object()
+            .ok_or_else(|| ScoltaError::invalid_json("debug_call", "expected JSON object"))?;
 
-    let call_input = obj.get("input").and_then(|v| v.as_str()).unwrap_or("");
+        let function = obj
+            .get("function")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ScoltaError::missing_field("debug_call", "function"))?;
 
-    // IMPORTANT: This match must cover all #[plugin_fn] exports except debug_call itself.
-    // When adding a new export, add its case here too.
-    // Current exports: resolve_prompt, get_prompt, clean_html, build_pagefind_html,
-    // to_js_scoring_config, score_results, merge_results, parse_expansion, version, describe
-    let result = match function {
-        "resolve_prompt" => debug::measure_call(function, call_input, || {
-            let parsed = serde_json::from_str(call_input).unwrap_or(json!({}));
-            inner::resolve_prompt(&parsed).map_err(|e| e.to_string())
-        }),
-        "get_prompt" => debug::measure_call(function, call_input, || {
-            inner::get_prompt(call_input).map_err(|e| e.to_string())
-        }),
-        "clean_html" => debug::measure_call(function, call_input, || {
-            let parsed = serde_json::from_str(call_input).unwrap_or(json!({}));
-            inner::clean_html(&parsed).map_err(|e| e.to_string())
-        }),
-        "build_pagefind_html" => debug::measure_call(function, call_input, || {
-            let parsed = serde_json::from_str(call_input).unwrap_or(json!({}));
-            inner::build_pagefind_html(&parsed).map_err(|e| e.to_string())
-        }),
-        "to_js_scoring_config" => debug::measure_call(function, call_input, || {
-            let parsed = serde_json::from_str(call_input).unwrap_or(json!({}));
-            inner::to_js_scoring_config(&parsed)
-                .map(|v| v.to_string())
-                .map_err(|e| e.to_string())
-        }),
-        "score_results" => debug::measure_call(function, call_input, || {
-            let parsed = serde_json::from_str(call_input).unwrap_or(json!({}));
-            inner::score_results(&parsed)
-                .map(|v| v.to_string())
-                .map_err(|e| e.to_string())
-        }),
-        "merge_results" => debug::measure_call(function, call_input, || {
-            let parsed = serde_json::from_str(call_input).unwrap_or(json!({}));
-            inner::merge_results(&parsed)
-                .map(|v| v.to_string())
-                .map_err(|e| e.to_string())
-        }),
-        "parse_expansion" => debug::measure_call(function, call_input, || {
-            Ok(serde_json::to_string(&inner::parse_expansion(call_input)).unwrap_or_default())
-        }),
-        "version" => debug::measure_call(function, call_input, || Ok(inner::version())),
-        "describe" => {
-            debug::measure_call(function, call_input, || Ok(inner::describe().to_string()))
-        }
-        _ => {
-            return Err(ScoltaError::UnknownFunction {
-                name: function.to_string(),
+        let call_input = obj.get("input").and_then(|v| v.as_str()).unwrap_or("");
+
+        // IMPORTANT: This match must cover all #[plugin_fn] exports except debug_call itself.
+        // When adding a new export, add its case here too.
+        let result = match function {
+            "resolve_prompt" => debug::measure_call(function, call_input, || {
+                let parsed = serde_json::from_str(call_input).unwrap_or(json!({}));
+                inner::resolve_prompt(&parsed).map_err(|e| e.to_string())
+            }),
+            "get_prompt" => debug::measure_call(function, call_input, || {
+                inner::get_prompt(call_input).map_err(|e| e.to_string())
+            }),
+            "clean_html" => debug::measure_call(function, call_input, || {
+                let parsed = serde_json::from_str(call_input).unwrap_or(json!({}));
+                inner::clean_html(&parsed).map_err(|e| e.to_string())
+            }),
+            "build_pagefind_html" => debug::measure_call(function, call_input, || {
+                let parsed = serde_json::from_str(call_input).unwrap_or(json!({}));
+                inner::build_pagefind_html(&parsed).map_err(|e| e.to_string())
+            }),
+            "to_js_scoring_config" => debug::measure_call(function, call_input, || {
+                let parsed = serde_json::from_str(call_input).unwrap_or(json!({}));
+                inner::to_js_scoring_config(&parsed)
+                    .map(|v| v.to_string())
+                    .map_err(|e| e.to_string())
+            }),
+            "score_results" => debug::measure_call(function, call_input, || {
+                let parsed = serde_json::from_str(call_input).unwrap_or(json!({}));
+                inner::score_results(&parsed)
+                    .map(|v| v.to_string())
+                    .map_err(|e| e.to_string())
+            }),
+            "merge_results" => debug::measure_call(function, call_input, || {
+                let parsed = serde_json::from_str(call_input).unwrap_or(json!({}));
+                inner::merge_results(&parsed)
+                    .map(|v| v.to_string())
+                    .map_err(|e| e.to_string())
+            }),
+            "parse_expansion" => debug::measure_call(function, call_input, || {
+                Ok(serde_json::to_string(&inner::parse_expansion(call_input)).unwrap_or_default())
+            }),
+            "version" => debug::measure_call(function, call_input, || Ok(inner::version())),
+            "describe" => {
+                debug::measure_call(function, call_input, || Ok(inner::describe().to_string()))
             }
-            .into());
-        }
-    };
+            _ => {
+                return Err(ScoltaError::UnknownFunction {
+                    name: function.to_string(),
+                }
+                .into());
+            }
+        };
 
-    Ok(Json(debug::debug_result_to_json(&result)))
+        Ok(Json(debug::debug_result_to_json(&result)))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -667,6 +704,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg(feature = "extism")]
     #[test]
     fn test_clean_html() {
         let input = json!({
@@ -678,6 +716,7 @@ mod tests {
         assert!(!result.contains("evil"));
     }
 
+    #[cfg(feature = "extism")]
     #[test]
     fn test_build_pagefind_html() {
         let input = json!({
