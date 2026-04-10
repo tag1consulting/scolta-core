@@ -22,8 +22,7 @@ wasm-pack build \
     --release \
     --no-default-features \
     --features browser \
-    --out-dir pkg \
-    --out-name scolta_core
+    --out-dir pkg
 
 # Strip the auto-generated .gitignore from pkg/ — we want to commit these files
 rm -f pkg/.gitignore

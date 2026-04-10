@@ -67,7 +67,7 @@ jobs:
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       - name: Build browser WASM
-        run: wasm-pack build --target web --release --no-default-features --features browser --out-dir pkg --out-name scolta_core
+        run: wasm-pack build --target web --release --no-default-features --features browser --out-dir pkg
 
       - name: Verify output files exist
         run: |
