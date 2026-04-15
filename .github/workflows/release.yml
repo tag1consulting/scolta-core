@@ -48,11 +48,10 @@ jobs:
             scolta_core.js \
             scolta_core.d.ts \
             scolta_core_bg.wasm.d.ts
-          echo "ARCHIVE=scolta-core-${VERSION}.tar.gz" >> $GITHUB_ENV
-          echo "VERSION=${VERSION}" >> $GITHUB_ENV
 
       - name: Extract CHANGELOG entry
         run: |
+          VERSION=${GITHUB_REF_NAME#v}
           awk "/^## \[${VERSION}\]/{found=1; next} found && /^## \[/{exit} found{print}" \
             CHANGELOG.md > release-notes.txt
           cat release-notes.txt
@@ -61,5 +60,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           body_path: release-notes.txt
-          files: ${{ env.ARCHIVE }}
+          files: scolta-core-*.tar.gz
           fail_on_unmatched_files: true
