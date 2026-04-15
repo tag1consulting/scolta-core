@@ -270,8 +270,25 @@ pub fn recency_boost(date: &str, config: &ScoringConfig) -> f64 {
 ///
 /// This matches the Tag1 reference implementation which uses proportional
 /// scoring with word-boundary matching.
+///
+/// This is a thin wrapper that calls [`extract_terms`] then delegates to
+/// [`title_match_score_with_terms`]. Prefer `_with_terms` when scoring many
+/// results for the same query to avoid repeated term extraction.
 pub fn title_match_score(query: &str, title: &str, config: &ScoringConfig) -> f64 {
     let terms = common::extract_terms(query);
+    title_match_score_with_terms(&terms, title, config)
+}
+
+/// Score title match using pre-extracted terms.
+///
+/// Same logic as [`title_match_score`] but takes terms that have already been
+/// extracted by [`common::extract_terms`]. Use this when scoring many results
+/// against the same query to avoid extracting terms on every call.
+pub fn title_match_score_with_terms(
+    terms: &[String],
+    title: &str,
+    config: &ScoringConfig,
+) -> f64 {
     if terms.is_empty() {
         return 0.0;
     }
@@ -302,8 +319,25 @@ pub fn title_match_score(query: &str, title: &str, config: &ScoringConfig) -> f6
 /// - All terms present → `content_match_boost × content_all_terms_multiplier / content_match_boost`
 /// - Some terms present → `content_match_boost × (matchCount / totalTerms)`
 /// - No terms → 0.0
+///
+/// This is a thin wrapper that calls [`extract_terms`] then delegates to
+/// [`content_match_score_with_terms`]. Prefer `_with_terms` when scoring many
+/// results for the same query to avoid repeated term extraction.
 pub fn content_match_score(query: &str, content: &str, config: &ScoringConfig) -> f64 {
     let terms = common::extract_terms(query);
+    content_match_score_with_terms(&terms, content, config)
+}
+
+/// Score content match using pre-extracted terms.
+///
+/// Same logic as [`content_match_score`] but takes terms that have already
+/// been extracted by [`common::extract_terms`]. Use this when scoring many
+/// results against the same query to avoid extracting terms on every call.
+pub fn content_match_score_with_terms(
+    terms: &[String],
+    content: &str,
+    config: &ScoringConfig,
+) -> f64 {
     if terms.is_empty() {
         return 0.0;
     }
@@ -344,23 +378,44 @@ pub fn content_match_score(query: &str, content: &str, config: &ScoringConfig) -
 ///
 /// The additive model ensures no single zero component can collapse the entire
 /// score — an article with no date still benefits from a strong title match.
+///
+/// This is a thin wrapper; prefer [`score_result_with_terms`] when scoring
+/// many results for the same query.
 pub fn score_result(result: &SearchResult, query: &str, config: &ScoringConfig) -> f64 {
+    let terms = common::extract_terms(query);
+    score_result_with_terms(result, &terms, config)
+}
+
+/// Calculate composite score using pre-extracted terms.
+///
+/// Same logic as [`score_result`] but takes terms that have already been
+/// extracted by [`common::extract_terms`]. Use this (via [`score_results`])
+/// to avoid extracting terms once per result.
+pub fn score_result_with_terms(
+    result: &SearchResult,
+    terms: &[String],
+    config: &ScoringConfig,
+) -> f64 {
     let base_score = if result.score > 0.0 {
         result.score
     } else {
         1.0
     };
-    let title_boost = title_match_score(query, &result.title, config);
-    let content_boost = content_match_score(query, &result.excerpt, config);
+    let title_boost = title_match_score_with_terms(terms, &result.title, config);
+    let content_boost = content_match_score_with_terms(terms, &result.excerpt, config);
     let recency = recency_boost(&result.date, config);
 
     base_score + title_boost + content_boost + recency
 }
 
 /// Score all results and sort by relevance (highest first).
+///
+/// Extracts query terms once before the loop and reuses them for each result,
+/// avoiding redundant [`common::extract_terms`] calls.
 pub fn score_results(results: &mut [SearchResult], query: &str, config: &ScoringConfig) {
+    let terms = common::extract_terms(query);
     for result in results.iter_mut() {
-        result.score = score_result(result, query, config);
+        result.score = score_result_with_terms(result, &terms, config);
     }
 
     results.sort_by(|a, b| {
