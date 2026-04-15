@@ -1,18 +1,18 @@
 # Scolta Core API Reference
 
-Version: 0.2.1-dev · Target: wasm32-unknown-unknown · Framework: wasm-bindgen
+Version: 0.2.2-dev · Target: wasm32-unknown-unknown · Framework: wasm-bindgen
 
 ## 1. Overview
 
 `scolta-core` is the Rust/WebAssembly module that powers Scolta's client-side search experience. It provides search result scoring, prompt template management, and LLM expansion response parsing. By running in the browser via wasm-bindgen, it guarantees identical scoring behavior across all platform adapters (PHP, WordPress, Drupal, Laravel) without server round-trips.
 
-**Architecture:** `browser.rs` contains 8 `#[wasm_bindgen]` exports that form the public API. Each export is a thin serialization wrapper delegating to a corresponding function in the `inner::` module (`lib.rs`). The `inner::` functions are plain Rust — testable with `cargo test` without a WASM runtime — and are the sole implementation of all business logic. Modules `scoring`, `config`, `prompts`, `expansion`, `error`, and `common` contain the algorithmic details.
+**Architecture:** `browser.rs` contains 9 `#[wasm_bindgen]` exports that form the public API. Each export is a thin serialization wrapper delegating to a corresponding function in the `inner::` module (`lib.rs`). The `inner::` functions are plain Rust — testable with `cargo test` without a WASM runtime — and are the sole implementation of all business logic. Modules `scoring`, `config`, `prompts`, `expansion`, `error`, and `common` contain the algorithmic details.
 
 ---
 
 ## 2. Browser WASM Exports
 
-All 8 exports take and return JSON strings (or plain strings for `version` and `get_prompt`). On error they return a `JsError` that becomes a JavaScript exception.
+All 9 exports take and return JSON strings (or plain strings for `version` and `get_prompt`). On error they return a `JsError` that becomes a JavaScript exception.
 
 ---
 
@@ -94,21 +94,66 @@ Merge original and expanded search results with URL-based deduplication. Used wh
 
 ### `parse_expansion(input: &str) -> Result<String, JsError>`
 
-Parse an LLM expansion response into an array of search terms. Handles three input formats with graceful fallback:
+Parse an LLM expansion response into an array of search terms. Accepts two input forms:
 
-1. **JSON array** (preferred): `["term1", "term2", "term3"]`
-2. **Markdown-wrapped JSON**: ` ```json ["term1", "term2"] ``` `
-3. **Fallback**: newline- or comma-separated plain text
+**1. Bare string** — raw LLM response; language defaults to `"en"`.
 
-All results are filtered through the stop word list. Single-character strings and pure numbers are removed.
+Handles three text formats with graceful fallback:
 
-**Input:** Raw LLM response string (any of the above formats).
+- **JSON array** (preferred): `["term1", "term2", "term3"]`
+- **Markdown-wrapped JSON**: ` ```json ["term1", "term2"] ``` `
+- **Fallback**: newline- or comma-separated plain text
+
+**2. JSON object** — specify a language for stop word filtering:
+```json
+{ "text": "[\"term1\", \"term2\"]", "language": "de" }
+```
+
+All results are filtered through the stop word list for the given language (see `ScoringConfig.language`). Single-character strings and pure numbers are removed.
 
 **Output JSON:** Array of cleaned expansion terms.
 
 ```json
 ["cardiac surgery", "heart procedure", "surgical intervention"]
 ```
+
+---
+
+### `batch_score_results(input: &str) -> Result<String, JsError>` *(since 0.2.2)*
+
+Score multiple queries against their respective result sets in a single WASM call. Reduces JS↔WASM round-trip overhead when re-scoring several result batches at once (e.g., after AI query expansion produces multiple term sets).
+
+**Input JSON:**
+```json
+{
+  "queries": [
+    {
+      "query": "search terms",
+      "results": [ /* array of SearchResult */ ],
+      "config": { "language": "en" }
+    },
+    {
+      "query": "other query",
+      "results": [ /* array of SearchResult */ ]
+    }
+  ],
+  "default_config": { "recency_boost_max": 0.3 }
+}
+```
+
+- `queries` — required array. Each entry must have `query` and `results`; `config` is optional.
+- `default_config` — optional. Applied to every query entry. Per-query `config` takes precedence.
+
+**Output JSON:** Array of scored result arrays, one per query, in input order.
+
+```json
+[
+  [ { "url": "https://a.com", "score": 2.1, ... } ],
+  [ { "url": "https://b.com", "score": 1.4, ... } ]
+]
+```
+
+**Error:** `JsError` if `queries` is missing, any entry lacks `query` or `results`, or any `results` array cannot be parsed.
 
 ---
 
@@ -168,6 +213,8 @@ Convert a scoring config object to the SCREAMING_SNAKE_CASE format expected by t
   "RECENCY_HALF_LIFE_DAYS": 365,
   "RECENCY_PENALTY_AFTER_DAYS": 1825,
   "RECENCY_MAX_PENALTY": 0.3,
+  "RECENCY_STRATEGY": "exponential",
+  "RECENCY_CURVE": [],
   "TITLE_MATCH_BOOST": 1.0,
   "TITLE_ALL_TERMS_MULTIPLIER": 1.5,
   "CONTENT_MATCH_BOOST": 0.4,
@@ -176,6 +223,8 @@ Convert a scoring config object to the SCREAMING_SNAKE_CASE format expected by t
   "RESULTS_PER_PAGE": 10,
   "MAX_PAGEFIND_RESULTS": 50,
   "EXPAND_PRIMARY_WEIGHT": 0.7,
+  "LANGUAGE": "en",
+  "CUSTOM_STOP_WORDS": [],
   "AI_EXPAND_QUERY": true,
   "AI_SUMMARIZE": false,
   "AI_SUMMARY_TOP_N": 5,
@@ -201,19 +250,14 @@ Return a JSON manifest of all exported functions with metadata. Used by platform
 ```json
 {
   "name": "scolta-core",
-  "version": "0.2.1-dev",
-  "wasm_interface_version": 2,
+  "version": "0.2.2-dev",
+  "wasm_interface_version": 3,
   "description": "Scolta browser WASM — client-side search scoring, prompt management, and query expansion",
   "functions": {
-    "score_results": {
-      "description": "Score and re-rank search results by relevance",
-      "since": "0.1.0",
-      "stability": "stable",
-      "input_type": "json",
-      "output_type": "json"
-    },
+    "score_results": { "since": "0.1.0", "stability": "stable", "input_type": "json", "output_type": "json" },
     "merge_results": { "since": "0.1.0", "stability": "stable", "input_type": "json", "output_type": "json" },
     "parse_expansion": { "since": "0.1.0", "stability": "stable", "input_type": "string", "output_type": "json" },
+    "batch_score_results": { "since": "0.2.2", "stability": "experimental", "input_type": "json", "output_type": "json" },
     "resolve_prompt": { "since": "0.1.0", "stability": "stable", "input_type": "json", "output_type": "string" },
     "get_prompt": { "since": "0.1.0", "stability": "stable", "input_type": "string", "output_type": "string" },
     "to_js_scoring_config": { "since": "0.1.0", "stability": "stable", "input_type": "json", "output_type": "json" },
@@ -250,9 +294,11 @@ All fields are optional in JSON input; missing fields use the listed defaults.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `recency_boost_max` | f64 | 0.5 | Maximum additive recency boost for recent content |
-| `recency_half_life_days` | u32 | 365 | Days until recency boost decays to half |
-| `recency_penalty_after_days` | u32 | 1825 | Days (~5 years) after which a penalty begins |
+| `recency_half_life_days` | u32 | 365 | Decay half-life in days; also step boundary for `"step"` strategy |
+| `recency_penalty_after_days` | u32 | 1825 | Days (~5 years) after which an old-content penalty begins |
 | `recency_max_penalty` | f64 | 0.3 | Maximum additive penalty for very old content |
+| `recency_strategy` | string | `"exponential"` | Decay strategy: `"exponential"`, `"linear"`, `"step"`, `"none"`, `"custom"` |
+| `recency_curve` | `[[f64,f64]]` | `[]` | Control points `[days_old, boost]` for `"custom"` strategy; must be sorted ascending |
 | `title_match_boost` | f64 | 1.0 | Boost when any query term appears in the title |
 | `title_all_terms_multiplier` | f64 | 1.5 | Multiplier applied when ALL terms appear in title |
 | `content_match_boost` | f64 | 0.4 | Boost when any query term appears in content |
@@ -261,8 +307,22 @@ All fields are optional in JSON input; missing fields use the listed defaults.
 | `excerpt_length` | u32 | 300 | Max excerpt length in characters |
 | `results_per_page` | u32 | 10 | Results per page for pagination |
 | `max_pagefind_results` | u32 | 50 | Max results from Pagefind to consider |
+| `language` | string | `"en"` | ISO 639-1 code for stop word filtering (30 languages supported; CJK/unknown → no filtering) |
+| `custom_stop_words` | string[] | `[]` | Additional stop words layered on top of the language list |
 
 Valid ranges are checked by `ScoringConfig::validate()`. Values outside reasonable ranges produce `ConfigWarning` entries but do not prevent scoring.
+
+**Recency strategy details:**
+
+| Strategy | Behaviour |
+|---|---|
+| `"exponential"` | `MAX × exp(-age/HALF_LIFE × ln2)` — matches Tag1 reference (default) |
+| `"linear"` | Linear decay from max at day 0 to 0 at `recency_penalty_after_days` |
+| `"step"` | Full max until `recency_half_life_days`, then 0 until penalty threshold |
+| `"none"` | Always 0.0 — disables recency entirely |
+| `"custom"` | Piecewise-linear interpolation over `recency_curve` control points |
+
+All strategies (except `"none"` and `"custom"`) apply a shared linear old-content penalty beyond `recency_penalty_after_days`: 5% per year, capped at `recency_max_penalty`.
 
 ### SearchResult
 

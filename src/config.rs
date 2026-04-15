@@ -92,6 +92,24 @@ pub fn from_json(json: &serde_json::Value) -> ScoringConfig {
             .get("max_pagefind_results")
             .and_then(|v| v.as_u64())
             .unwrap_or(50) as u32,
+        language: obj
+            .get("language")
+            .and_then(|v| v.as_str())
+            .unwrap_or("en")
+            .to_string(),
+        custom_stop_words: obj
+            .get("custom_stop_words")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default(),
+        recency_strategy: obj
+            .get("recency_strategy")
+            .and_then(|v| v.as_str())
+            .unwrap_or("exponential")
+            .to_string(),
+        recency_curve: obj
+            .get("recency_curve")
+            .and_then(|v| serde_json::from_value::<Vec<[f64; 2]>>(v.clone()).ok())
+            .unwrap_or_default(),
     }
 }
 
@@ -150,6 +168,8 @@ pub fn to_js_scoring_config(
         "RECENCY_HALF_LIFE_DAYS": config.recency_half_life_days,
         "RECENCY_PENALTY_AFTER_DAYS": config.recency_penalty_after_days,
         "RECENCY_MAX_PENALTY": config.recency_max_penalty,
+        "RECENCY_STRATEGY": config.recency_strategy,
+        "RECENCY_CURVE": config.recency_curve,
         "TITLE_MATCH_BOOST": config.title_match_boost,
         "TITLE_ALL_TERMS_MULTIPLIER": config.title_all_terms_multiplier,
         "CONTENT_MATCH_BOOST": config.content_match_boost,
@@ -157,6 +177,8 @@ pub fn to_js_scoring_config(
         "EXCERPT_LENGTH": config.excerpt_length,
         "RESULTS_PER_PAGE": config.results_per_page,
         "MAX_PAGEFIND_RESULTS": config.max_pagefind_results,
+        "LANGUAGE": config.language,
+        "CUSTOM_STOP_WORDS": config.custom_stop_words,
         "AI_EXPAND_QUERY": ai_expand_query,
         "AI_SUMMARIZE": ai_summarize,
         "AI_SUMMARY_TOP_N": ai_summary_top_n,
@@ -185,6 +207,10 @@ mod tests {
         assert_eq!(result["AI_SUMMARY_TOP_N"], 5);
         assert_eq!(result["AI_MAX_FOLLOWUPS"], 3);
         assert_eq!(result["AI_LANGUAGES"], json!(["en"]));
+        assert_eq!(result["LANGUAGE"], "en");
+        assert_eq!(result["RECENCY_STRATEGY"], "exponential");
+        assert_eq!(result["RECENCY_CURVE"], json!([]));
+        assert_eq!(result["CUSTOM_STOP_WORDS"], json!([]));
     }
 
     #[test]
@@ -227,6 +253,10 @@ mod tests {
         assert_eq!(config.recency_boost_max, 0.5);
         assert_eq!(config.recency_half_life_days, 365);
         assert_eq!(config.content_all_terms_multiplier, 0.48);
+        assert_eq!(config.language, "en");
+        assert!(config.custom_stop_words.is_empty());
+        assert_eq!(config.recency_strategy, "exponential");
+        assert!(config.recency_curve.is_empty());
     }
 
     #[test]
@@ -241,6 +271,41 @@ mod tests {
         assert_eq!(config.recency_half_life_days, 200);
         assert_eq!(config.content_all_terms_multiplier, 0.6);
         assert_eq!(config.content_match_boost, 0.4); // Default
+    }
+
+    #[test]
+    fn test_from_json_language_fields() {
+        let json = json!({
+            "language": "de",
+            "custom_stop_words": ["scolta", "pagefind"],
+        });
+        let config = from_json(&json);
+        assert_eq!(config.language, "de");
+        assert_eq!(config.custom_stop_words, vec!["scolta", "pagefind"]);
+    }
+
+    #[test]
+    fn test_from_json_recency_strategy() {
+        let json = json!({
+            "recency_strategy": "linear",
+            "recency_curve": [[0.0, 1.0], [365.0, 0.0]],
+        });
+        let config = from_json(&json);
+        assert_eq!(config.recency_strategy, "linear");
+        // curve is parsed but irrelevant for "linear" strategy
+    }
+
+    #[test]
+    fn test_from_json_recency_curve() {
+        let json = json!({
+            "recency_strategy": "custom",
+            "recency_curve": [[0.0, 0.5], [365.0, 0.0]],
+        });
+        let config = from_json(&json);
+        assert_eq!(config.recency_strategy, "custom");
+        assert_eq!(config.recency_curve.len(), 2);
+        assert_eq!(config.recency_curve[0], [0.0, 0.5]);
+        assert_eq!(config.recency_curve[1], [365.0, 0.0]);
     }
 
     #[test]

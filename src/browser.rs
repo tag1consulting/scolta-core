@@ -7,7 +7,8 @@
 //!
 //! - [`score_results`] — Score and rank search results
 //! - [`merge_results`] — Merge original + expanded results
-//! - [`parse_expansion`] — Parse LLM expansion response
+//! - [`parse_expansion`] — Parse LLM expansion response (string or JSON object)
+//! - [`batch_score_results`] — Score multiple queries in one call
 //! - [`resolve_prompt`] — Resolve prompt template
 //! - [`get_prompt`] — Get raw prompt template
 //! - [`to_js_scoring_config`] — Export scoring config for JS
@@ -55,12 +56,49 @@ pub fn merge_results(input: &str) -> Result<String, JsError> {
 
 /// Parse an LLM expansion response into individual search terms.
 ///
-/// Input: Raw LLM response string (may contain JSON, markdown, or bare text).
-/// Output: JSON string — array of extracted terms.
+/// Accepts two input forms:
+///
+/// 1. **Bare string** — treated as the raw LLM response; language defaults to `"en"`.
+///    ```text
+///    ["term1", "term2"]
+///    ```
+///
+/// 2. **JSON object** — allows specifying a language for stop word filtering.
+///    ```json
+///    { "text": "[\"term1\", \"term2\"]", "language": "de" }
+///    ```
+///
+/// Output: JSON string — array of extracted, filtered terms.
 #[wasm_bindgen]
 pub fn parse_expansion(input: &str) -> Result<String, JsError> {
     let terms = inner::parse_expansion(input);
     serde_json::to_string(&terms)
+        .map_err(|e| JsError::new(&format!("JSON serialization failed: {}", e)))
+}
+
+/// Score multiple queries against their respective result sets in a single call.
+///
+/// Input: JSON string with shape:
+/// ```json
+/// {
+///   "queries": [
+///     { "query": "search terms", "results": [...], "config": {...} },
+///     { "query": "other query",  "results": [...] }
+///   ],
+///   "default_config": { "language": "en" }
+/// }
+/// ```
+///
+/// Per-query `"config"` overrides `"default_config"` for that entry.
+///
+/// Output: JSON string — array of arrays of scored results, one inner array
+/// per input query, in the same order.
+#[wasm_bindgen]
+pub fn batch_score_results(input: &str) -> Result<String, JsError> {
+    let value: serde_json::Value =
+        serde_json::from_str(input).map_err(|e| JsError::new(&format!("Invalid JSON: {}", e)))?;
+    let result = inner::batch_score_results(&value).map_err(|e| JsError::new(&e.to_string()))?;
+    serde_json::to_string(&result)
         .map_err(|e| JsError::new(&format!("JSON serialization failed: {}", e)))
 }
 
@@ -173,5 +211,85 @@ mod tests {
         let input = serde_json::json!({"recency_boost_max": 0.8});
         let result = inner::to_js_scoring_config(&input).unwrap();
         assert_eq!(result["RECENCY_BOOST_MAX"], 0.8);
+    }
+
+    #[test]
+    fn parse_expansion_object_form_with_language() {
+        // JSON object form: { "text": "...", "language": "de" }
+        let input = serde_json::json!({
+            "text": r#"["und", "drupal", "suche"]"#,
+            "language": "de"
+        });
+        let terms = inner::parse_expansion_with_language(
+            input["text"].as_str().unwrap(),
+            input["language"].as_str().unwrap_or("en"),
+        );
+        assert!(!terms.contains(&"und".to_string()));
+        assert!(terms.contains(&"drupal".to_string()));
+    }
+
+    #[test]
+    fn batch_score_results_basic() {
+        let input = serde_json::json!({
+            "queries": [
+                {
+                    "query": "drupal performance",
+                    "results": [
+                        {"url": "https://a.com", "title": "Drupal Speed Guide", "excerpt": "Improve Drupal performance", "date": "2026-01-01"},
+                        {"url": "https://b.com", "title": "About Us", "excerpt": "Company info", "date": "2026-01-01"}
+                    ]
+                },
+                {
+                    "query": "rust programming",
+                    "results": [
+                        {"url": "https://c.com", "title": "Learn Rust", "excerpt": "Rust language guide", "date": "2026-01-01"}
+                    ]
+                }
+            ]
+        });
+        let result = inner::batch_score_results(&input).unwrap();
+        let arr = result.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        // First batch: 2 results
+        assert_eq!(arr[0].as_array().unwrap().len(), 2);
+        // First result of first batch should be Drupal-related
+        assert_eq!(arr[0][0]["url"], "https://a.com");
+        // Second batch: 1 result
+        assert_eq!(arr[1].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn batch_score_results_default_config() {
+        let input = serde_json::json!({
+            "queries": [
+                {
+                    "query": "search",
+                    "results": [
+                        {"url": "https://a.com", "title": "Search Results", "excerpt": "find things", "date": "2026-01-01"}
+                    ]
+                }
+            ],
+            "default_config": { "language": "en", "recency_boost_max": 0.0 }
+        });
+        let result = inner::batch_score_results(&input).unwrap();
+        assert_eq!(result.as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn batch_score_results_per_query_config_overrides_default() {
+        let input = serde_json::json!({
+            "queries": [
+                {
+                    "query": "test",
+                    "results": [
+                        {"url": "https://a.com", "title": "Test Page", "excerpt": "testing", "date": "2026-01-01"}
+                    ],
+                    "config": { "recency_boost_max": 0.1 }
+                }
+            ],
+            "default_config": { "recency_boost_max": 0.9 }
+        });
+        let result = inner::batch_score_results(&input).unwrap();
+        assert_eq!(result.as_array().unwrap().len(), 1);
     }
 }

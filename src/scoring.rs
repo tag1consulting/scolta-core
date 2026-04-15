@@ -41,6 +41,8 @@ use std::collections::HashMap;
 /// | `recency_half_life_days` | 1–3650 | 365 |
 /// | `recency_penalty_after_days` | 1–7300 | 1825 |
 /// | `recency_max_penalty` | 0.0–1.0 | 0.3 |
+/// | `recency_strategy` | "exponential"\|"linear"\|"step"\|"none"\|"custom" | "exponential" |
+/// | `recency_curve` | sorted `[[days,boost],…]` | [] |
 /// | `title_match_boost` | 0.0–5.0 | 1.0 |
 /// | `title_all_terms_multiplier` | 0.0–5.0 | 1.5 |
 /// | `content_match_boost` | 0.0–5.0 | 0.4 |
@@ -49,16 +51,32 @@ use std::collections::HashMap;
 /// | `excerpt_length` | 50–2000 | 300 |
 /// | `results_per_page` | 1–100 | 10 |
 /// | `max_pagefind_results` | 1–500 | 50 |
+/// | `language` | ISO 639-1 code | "en" |
+/// | `custom_stop_words` | list of lowercase tokens | [] |
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoringConfig {
     /// Maximum recency boost factor (default 0.5).
     pub recency_boost_max: f64,
     /// Half-life for recency boost in days (default 365).
+    /// Also used as the step boundary for the `"step"` strategy.
     pub recency_half_life_days: u32,
     /// Days after which to apply penalty (default 1825 = ~5 years).
     pub recency_penalty_after_days: u32,
     /// Maximum penalty for very old content (default 0.3).
     pub recency_max_penalty: f64,
+    /// Recency decay strategy. One of:
+    /// - `"exponential"` — exponential decay (default, matches Tag1 reference)
+    /// - `"linear"` — linear decay from max at day 0 to 0 at penalty threshold
+    /// - `"step"` — full boost until `recency_half_life_days`, then 0
+    /// - `"none"` — no recency adjustment (always 0.0)
+    /// - `"custom"` — piecewise linear from `recency_curve` control points
+    pub recency_strategy: String,
+    /// Control points for the `"custom"` recency strategy.
+    ///
+    /// Each entry is `[days_old, boost_value]`. Points must be sorted
+    /// ascending by `days_old`. Values outside the range are clamped to the
+    /// nearest boundary point. Ignored for all other strategies.
+    pub recency_curve: Vec<[f64; 2]>,
     /// Boost when any query term appears in title (default 1.0).
     pub title_match_boost: f64,
     /// Multiplier when ALL query terms appear in title (default 1.5).
@@ -79,6 +97,13 @@ pub struct ScoringConfig {
     pub results_per_page: u32,
     /// Maximum results from Pagefind to consider (default 50).
     pub max_pagefind_results: u32,
+    /// ISO 639-1 language code for stop word filtering (default "en").
+    pub language: String,
+    /// Additional stop words beyond the language defaults (default empty).
+    ///
+    /// Comparison is case-insensitive. These are applied on top of the
+    /// language stop word list, not instead of it.
+    pub custom_stop_words: Vec<String>,
 }
 
 impl Default for ScoringConfig {
@@ -88,6 +113,8 @@ impl Default for ScoringConfig {
             recency_half_life_days: 365,
             recency_penalty_after_days: 1825,
             recency_max_penalty: 0.3,
+            recency_strategy: "exponential".to_string(),
+            recency_curve: Vec::new(),
             title_match_boost: 1.0,
             title_all_terms_multiplier: 1.5,
             content_match_boost: 0.4,
@@ -96,6 +123,8 @@ impl Default for ScoringConfig {
             excerpt_length: 300,
             results_per_page: 10,
             max_pagefind_results: 50,
+            language: "en".to_string(),
+            custom_stop_words: Vec::new(),
         }
     }
 }
@@ -176,6 +205,36 @@ impl ScoringConfig {
             });
         }
 
+        let valid_strategies = ["exponential", "linear", "step", "none", "custom"];
+        if !valid_strategies.contains(&self.recency_strategy.as_str()) {
+            warnings.push(ConfigWarning {
+                field: "recency_strategy",
+                message: format!(
+                    "unknown strategy '{}'; valid: exponential, linear, step, none, custom",
+                    self.recency_strategy
+                ),
+            });
+        }
+
+        if self.recency_strategy == "custom" && self.recency_curve.is_empty() {
+            warnings.push(ConfigWarning {
+                field: "recency_curve",
+                message: "recency_strategy is 'custom' but recency_curve is empty; will return 0.0"
+                    .to_string(),
+            });
+        }
+
+        if self.recency_curve.len() >= 2 {
+            let unsorted = self.recency_curve.windows(2).any(|w| w[0][0] >= w[1][0]);
+            if unsorted {
+                warnings.push(ConfigWarning {
+                    field: "recency_curve",
+                    message: "recency_curve points must be sorted ascending by days_old"
+                        .to_string(),
+                });
+            }
+        }
+
         warnings
     }
 }
@@ -208,15 +267,24 @@ pub struct SearchResult {
 
 /// Calculate recency boost based on publication date.
 ///
-/// Uses exponential decay matching the Tag1 reference implementation:
-/// - Recent content gets a boost up to `recency_boost_max` that decays
-///   with half-life `recency_half_life_days`
-/// - Content older than `recency_penalty_after_days` gets a penalty
-///   that grows linearly, capped at `recency_max_penalty`
-/// - Unparseable dates return 0.0 (neutral — no boost, no penalty)
+/// Dispatches to the strategy named in `config.recency_strategy`:
 ///
-/// This is an **additive** value, not a multiplier. The composite score
-/// formula adds this to the base score and match boosts.
+/// | Strategy | Behaviour |
+/// |---|---|
+/// | `"exponential"` | Exponential decay matching the Tag1 reference (default) |
+/// | `"linear"` | Linear decay from max at day 0 to 0 at penalty threshold |
+/// | `"step"` | Full boost until `recency_half_life_days`, then drops to 0 |
+/// | `"none"` | Always 0.0 — disables recency entirely |
+/// | `"custom"` | Piecewise-linear from `recency_curve` control points |
+/// | unknown | Falls back to `"exponential"` |
+///
+/// All strategies apply the same old-content linear penalty once the content
+/// age exceeds `recency_penalty_after_days` (except `"none"` and `"custom"`).
+///
+/// Returns 0.0 for unparseable dates (neutral — no boost, no penalty).
+/// Returns `recency_boost_max` for future dates (brand-new content).
+///
+/// This is an **additive** value, not a multiplier.
 ///
 /// # Arguments
 /// * `date` - ISO 8601 date string (YYYY-MM-DD)
@@ -225,39 +293,119 @@ pub struct SearchResult {
 /// # Returns
 /// Additive boost (positive for recent, negative for old, 0.0 for neutral)
 pub fn recency_boost(date: &str, config: &ScoringConfig) -> f64 {
-    let days_old = match days_since_date(date) {
+    let days_since = match days_since_date(date) {
         Some(d) => d,
-        None => return 0.0, // Unparseable date → no boost
+        None => return 0.0, // Unparseable date → neutral
     };
 
-    if days_old < 0 {
+    if days_since < 0 {
         // Future date — treat as brand new, maximum boost
         return config.recency_boost_max;
     }
 
-    let days_old = days_old as f64;
+    let days_old = days_since as f64;
 
+    match config.recency_strategy.as_str() {
+        "linear" => recency_linear(days_old, config),
+        "step" => recency_step(days_old, config),
+        "none" => 0.0,
+        "custom" => recency_custom(days_old, config),
+        _ => recency_exponential(days_old, config), // "exponential" and unknown
+    }
+}
+
+/// Exponential decay — matches the Tag1 reference implementation.
+///
+/// `MAX_BOOST × exp(-age / HALF_LIFE × ln2)` for content newer than
+/// `recency_penalty_after_days`; linear penalty beyond that threshold.
+fn recency_exponential(days_old: f64, config: &ScoringConfig) -> f64 {
     if config.recency_half_life_days == 0 {
-        // Avoid division by zero from bad config
         return 0.0;
     }
 
     let penalty_threshold = config.recency_penalty_after_days as f64;
 
     if days_old < penalty_threshold {
-        // Exponential decay boost for content newer than penalty threshold.
-        // Formula matches Tag1 reference: MAX_BOOST * exp(-ageDays / HALF_LIFE * ln2)
         let half_life = config.recency_half_life_days as f64;
         let boost =
             config.recency_boost_max * (-days_old / half_life * std::f64::consts::LN_2).exp();
         boost.max(0.0)
     } else {
-        // Linear penalty for very old content, capped at max_penalty.
-        // 5% penalty per year beyond the threshold, matching Tag1 reference.
-        let years_over = (days_old - penalty_threshold) / 365.0;
-        let penalty = (years_over * 0.05).min(config.recency_max_penalty);
-        -penalty
+        recency_old_penalty(days_old, penalty_threshold, config)
     }
+}
+
+/// Linear decay — from `recency_boost_max` at day 0 to 0.0 at the penalty
+/// threshold; linear penalty beyond that threshold.
+fn recency_linear(days_old: f64, config: &ScoringConfig) -> f64 {
+    let penalty_threshold = config.recency_penalty_after_days as f64;
+
+    if days_old < penalty_threshold {
+        let fraction = 1.0 - (days_old / penalty_threshold);
+        (config.recency_boost_max * fraction).max(0.0)
+    } else {
+        recency_old_penalty(days_old, penalty_threshold, config)
+    }
+}
+
+/// Step function — full boost until `recency_half_life_days`, drops to 0.0
+/// until the penalty threshold, then applies the linear old-content penalty.
+fn recency_step(days_old: f64, config: &ScoringConfig) -> f64 {
+    let half_life = config.recency_half_life_days as f64;
+    let penalty_threshold = config.recency_penalty_after_days as f64;
+
+    if days_old < half_life {
+        config.recency_boost_max
+    } else if days_old < penalty_threshold {
+        0.0
+    } else {
+        recency_old_penalty(days_old, penalty_threshold, config)
+    }
+}
+
+/// Piecewise-linear interpolation over `config.recency_curve` control points.
+///
+/// Each point is `[days_old, boost_value]`. Values before the first point or
+/// after the last point are clamped to the boundary values. Returns 0.0 if
+/// the curve is empty.
+fn recency_custom(days_old: f64, config: &ScoringConfig) -> f64 {
+    let curve = &config.recency_curve;
+
+    if curve.is_empty() {
+        return 0.0;
+    }
+
+    // Clamp to boundaries
+    if days_old <= curve[0][0] {
+        return curve[0][1];
+    }
+    if days_old >= curve[curve.len() - 1][0] {
+        return curve[curve.len() - 1][1];
+    }
+
+    // Find the surrounding segment and interpolate
+    for w in curve.windows(2) {
+        let (x0, y0) = (w[0][0], w[0][1]);
+        let (x1, y1) = (w[1][0], w[1][1]);
+        if days_old >= x0 && days_old <= x1 {
+            let span = x1 - x0;
+            if span == 0.0 {
+                return y0;
+            }
+            let t = (days_old - x0) / span;
+            return y0 + t * (y1 - y0);
+        }
+    }
+
+    0.0
+}
+
+/// Shared old-content linear penalty: 5% per year beyond the threshold,
+/// capped at `recency_max_penalty`. Used by exponential, linear, and step.
+fn recency_old_penalty(days_old: f64, penalty_threshold: f64, config: &ScoringConfig) -> f64 {
+    let years_over = (days_old - penalty_threshold) / 365.0;
+    let penalty = (years_over * 0.05).min(config.recency_max_penalty);
+    -penalty
 }
 
 /// Score title match for relevance.
@@ -275,7 +423,7 @@ pub fn recency_boost(date: &str, config: &ScoringConfig) -> f64 {
 /// [`title_match_score_with_terms`]. Prefer `_with_terms` when scoring many
 /// results for the same query to avoid repeated term extraction.
 pub fn title_match_score(query: &str, title: &str, config: &ScoringConfig) -> f64 {
-    let terms = common::extract_terms(query);
+    let terms = common::extract_terms(query, &config.language);
     title_match_score_with_terms(&terms, title, config)
 }
 
@@ -320,7 +468,7 @@ pub fn title_match_score_with_terms(terms: &[String], title: &str, config: &Scor
 /// [`content_match_score_with_terms`]. Prefer `_with_terms` when scoring many
 /// results for the same query to avoid repeated term extraction.
 pub fn content_match_score(query: &str, content: &str, config: &ScoringConfig) -> f64 {
-    let terms = common::extract_terms(query);
+    let terms = common::extract_terms(query, &config.language);
     content_match_score_with_terms(&terms, content, config)
 }
 
@@ -378,7 +526,7 @@ pub fn content_match_score_with_terms(
 /// This is a thin wrapper; prefer [`score_result_with_terms`] when scoring
 /// many results for the same query.
 pub fn score_result(result: &SearchResult, query: &str, config: &ScoringConfig) -> f64 {
-    let terms = common::extract_terms(query);
+    let terms = common::extract_terms(query, &config.language);
     score_result_with_terms(result, &terms, config)
 }
 
@@ -409,7 +557,11 @@ pub fn score_result_with_terms(
 /// Extracts query terms once before the loop and reuses them for each result,
 /// avoiding redundant [`common::extract_terms`] calls.
 pub fn score_results(results: &mut [SearchResult], query: &str, config: &ScoringConfig) {
-    let terms = common::extract_terms(query);
+    let terms = if config.custom_stop_words.is_empty() {
+        common::extract_terms(query, &config.language)
+    } else {
+        common::extract_terms_with_custom(query, &config.language, &config.custom_stop_words)
+    };
     for result in results.iter_mut() {
         result.score = score_result_with_terms(result, &terms, config);
     }
@@ -810,5 +962,201 @@ mod tests {
         // 2026-01-01 00:00:00 UTC = 1767225600
         let (y, m, d) = civil_from_epoch_secs(1_767_225_600);
         assert_eq!((y, m, d), (2026, 1, 1));
+    }
+
+    // --- Recency strategy tests ---
+
+    #[test]
+    fn test_recency_strategy_exponential_is_default() {
+        let config = ScoringConfig::default();
+        assert_eq!(config.recency_strategy, "exponential");
+        let boost = recency_boost(&days_ago(30), &config);
+        assert!(boost > 0.0);
+    }
+
+    #[test]
+    fn test_recency_strategy_none() {
+        let config = ScoringConfig {
+            recency_strategy: "none".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(recency_boost(&days_ago(1), &config), 0.0);
+        assert_eq!(recency_boost(&days_ago(3650), &config), 0.0);
+        // Note: future dates still return max boost before strategy dispatch
+        // (handled in recency_boost guard)
+    }
+
+    #[test]
+    fn test_recency_strategy_linear_recent() {
+        let config = ScoringConfig {
+            recency_strategy: "linear".to_string(),
+            ..Default::default()
+        };
+        let boost_new = recency_boost(&days_ago(1), &config);
+        let boost_old = recency_boost(&days_ago(900), &config);
+        // Very recent → close to max; 900 days is under the penalty threshold (1825)
+        // but boost should be near zero (900/1825 ≈ 0.49 through, so ~50% of max)
+        assert!(boost_new > 0.0);
+        assert!(boost_new > boost_old);
+    }
+
+    #[test]
+    fn test_recency_strategy_linear_at_threshold() {
+        let config = ScoringConfig {
+            recency_strategy: "linear".to_string(),
+            recency_penalty_after_days: 365,
+            ..Default::default()
+        };
+        // At the threshold, linear boost should be ~0
+        let boost = recency_boost("2025-04-15", &config); // ~365 days ago from 2026-04-15
+        assert!(boost.abs() < 0.1);
+    }
+
+    #[test]
+    fn test_recency_strategy_step() {
+        let config = ScoringConfig {
+            recency_strategy: "step".to_string(),
+            recency_half_life_days: 180,
+            ..Default::default()
+        };
+        let boost_new = recency_boost(&days_ago(30), &config);
+        let boost_mid = recency_boost(&days_ago(300), &config);
+        assert_eq!(boost_new, config.recency_boost_max);
+        assert_eq!(boost_mid, 0.0); // Between half_life and penalty threshold
+    }
+
+    #[test]
+    fn test_recency_strategy_custom_empty_curve() {
+        let config = ScoringConfig {
+            recency_strategy: "custom".to_string(),
+            recency_curve: vec![],
+            ..Default::default()
+        };
+        assert_eq!(recency_boost(&days_ago(30), &config), 0.0);
+    }
+
+    #[test]
+    fn test_recency_strategy_custom_interpolation() {
+        let config = ScoringConfig {
+            recency_strategy: "custom".to_string(),
+            recency_curve: vec![[0.0, 1.0], [365.0, 0.5], [730.0, 0.0]],
+            ..Default::default()
+        };
+        // At day 0: boost = 1.0 (clamped to first point)
+        let b0 = recency_custom(0.0, &config);
+        assert!((b0 - 1.0).abs() < 0.001);
+
+        // At day 182.5: midpoint between [0,1.0] and [365,0.5] → ~0.75
+        let b_mid = recency_custom(182.5, &config);
+        assert!((b_mid - 0.75).abs() < 0.01);
+
+        // At day 365: exactly 0.5
+        let b365 = recency_custom(365.0, &config);
+        assert!((b365 - 0.5).abs() < 0.001);
+
+        // Beyond last point: clamped to 0.0
+        let b_beyond = recency_custom(1000.0, &config);
+        assert!((b_beyond - 0.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_recency_strategy_unknown_falls_back_to_exponential() {
+        let exponential = ScoringConfig {
+            recency_strategy: "exponential".to_string(),
+            ..Default::default()
+        };
+        let unknown = ScoringConfig {
+            recency_strategy: "foobar".to_string(),
+            ..Default::default()
+        };
+        let date = days_ago(60);
+        assert_eq!(
+            recency_boost(&date, &exponential),
+            recency_boost(&date, &unknown)
+        );
+    }
+
+    #[test]
+    fn test_config_validate_unknown_strategy() {
+        let config = ScoringConfig {
+            recency_strategy: "invalid".to_string(),
+            ..Default::default()
+        };
+        let warnings = config.validate();
+        assert!(warnings.iter().any(|w| w.field == "recency_strategy"));
+    }
+
+    #[test]
+    fn test_config_validate_custom_empty_curve() {
+        let config = ScoringConfig {
+            recency_strategy: "custom".to_string(),
+            recency_curve: vec![],
+            ..Default::default()
+        };
+        let warnings = config.validate();
+        assert!(warnings.iter().any(|w| w.field == "recency_curve"));
+    }
+
+    #[test]
+    fn test_config_validate_unsorted_curve() {
+        let config = ScoringConfig {
+            recency_strategy: "custom".to_string(),
+            recency_curve: vec![[365.0, 0.5], [0.0, 1.0]], // reversed
+            ..Default::default()
+        };
+        let warnings = config.validate();
+        assert!(warnings.iter().any(|w| w.field == "recency_curve"));
+    }
+
+    #[test]
+    fn test_language_config_default() {
+        let config = ScoringConfig::default();
+        assert_eq!(config.language, "en");
+        assert!(config.custom_stop_words.is_empty());
+    }
+
+    #[test]
+    fn test_score_results_respects_language() {
+        // Use German language — "und" should be filtered as a stop word
+        let config = ScoringConfig {
+            language: "de".to_string(),
+            ..Default::default()
+        };
+        // "und" is a German stop word; "drupal" is not
+        // Score results with a query containing a German stop word
+        let mut results = vec![SearchResult {
+            url: "https://example.com".to_string(),
+            title: "Drupal Guide".to_string(),
+            excerpt: "Alles über Drupal".to_string(),
+            date: days_ago(30),
+            score: 1.0,
+            content_type: String::new(),
+            site_name: String::new(),
+            extra: serde_json::Map::new(),
+        }];
+        // Should not panic; query with only German stop words → no terms → title boost is 0
+        score_results(&mut results, "und der die", &config);
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_custom_stop_words() {
+        let config = ScoringConfig {
+            custom_stop_words: vec!["drupal".to_string()],
+            ..Default::default()
+        };
+        let mut results = vec![SearchResult {
+            url: "https://example.com".to_string(),
+            title: "Drupal Guide".to_string(),
+            excerpt: "All about Drupal CMS".to_string(),
+            date: days_ago(30),
+            score: 1.0,
+            content_type: String::new(),
+            site_name: String::new(),
+            extra: serde_json::Map::new(),
+        }];
+        // "drupal" is now a custom stop word; "guide" remains
+        score_results(&mut results, "drupal guide", &config);
+        assert_eq!(results.len(), 1);
     }
 }

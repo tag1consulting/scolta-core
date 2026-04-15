@@ -7,15 +7,10 @@
 
 use crate::common;
 
-/// Parse an LLM response containing expansion terms.
+/// Parse an LLM response containing expansion terms, using English stop words.
 ///
-/// Handles multiple input formats with a fallback chain:
-/// 1. **Markdown-wrapped JSON**: `` ```json ["term1", "term2"] ``` ``
-/// 2. **Bare JSON array**: `["term1", "term2", "term3"]`
-/// 3. **Fallback**: Split by newlines/commas if JSON fails
-///
-/// All results are filtered through [`common::is_valid_term`] to remove
-/// stop words, very short strings, and pure numbers.
+/// This is a convenience wrapper for [`parse_expansion_with_language`] that
+/// defaults to English (`"en"`). Use it when no language context is available.
 ///
 /// # Arguments
 /// * `response` - Raw LLM response text
@@ -23,6 +18,27 @@ use crate::common;
 /// # Returns
 /// Vector of cleaned expansion terms (may be empty if everything was filtered)
 pub fn parse_expansion(response: &str) -> Vec<String> {
+    parse_expansion_with_language(response, "en")
+}
+
+/// Parse an LLM response containing expansion terms for the given language.
+///
+/// Handles multiple input formats with a fallback chain:
+/// 1. **Markdown-wrapped JSON**: `` ```json ["term1", "term2"] ``` ``
+/// 2. **Bare JSON array**: `["term1", "term2", "term3"]`
+/// 3. **Fallback**: Split by newlines/commas if JSON fails
+///
+/// All results are filtered through [`common::is_valid_term`] with the given
+/// language's stop word list to remove stop words, very short strings, and
+/// pure numbers.
+///
+/// # Arguments
+/// * `response` - Raw LLM response text
+/// * `language` - ISO 639-1 language code (e.g. `"en"`, `"de"`)
+///
+/// # Returns
+/// Vector of cleaned expansion terms (may be empty if everything was filtered)
+pub fn parse_expansion_with_language(response: &str, language: &str) -> Vec<String> {
     // Try to extract JSON from markdown code blocks first
     let json_text = extract_json_from_markdown(response).unwrap_or_else(|| response.to_string());
 
@@ -33,7 +49,7 @@ pub fn parse_expansion(response: &str) -> Vec<String> {
                 .iter()
                 .filter_map(|v| v.as_str())
                 .map(|s| s.trim().to_string())
-                .filter(|s| common::is_valid_term(s))
+                .filter(|s| common::is_valid_term(s, language))
                 .collect();
 
             // Return even if empty — the JSON was valid, so falling through
@@ -44,7 +60,7 @@ pub fn parse_expansion(response: &str) -> Vec<String> {
     }
 
     // Fallback: split by newlines and commas
-    fallback_parse(&json_text)
+    fallback_parse_with_language(&json_text, language)
 }
 
 /// Extract JSON content from markdown code blocks.
@@ -74,15 +90,15 @@ fn extract_json_from_markdown(text: &str) -> Option<String> {
     None
 }
 
-/// Fallback parsing when JSON fails.
+/// Fallback parsing when JSON fails, using the given language's stop words.
 ///
 /// Splits by newlines and commas, cleans whitespace and quotes.
-fn fallback_parse(text: &str) -> Vec<String> {
+fn fallback_parse_with_language(text: &str, language: &str) -> Vec<String> {
     text.split(['\n', ','])
         .map(|s| s.trim())
         .map(|s| s.trim_matches('"').trim_matches('\'').trim())
         .map(|s| s.to_string())
-        .filter(|s| common::is_valid_term(s))
+        .filter(|s| common::is_valid_term(s, language))
         .collect()
 }
 
@@ -175,19 +191,19 @@ mod tests {
 
     #[test]
     fn test_fallback_parse_newlines() {
-        let terms = fallback_parse("term1\nterm2\nterm3");
+        let terms = fallback_parse_with_language("term1\nterm2\nterm3", "en");
         assert_eq!(terms.len(), 3);
     }
 
     #[test]
     fn test_fallback_parse_commas() {
-        let terms = fallback_parse("term1, term2, term3");
+        let terms = fallback_parse_with_language("term1, term2, term3", "en");
         assert_eq!(terms.len(), 3);
     }
 
     #[test]
     fn test_fallback_parse_quoted() {
-        let terms = fallback_parse(r#""term1", "term2""#);
+        let terms = fallback_parse_with_language(r#""term1", "term2""#, "en");
         assert_eq!(terms.len(), 2);
         assert_eq!(terms[0], "term1");
         assert_eq!(terms[1], "term2");
@@ -199,5 +215,33 @@ mod tests {
         let terms = parse_expansion(response);
         assert_eq!(terms.len(), 3);
         assert_eq!(terms[0], "term1");
+    }
+
+    #[test]
+    fn test_parse_expansion_with_language_de() {
+        // "und" is a German stop word, "drupal" is not
+        let response = r#"["und", "drupal", "suche"]"#;
+        let terms = parse_expansion_with_language(response, "de");
+        assert!(!terms.contains(&"und".to_string()));
+        assert!(terms.contains(&"drupal".to_string()));
+        assert!(terms.contains(&"suche".to_string()));
+    }
+
+    #[test]
+    fn test_parse_expansion_with_language_en_same_as_default() {
+        let response = r#"["the", "search", "engine"]"#;
+        let en_terms = parse_expansion_with_language(response, "en");
+        let default_terms = parse_expansion(response);
+        assert_eq!(en_terms, default_terms);
+    }
+
+    #[test]
+    fn test_parse_expansion_unknown_lang_keeps_english_stop_words_as_terms() {
+        // For unknown language, English stop words are NOT filtered
+        let response = r#"["the", "search"]"#;
+        let terms = parse_expansion_with_language(response, "xx");
+        // "the" is 3 chars, not a stop word for unknown language → included
+        assert!(terms.contains(&"the".to_string()));
+        assert!(terms.contains(&"search".to_string()));
     }
 }

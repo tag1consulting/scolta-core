@@ -23,6 +23,7 @@ pub mod error;
 pub mod expansion;
 pub mod prompts;
 pub mod scoring;
+pub mod stop_words;
 
 use error::ScoltaError;
 use serde_json::json;
@@ -30,7 +31,7 @@ use serde_json::json;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// WASM interface version — tracks binary compatibility.
-pub const WASM_INTERFACE_VERSION: u32 = 2;
+pub const WASM_INTERFACE_VERSION: u32 = 3;
 
 // ---------------------------------------------------------------------------
 // Inner functions: plain Rust, callable from tests and browser exports.
@@ -154,9 +155,105 @@ pub mod inner {
         serde_json::to_value(&merged).map_err(|e| ScoltaError::parse_error("merge_results", e))
     }
 
-    /// Parse an LLM expansion response into a term array.
+    /// Parse an LLM expansion response into a term array (defaults to English).
+    ///
+    /// Also accepts a JSON object `{ "text": "...", "language": "fr" }` to
+    /// specify a language for stop word filtering.
     pub fn parse_expansion(input: &str) -> Vec<String> {
+        // Support JSON object form: { "text": "...", "language": "fr" }
+        if let Ok(obj) = serde_json::from_str::<serde_json::Value>(input) {
+            if let Some(map) = obj.as_object() {
+                if let Some(text) = map.get("text").and_then(|v| v.as_str()) {
+                    let language = map.get("language").and_then(|v| v.as_str()).unwrap_or("en");
+                    return expansion::parse_expansion_with_language(text, language);
+                }
+            }
+        }
+        // Bare string form — default to English
         expansion::parse_expansion(input)
+    }
+
+    /// Parse an LLM expansion response with an explicit language for stop word
+    /// filtering.
+    pub fn parse_expansion_with_language(input: &str, language: &str) -> Vec<String> {
+        expansion::parse_expansion_with_language(input, language)
+    }
+
+    /// Score multiple queries against their respective result sets.
+    ///
+    /// Input shape:
+    /// ```json
+    /// {
+    ///   "queries": [
+    ///     { "query": "...", "results": [...], "config": {...} }
+    ///   ],
+    ///   "default_config": { ... }
+    /// }
+    /// ```
+    ///
+    /// Per-query `"config"` is merged on top of `"default_config"`. Returns
+    /// an array of arrays — one scored result array per input query, in the
+    /// same order as the input.
+    pub fn batch_score_results(
+        input: &serde_json::Value,
+    ) -> Result<serde_json::Value, ScoltaError> {
+        let obj = input.as_object().ok_or(ScoltaError::invalid_json(
+            "batch_score_results",
+            "expected JSON object",
+        ))?;
+
+        let queries = obj
+            .get("queries")
+            .and_then(|v| v.as_array())
+            .ok_or(ScoltaError::missing_field("batch_score_results", "queries"))?;
+
+        let empty_obj = serde_json::json!({});
+        let default_config_json = obj.get("default_config").unwrap_or(&empty_obj);
+
+        let mut batch_results: Vec<serde_json::Value> = Vec::with_capacity(queries.len());
+
+        for (i, query_entry) in queries.iter().enumerate() {
+            let qobj = query_entry.as_object().ok_or_else(|| {
+                ScoltaError::parse_error(
+                    "batch_score_results",
+                    format!("queries[{}] expected object", i),
+                )
+            })?;
+
+            let query = qobj.get("query").and_then(|v| v.as_str()).ok_or_else(|| {
+                ScoltaError::parse_error(
+                    "batch_score_results",
+                    format!("queries[{}].query is required", i),
+                )
+            })?;
+
+            let results_json = qobj.get("results").ok_or_else(|| {
+                ScoltaError::parse_error(
+                    "batch_score_results",
+                    format!("queries[{}].results is required", i),
+                )
+            })?;
+
+            let mut results: Vec<scoring::SearchResult> =
+                serde_json::from_value(results_json.clone()).map_err(|e| {
+                    ScoltaError::parse_error(
+                        "batch_score_results",
+                        format!("queries[{}].results: {}", i, e),
+                    )
+                })?;
+
+            // Per-query config overrides default_config
+            let config_json = qobj.get("config").unwrap_or(default_config_json);
+            let cfg = config::from_json(config_json);
+
+            scoring::score_results(&mut results, query, &cfg);
+
+            let scored = serde_json::to_value(&results)
+                .map_err(|e| ScoltaError::parse_error("batch_score_results", e))?;
+            batch_results.push(scored);
+        }
+
+        Ok(serde_json::Value::Array(batch_results))
     }
 
     /// Get the crate version string.
@@ -220,6 +317,13 @@ pub mod inner {
                     "stability": "stable",
                     "input_type": "none",
                     "output_type": "string"
+                },
+                "batch_score_results": {
+                    "description": "Score multiple queries in a single call; returns array of scored result arrays",
+                    "since": "0.2.2",
+                    "stability": "experimental",
+                    "input_type": "json",
+                    "output_type": "json"
                 },
                 "describe": {
                     "description": "Describe all exported functions",
@@ -302,6 +406,8 @@ mod tests {
         assert_eq!(result["RECENCY_BOOST_MAX"], 0.8);
         assert_eq!(result["AI_EXPAND_QUERY"], false);
         assert_eq!(result["RECENCY_HALF_LIFE_DAYS"], 365);
+        assert_eq!(result["LANGUAGE"], "en");
+        assert_eq!(result["RECENCY_STRATEGY"], "exponential");
     }
 
     #[test]
@@ -357,12 +463,90 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_expansion_object_form() {
+        // JSON object form dispatches to parse_expansion_with_language
+        let terms =
+            inner::parse_expansion(r#"{"text": "[\"und\", \"drupal\"]", "language": "de"}"#);
+        assert!(!terms.contains(&"und".to_string()));
+        assert!(terms.contains(&"drupal".to_string()));
+    }
+
+    #[test]
+    fn test_batch_score_results_basic() {
+        let input = json!({
+            "queries": [
+                {
+                    "query": "drupal",
+                    "results": [
+                        {"url": "https://a.com", "title": "Drupal Guide", "excerpt": "About Drupal", "date": "2026-01-01"},
+                        {"url": "https://b.com", "title": "Other Page", "excerpt": "Unrelated", "date": "2026-01-01"}
+                    ]
+                }
+            ]
+        });
+        let result = inner::batch_score_results(&input).unwrap();
+        let arr = result.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        let first_batch = arr[0].as_array().unwrap();
+        assert_eq!(first_batch.len(), 2);
+        assert_eq!(first_batch[0]["url"], "https://a.com");
+    }
+
+    #[test]
+    fn test_batch_score_results_multiple_queries() {
+        let input = json!({
+            "queries": [
+                {
+                    "query": "rust",
+                    "results": [{"url": "https://a.com", "title": "Rust Guide", "excerpt": "Rust language", "date": "2026-01-01"}]
+                },
+                {
+                    "query": "python",
+                    "results": [{"url": "https://b.com", "title": "Python Docs", "excerpt": "Python language", "date": "2026-01-01"}]
+                }
+            ]
+        });
+        let result = inner::batch_score_results(&input).unwrap();
+        let arr = result.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+    }
+
+    #[test]
+    fn test_batch_score_results_per_query_config() {
+        let input = json!({
+            "queries": [{
+                "query": "test",
+                "results": [{"url": "https://a.com", "title": "Test", "excerpt": "testing", "date": "2026-01-01"}],
+                "config": {"language": "de"}
+            }],
+            "default_config": {"language": "en"}
+        });
+        let result = inner::batch_score_results(&input).unwrap();
+        assert_eq!(result.as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_batch_score_results_empty_queries() {
+        let input = json!({"queries": []});
+        let result = inner::batch_score_results(&input).unwrap();
+        assert_eq!(result.as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_batch_score_results_missing_queries() {
+        let input = json!({});
+        assert!(inner::batch_score_results(&input).is_err());
+    }
+
+    #[test]
     fn test_describe() {
         let desc = inner::describe();
         assert_eq!(desc["name"], "scolta-core");
         assert_eq!(desc["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(desc["wasm_interface_version"], 3);
         let functions = desc["functions"].as_object().unwrap();
         assert!(functions.contains_key("score_results"));
+        assert!(functions.contains_key("batch_score_results"));
         assert!(functions.contains_key("describe"));
         assert!(!functions.contains_key("clean_html"));
         assert!(!functions.contains_key("debug_call"));
