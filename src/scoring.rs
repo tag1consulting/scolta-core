@@ -284,11 +284,7 @@ pub fn title_match_score(query: &str, title: &str, config: &ScoringConfig) -> f6
 /// Same logic as [`title_match_score`] but takes terms that have already been
 /// extracted by [`common::extract_terms`]. Use this when scoring many results
 /// against the same query to avoid extracting terms on every call.
-pub fn title_match_score_with_terms(
-    terms: &[String],
-    title: &str,
-    config: &ScoringConfig,
-) -> f64 {
+pub fn title_match_score_with_terms(terms: &[String], title: &str, config: &ScoringConfig) -> f64 {
     if terms.is_empty() {
         return 0.0;
     }
@@ -556,8 +552,16 @@ pub fn civil_from_epoch_secs(secs: u64) -> (i32, i32, i32) {
 /// `today()` (which uses `civil_from_epoch_secs`) are consistent inverses
 /// of each other — no approximation error accumulates.
 fn date_to_days(year: i32, month: i32, day: i32) -> i32 {
-    let y = if month <= 2 { year as i64 - 1 } else { year as i64 };
-    let m = if month <= 2 { month as i64 + 9 } else { month as i64 - 3 };
+    let y = if month <= 2 {
+        year as i64 - 1
+    } else {
+        year as i64
+    };
+    let m = if month <= 2 {
+        month as i64 + 9
+    } else {
+        month as i64 - 3
+    };
     let era = if y >= 0 { y } else { y - 399 } / 400;
     let yoe = (y - era * 400) as u32;
     let doy = (153 * m as u32 + 2) / 5 + day as u32 - 1;
