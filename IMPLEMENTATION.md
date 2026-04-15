@@ -1,18 +1,18 @@
 # Scolta Core - Implementation Summary
 
-Complete Rust WebAssembly crate for the Scolta search engine core, replacing PHP scolta-php library logic with cross-platform WASM module via Extism PDK.
+Complete Rust WebAssembly crate for the Scolta search engine core. Provides client-side search scoring, prompt management, and query expansion via wasm-bindgen.
 
 ## Project Structure
 
 ```
 scolta-core/
-├── Cargo.toml              # Package manifest (edition 2021, extism-pdk 1.2)
+├── Cargo.toml              # Package manifest (edition 2021, wasm-bindgen 0.2)
 ├── rustfmt.toml            # Formatting config (edition 2021)
 ├── README.md               # Usage and build instructions
 ├── API.md                  # Complete API reference with language-specific guides
 ├── IMPLEMENTATION.md       # This file
 ├── src/
-│   ├── lib.rs              # 11 Extism plugin functions + inner module + orchestration
+│   ├── lib.rs              # inner module + orchestration (plain Rust, tested without WASM)
 │   ├── common.rs           # Shared stop words, term extraction, validation
 │   ├── error.rs            # Typed error enum (ScoltaError) with function attribution
 │   ├── prompts.rs          # Prompt templates and resolution
@@ -33,14 +33,14 @@ scolta-core/
 
 ### Cargo.toml
 - Package name: `scolta-core`
-- Version: `0.1.0`
+- Version: `0.2.1-dev`
 - Edition: `2021`
-- Library type: `cdylib` (WebAssembly module)
+- Library type: `cdylib` + `rlib` (WASM module + library)
 - Dependencies:
-  - `extism-pdk = "1.2"` - Extism plugin framework
+  - `wasm-bindgen = "0.2"` - WASM/JavaScript interop
+  - `js-sys = "0.3"` - JavaScript type bindings
   - `serde = "1"` - Serialization with derive support
   - `serde_json = "1"` - JSON support
-  - `regex = "1"` - Pattern matching for HTML processing
 - Release profile: Optimized for size and strip symbols
 
 ### rustfmt.toml
@@ -48,10 +48,13 @@ Minimal formatting enforcement:
 - Edition: `2021`
 - Uses cargo fmt defaults for all other settings
 
-### src/lib.rs
-Core plugin entry point exporting 11 Extism functions via `#[plugin_fn]`, with an `inner` module containing plain Rust equivalents for testing and `debug_call`. All inner functions return `Result<T, ScoltaError>` (typed errors with function attribution).
+### src/browser.rs
+8 browser WASM exports via `#[wasm_bindgen]` — thin serialization wrappers over `inner::` functions. Delegates all logic to `inner::`.
 
-#### Plugin Functions (Extism-compatible)
+### src/lib.rs
+`inner` module with plain Rust implementations, callable from browser exports and unit tests. All inner functions return `Result<T, ScoltaError>` (typed errors with function attribution).
+
+#### Browser WASM Exports (wasm-bindgen)
 1. `resolve_prompt(json) -> string`
    - Input: `{prompt_name, site_name, site_description}`
    - Returns: Resolved template with placeholders replaced
@@ -90,11 +93,8 @@ Core plugin entry point exporting 11 Extism functions via `#[plugin_fn]`, with a
 10. `describe() -> json`
     - Returns: Machine-readable catalog of all exported functions
 
-11. `debug_call(json) -> json`
-    - Input: `{function: string, input: string}`
-    - Wraps any plugin function with timing/size metrics
-    - Output: `{output, error, time_us, input_size, output_size}`
-    - `output` is null on error; `error` is null on success
+Not exported to browser WASM:
+- `debug_call(json) -> json` — server-side profiling wrapper (timing/size metrics)
 
 ### src/common.rs
 Shared constants and utilities — single source of truth for stop words and term validation. Both `scoring` and `expansion` import from here.
@@ -428,10 +428,10 @@ cargo test --release
 
 ### WebAssembly Build
 ```bash
-cargo build --target wasm32-wasip1 --release
+wasm-pack build --target web --release
 ```
 
-Output: `target/wasm32-wasip1/release/scolta_core.wasm`
+Output: `pkg/scolta_core_bg.wasm`, `pkg/scolta_core.js`, `pkg/scolta_core.d.ts`
 
 ### Formatting
 ```bash
@@ -455,13 +455,12 @@ Uses default Rust formatting (4 spaces, 100 char line limit where possible)
 
 ## Dependencies
 
-- **extism-pdk 1.2** - 1.2MB (plugin framework)
+- **wasm-bindgen 0.2** - WASM/JavaScript interop
+- **js-sys 0.3** - JavaScript type bindings
 - **serde 1.0** - ~100KB (serialization)
 - **serde_json 1.0** - ~50KB (JSON)
-- **regex 1.0** - ~250KB (pattern matching)
 
-Total uncompressed: ~1.4MB
-Typical WASM binary size: ~500KB (after strip and LTO)
+Typical WASM binary size: under 500KB (after strip and LTO)
 
 ## Future Enhancements
 
@@ -477,9 +476,8 @@ Typical WASM binary size: ~500KB (after strip and LTO)
 ## Compatibility
 
 - **Rust**: 1.70+ (2021 edition)
-- **Target**: `wasm32-wasip1` (WASI Preview 1)
-- **Extism**: 1.0.0+
-- **JavaScript**: ES2020+ (for JSON handling in frontend)
+- **Target**: `wasm32-unknown-unknown` (via wasm-pack)
+- **JavaScript**: ES2020+ (for ES module imports)
 
 ## License
 

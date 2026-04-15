@@ -59,7 +59,7 @@ The version in the repo is always either a tagged release (`0.2.0`) or a dev pre
 
 ## Architecture
 
-- `#[plugin_fn]` functions are thin Extism wrappers — keep logic in `inner::` module.
+- `#[wasm_bindgen]` functions in browser.rs are thin wrappers over inner:: functions in lib.rs.
 - `inner::` functions are the testable API surface.
 - `describe()` is the single source of truth for the function manifest.
 

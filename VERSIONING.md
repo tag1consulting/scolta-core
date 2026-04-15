@@ -153,8 +153,8 @@ In Rust, the same information lives in doc comments and Rust's native `#[depreca
 /// # Stability
 /// - **Status:** stable
 /// - **Since:** 1.0.0
-#[extism_pdk::plugin_fn]
-pub fn score_results(input: String) -> String { ... }
+#[wasm_bindgen]
+pub fn score_results(input: &str) -> Result<String, JsError> { ... }
 ```
 
 **At runtime:** scolta-core exposes a `describe()` function that returns a machine-readable manifest of every exported function, its lifecycle state, when it was introduced, and (if deprecated) when it will be removed:
