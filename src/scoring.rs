@@ -545,12 +545,24 @@ pub fn civil_from_epoch_secs(secs: u64) -> (i32, i32, i32) {
     (y as i32, m as i32, d as i32)
 }
 
-/// Convert a date to an approximate day number for comparison.
+/// Convert a calendar date to a day number using Howard Hinnant's
+/// `days_from_civil` algorithm.
 ///
-/// Uses 365 days/year and 30 days/month. Not calendar-accurate, but
-/// consistent across platforms — which is the point.
+/// This is the inverse of [`civil_from_epoch_secs`]: it maps a proleptic
+/// Gregorian calendar date to the number of days since 1970-01-01 (Unix
+/// epoch). Handles leap years and month-length differences exactly.
+///
+/// Using the Hinnant algorithm here ensures that `days_since_date()` and
+/// `today()` (which uses `civil_from_epoch_secs`) are consistent inverses
+/// of each other — no approximation error accumulates.
 fn date_to_days(year: i32, month: i32, day: i32) -> i32 {
-    year * 365 + (month - 1) * 30 + day
+    let y = if month <= 2 { year as i64 - 1 } else { year as i64 };
+    let m = if month <= 2 { month as i64 + 9 } else { month as i64 - 3 };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = (y - era * 400) as u32;
+    let doy = (153 * m as u32 + 2) / 5 + day as u32 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    (era * 146097 + doe as i64 - 719468) as i32
 }
 
 /// Calculate days elapsed since a date string.
