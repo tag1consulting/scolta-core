@@ -4,7 +4,7 @@ All notable changes to scolta-core will be documented in this file.
 
 This project uses [Semantic Versioning](https://semver.org/). Major versions are synchronized across all Scolta packages.
 
-## [0.2.2] - Unreleased
+## [0.2.2] - 2026-04-16
 
 ### Added
 
