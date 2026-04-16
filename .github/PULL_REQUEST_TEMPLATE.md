@@ -16,7 +16,7 @@
 - [ ] My code follows the project's coding standards
 - [ ] I have added tests that prove my fix/feature works
 - [ ] All existing tests pass (`cargo test`)
-- [ ] WASM build succeeds (`cargo build --target wasm32-wasip1 --release`)
+- [ ] WASM build succeeds (`wasm-pack build --target web --release`)
 - [ ] I have updated CHANGELOG.md with a summary of my changes
 - [ ] New public functions have `since` and `stability` fields in `describe()`
 - [ ] No stable function signatures were changed

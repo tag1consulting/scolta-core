@@ -559,4 +559,17 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn readme_does_not_reference_old_build_target() {
+        let readme = std::fs::read_to_string("README.md").expect("README.md should exist");
+        assert!(
+            !readme.contains("wasm32-wasip1"),
+            "README.md references old build target wasm32-wasip1. Current target is wasm32-unknown-unknown."
+        );
+        assert!(
+            !readme.contains("extism"),
+            "README.md references removed Extism dependency."
+        );
+    }
 }

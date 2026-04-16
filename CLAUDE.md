@@ -53,7 +53,7 @@ The version in the repo is always either a tagged release (`0.2.0`) or a dev pre
 ## Testing
 
 - Run tests with: `cargo test` (requires temporary crate-type switch for native tests).
-- WASM compilation check: `cargo check --target wasm32-wasip1`.
+- WASM compilation check: `cargo check --target wasm32-unknown-unknown`.
 - All new functions MUST have corresponding tests in `tests/integration.rs`.
 - Pagefind integration tests require `npx pagefind` to be available.
 

@@ -36,7 +36,7 @@ The platform adapters ship a pre-built copy of these files. Build from source on
 
 ```bash
 cargo test                          # unit + integration tests
-cargo check --target wasm32-wasip1  # confirm WASM compilation
+cargo check --target wasm32-unknown-unknown  # confirm WASM compilation
 ```
 
 All tests pass with no native runtime dependencies.
