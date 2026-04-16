@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/tag1consulting/scolta-core/actions/workflows/ci.yml/badge.svg)](https://github.com/tag1consulting/scolta-core/actions/workflows/ci.yml)
 
-Scolta is a browser-side search engine: the index lives in static files, scoring runs in the browser via WebAssembly, and an optional AI layer handles query expansion and summarization. No search server required. "Scolta" is Italian for "lookout" — someone watching for what matters.
+Scolta is a browser-side search engine: the index lives in static files, scoring runs in the browser via WebAssembly, and an optional AI layer handles query expansion and summarization. No search server required. "Scolta" is archaic Italian for sentinel — someone watching for what matters.
 
 This crate is the WebAssembly core. It compiles to a browser WASM module that platform adapters (WordPress, Drupal, Laravel) load to run scoring, prompt resolution, and result merging client-side.
 
