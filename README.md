@@ -78,19 +78,18 @@ Stop word changes affect both this crate and the PHP indexer in scolta-php. Run 
 ## Architecture
 
 ```text
-browser.rs      #[wasm_bindgen] exports — thin wrappers over lib.rs inner functions
-lib.rs          Inner functions (testable API surface)
-scoring.rs      Search result scoring (recency decay, title/content boost, result merging)
-expansion.rs    LLM expansion response parsing (JSON, markdown, plaintext fallback)
-prompts.rs      Prompt template constants and variable resolution
-html.rs         HTML cleaning and Pagefind-compatible HTML generation (build-time only)
-config.rs       ScoringConfig parsing, validation, JS export
+browser.rs      WASM entry points (wasm_bindgen exports)
 common.rs       Stop words, term extraction (single source of truth)
-debug.rs        Performance measurement utilities (server-side only)
+config.rs       ScoringConfig deserialization and validation
 error.rs        Typed error enum with function-name attribution
+expansion.rs    AI expansion response parsing
+lib.rs          Public API, describe() function catalog
+prompts.rs      Prompt template resolution
+scoring.rs      Scoring algorithms and recency strategies
+stop_words.rs   Language-specific stop word lists (30 languages)
 ```
 
-**Browser WASM exports (8 functions):** `resolve_prompt`, `get_prompt`, `score_results`, `merge_results`, `to_js_scoring_config`, `parse_expansion`, `version`, `describe`.
+**Browser WASM exports (9 functions):** `resolve_prompt`, `get_prompt`, `score_results`, `batch_score_results`, `merge_results`, `to_js_scoring_config`, `parse_expansion`, `version`, `describe`.
 
 **Server-only functions (not in browser bundle):** `clean_html`, `build_pagefind_html`, `debug_call`.
 
@@ -99,21 +98,17 @@ error.rs        Typed error enum with function-name attribution
 ## Testing
 
 ```bash
-cargo test                       # all tests
-cargo test --test integration    # integration tests only
+cargo test                       # all unit tests
+cargo clippy -- -D warnings      # lint
+cargo fmt --check                # formatting
 ```
-
-Test fixtures in `tests/fixtures/`:
-- `drupal-page.html` — sample Drupal page
-- `wordpress-post.html` — sample WordPress post
-- `expected-clean.txt` — expected output after HTML cleaning
 
 Adding a new public function requires:
 
 - An inner function in `lib.rs`
 - A `#[wasm_bindgen]` export in `browser.rs`
 - An entry in `describe()` with `since` and `stability` fields
-- A test in `tests/integration.rs`
+- Unit tests in the `#[cfg(test)]` block in `lib.rs`
 
 ## License
 
