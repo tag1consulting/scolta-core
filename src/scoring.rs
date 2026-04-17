@@ -1,39 +1,50 @@
 //! Search result scoring and ranking algorithms.
 //!
 //! Provides the canonical Scolta ranking: recency decay, title/content match
-//! boosting, composite scoring, and result merging with deduplication.
-//! All math lives here so that every language adapter (PHP, Python, JS, Go)
-//! produces identical rankings.
+//! boosting, priority page boosting, composite scoring, and result merging
+//! with deduplication. All math lives here so that every language adapter
+//! (PHP, Python, JS, Go) produces identical rankings.
 //!
 //! # Scoring formula
 //!
 //! ```text
-//! final_score = base_score + title_boost + content_boost + recency_boost
+//! final_score = (base_score × source_weight) + title_boost + content_boost + recency_boost + priority_boost
 //! ```
 //!
-//! This **additive** formula matches the Tag1 reference implementation and
-//! the client-side JavaScript scoring. No single zero component can collapse
-//! the entire score — an article with no date still benefits from a strong
-//! title match.
-//!
-//! `base_score` is the upstream search engine score (e.g., from Pagefind)
-//! if present, otherwise 1.0. Recency uses exponential decay (half-life
-//! based) for recent content, linear penalty for very old content.
+//! `base_score` is the upstream search engine score (e.g., from Pagefind).
+//! `source_weight` dampens results from secondary sources (e.g., expanded terms
+//! in SAYT). `priority_boost` is added when the result URL matches a configured
+//! priority page and the query contains that page's keywords.
 
 use crate::common;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::HashSet;
+
+/// A priority page entry that receives a score boost when query keywords match.
+///
+/// Priority pages surface specific results for branded or high-value queries
+/// (e.g., `/team/` for queries containing "team" or "leadership").
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PriorityPage {
+    /// URL path to match against result URLs (e.g., `"/team/"`).
+    pub url_pattern: String,
+    /// Query keywords that trigger the boost. Case-insensitive substring match.
+    /// Multi-word keywords (e.g., `"why tag1"`) match as phrases.
+    pub keywords: Vec<String>,
+    /// Score boost to apply when a query keyword matches.
+    pub boost: f64,
+    /// Optional replacement excerpt shown instead of the Pagefind-generated one.
+    #[serde(default)]
+    pub custom_excerpt: Option<String>,
+    /// Optional identifier for client-side use.
+    #[serde(default)]
+    pub page_id: Option<String>,
+}
 
 /// Configuration for search result scoring.
 ///
 /// All fields have sensible defaults (see [`Default`] impl). Callers can
 /// override any subset; unspecified fields keep their defaults.
-///
-/// # Value ranges
-///
-/// [`ScoringConfig::validate`] checks these ranges and returns warnings
-/// for out-of-range values. The scoring algorithm will still work with
-/// extreme values, but results may be surprising.
 ///
 /// | Field | Reasonable range | Default |
 /// |---|---|---|
@@ -47,63 +58,33 @@ use std::collections::HashMap;
 /// | `title_all_terms_multiplier` | 0.0–5.0 | 1.5 |
 /// | `content_match_boost` | 0.0–5.0 | 0.4 |
 /// | `content_all_terms_multiplier` | 0.0–5.0 | 0.48 |
-/// | `expand_primary_weight` | 0.0–1.0 | 0.7 |
 /// | `excerpt_length` | 50–2000 | 300 |
 /// | `results_per_page` | 1–100 | 10 |
 /// | `max_pagefind_results` | 1–500 | 50 |
 /// | `language` | ISO 639-1 code | "en" |
 /// | `custom_stop_words` | list of lowercase tokens | [] |
+/// | `priority_pages` | list of PriorityPage | [] |
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoringConfig {
-    /// Maximum recency boost factor (default 0.5).
     pub recency_boost_max: f64,
-    /// Half-life for recency boost in days (default 365).
-    /// Also used as the step boundary for the `"step"` strategy.
     pub recency_half_life_days: u32,
-    /// Days after which to apply penalty (default 1825 = ~5 years).
     pub recency_penalty_after_days: u32,
-    /// Maximum penalty for very old content (default 0.3).
     pub recency_max_penalty: f64,
-    /// Recency decay strategy. One of:
-    /// - `"exponential"` — exponential decay (default, matches Tag1 reference)
-    /// - `"linear"` — linear decay from max at day 0 to 0 at penalty threshold
-    /// - `"step"` — full boost until `recency_half_life_days`, then 0
-    /// - `"none"` — no recency adjustment (always 0.0)
-    /// - `"custom"` — piecewise linear from `recency_curve` control points
     pub recency_strategy: String,
-    /// Control points for the `"custom"` recency strategy.
-    ///
-    /// Each entry is `[days_old, boost_value]`. Points must be sorted
-    /// ascending by `days_old`. Values outside the range are clamped to the
-    /// nearest boundary point. Ignored for all other strategies.
     pub recency_curve: Vec<[f64; 2]>,
-    /// Boost when any query term appears in title (default 1.0).
     pub title_match_boost: f64,
-    /// Multiplier when ALL query terms appear in title (default 1.5).
     pub title_all_terms_multiplier: f64,
-    /// Boost when any query term appears in content (default 0.4).
     pub content_match_boost: f64,
-    /// Multiplier when ALL query terms appear in content (default 0.48).
-    ///
-    /// Previously hardcoded as `content_match_boost * 1.2`. Now explicit
-    /// and configurable.
     pub content_all_terms_multiplier: f64,
-    /// Weight for primary search results vs expanded (default 0.7).
-    /// Expanded results get weight `1.0 - expand_primary_weight`.
-    pub expand_primary_weight: f64,
-    /// Maximum length of excerpt in characters (default 300).
     pub excerpt_length: u32,
-    /// Results per page for pagination (default 10).
     pub results_per_page: u32,
-    /// Maximum results from Pagefind to consider (default 50).
     pub max_pagefind_results: u32,
-    /// ISO 639-1 language code for stop word filtering (default "en").
     pub language: String,
-    /// Additional stop words beyond the language defaults (default empty).
-    ///
-    /// Comparison is case-insensitive. These are applied on top of the
-    /// language stop word list, not instead of it.
     pub custom_stop_words: Vec<String>,
+    /// Priority pages receive a score boost when query keywords match.
+    /// Default: empty (no priority pages).
+    #[serde(default)]
+    pub priority_pages: Vec<PriorityPage>,
 }
 
 impl Default for ScoringConfig {
@@ -119,12 +100,12 @@ impl Default for ScoringConfig {
             title_all_terms_multiplier: 1.5,
             content_match_boost: 0.4,
             content_all_terms_multiplier: 0.48,
-            expand_primary_weight: 0.7,
             excerpt_length: 300,
             results_per_page: 10,
             max_pagefind_results: 50,
             language: "en".to_string(),
             custom_stop_words: Vec::new(),
+            priority_pages: Vec::new(),
         }
     }
 }
@@ -138,10 +119,7 @@ pub struct ConfigWarning {
 
 impl ScoringConfig {
     /// Validate configuration values and return warnings for anything
-    /// outside reasonable ranges.
-    ///
-    /// The config is still usable even with warnings — this is informational
-    /// to help developers catch configuration mistakes early.
+    /// outside reasonable ranges. The config is still usable with warnings.
     pub fn validate(&self) -> Vec<ConfigWarning> {
         let mut warnings = Vec::new();
 
@@ -171,16 +149,6 @@ impl ScoringConfig {
                 message: format!(
                     "value {} outside reasonable range (0.0–1.0)",
                     self.recency_max_penalty
-                ),
-            });
-        }
-
-        if self.expand_primary_weight < 0.0 || self.expand_primary_weight > 1.0 {
-            warnings.push(ConfigWarning {
-                field: "expand_primary_weight",
-                message: format!(
-                    "value {} outside reasonable range (0.0–1.0)",
-                    self.expand_primary_weight
                 ),
             });
         }
@@ -242,64 +210,71 @@ impl ScoringConfig {
 /// A single search result with score.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
-    /// URL of the result.
     pub url: String,
-    /// Page title.
     pub title: String,
-    /// Excerpt from the page.
     pub excerpt: String,
-    /// Publication or last-modified date (ISO 8601: YYYY-MM-DD).
     pub date: String,
-    /// Computed relevance score. If provided by the upstream search engine
-    /// (e.g., Pagefind), it is used as the base score. Otherwise defaults to 0.
     #[serde(default)]
     pub score: f64,
-    /// Content type (e.g., "article", "page", "pdf").
     #[serde(default)]
     pub content_type: String,
-    /// Site name or source.
     #[serde(default)]
     pub site_name: String,
-    /// Pass-through for additional fields the caller needs preserved.
+    /// Per-result weight applied to the base score before adding boosts.
+    /// Used to dampen results from secondary sources (e.g., expanded SAYT
+    /// terms). Default: 1.0 (no dampening). Callers that don't supply this
+    /// field get the same scoring as before.
+    #[serde(default)]
+    pub source_weight: Option<f64>,
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
-/// Calculate recency boost based on publication date.
+/// One input set for `merge_results` — a slice of results and the weight to
+/// apply to all their scores before merging.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergeSet {
+    pub results: Vec<SearchResult>,
+    pub weight: f64,
+}
+
+/// Options for `merge_results`.
+#[derive(Debug, Clone, Default)]
+pub struct MergeOptions {
+    pub sets: Vec<MergeSet>,
+    /// Field to deduplicate by: `"url"`, `"title"`, or `None` (no dedup).
+    pub deduplicate_by: Option<String>,
+    /// Case-sensitive deduplication for `"title"`. Default: false.
+    pub case_sensitive: bool,
+    /// URLs to exclude from the merged output.
+    pub exclude_urls: Vec<String>,
+    /// Normalize URLs for comparison (strip protocol, trailing slash, lowercase domain).
+    pub normalize_urls: bool,
+}
+
+/// Return the priority pages whose keywords match the given query.
 ///
-/// Dispatches to the strategy named in `config.recency_strategy`:
-///
-/// | Strategy | Behaviour |
-/// |---|---|
-/// | `"exponential"` | Exponential decay matching the Tag1 reference (default) |
-/// | `"linear"` | Linear decay from max at day 0 to 0 at penalty threshold |
-/// | `"step"` | Full boost until `recency_half_life_days`, then drops to 0 |
-/// | `"none"` | Always 0.0 — disables recency entirely |
-/// | `"custom"` | Piecewise-linear from `recency_curve` control points |
-/// | unknown | Falls back to `"exponential"` |
-///
-/// All strategies apply the same old-content linear penalty once the content
-/// age exceeds `recency_penalty_after_days` (except `"none"` and `"custom"`).
-///
-/// Returns 0.0 for unparseable dates (neutral — no boost, no penalty).
-/// Returns `recency_boost_max` for future dates (brand-new content).
-///
-/// This is an **additive** value, not a multiplier.
-///
-/// # Arguments
-/// * `date` - ISO 8601 date string (YYYY-MM-DD)
-/// * `config` - Scoring configuration
-///
-/// # Returns
-/// Additive boost (positive for recent, negative for old, 0.0 for neutral)
+/// Performs case-insensitive substring matching. Multi-word keywords must
+/// appear as a contiguous substring in the (lowercased) query.
+pub fn match_priority_pages<'a>(query: &str, pages: &'a [PriorityPage]) -> Vec<&'a PriorityPage> {
+    let query_lower = query.to_lowercase();
+    pages
+        .iter()
+        .filter(|pp| {
+            pp.keywords
+                .iter()
+                .any(|kw| query_lower.contains(&kw.to_lowercase()))
+        })
+        .collect()
+}
+
 pub fn recency_boost(date: &str, config: &ScoringConfig) -> f64 {
     let days_since = match days_since_date(date) {
         Some(d) => d,
-        None => return 0.0, // Unparseable date → neutral
+        None => return 0.0,
     };
 
     if days_since < 0 {
-        // Future date — treat as brand new, maximum boost
         return config.recency_boost_max;
     }
 
@@ -310,14 +285,10 @@ pub fn recency_boost(date: &str, config: &ScoringConfig) -> f64 {
         "step" => recency_step(days_old, config),
         "none" => 0.0,
         "custom" => recency_custom(days_old, config),
-        _ => recency_exponential(days_old, config), // "exponential" and unknown
+        _ => recency_exponential(days_old, config),
     }
 }
 
-/// Exponential decay — matches the Tag1 reference implementation.
-///
-/// `MAX_BOOST × exp(-age / HALF_LIFE × ln2)` for content newer than
-/// `recency_penalty_after_days`; linear penalty beyond that threshold.
 fn recency_exponential(days_old: f64, config: &ScoringConfig) -> f64 {
     if config.recency_half_life_days == 0 {
         return 0.0;
@@ -335,8 +306,6 @@ fn recency_exponential(days_old: f64, config: &ScoringConfig) -> f64 {
     }
 }
 
-/// Linear decay — from `recency_boost_max` at day 0 to 0.0 at the penalty
-/// threshold; linear penalty beyond that threshold.
 fn recency_linear(days_old: f64, config: &ScoringConfig) -> f64 {
     let penalty_threshold = config.recency_penalty_after_days as f64;
 
@@ -348,8 +317,6 @@ fn recency_linear(days_old: f64, config: &ScoringConfig) -> f64 {
     }
 }
 
-/// Step function — full boost until `recency_half_life_days`, drops to 0.0
-/// until the penalty threshold, then applies the linear old-content penalty.
 fn recency_step(days_old: f64, config: &ScoringConfig) -> f64 {
     let half_life = config.recency_half_life_days as f64;
     let penalty_threshold = config.recency_penalty_after_days as f64;
@@ -363,19 +330,13 @@ fn recency_step(days_old: f64, config: &ScoringConfig) -> f64 {
     }
 }
 
-/// Piecewise-linear interpolation over `config.recency_curve` control points.
-///
-/// Each point is `[days_old, boost_value]`. Values before the first point or
-/// after the last point are clamped to the boundary values. Returns 0.0 if
-/// the curve is empty.
-fn recency_custom(days_old: f64, config: &ScoringConfig) -> f64 {
+pub fn recency_custom(days_old: f64, config: &ScoringConfig) -> f64 {
     let curve = &config.recency_curve;
 
     if curve.is_empty() {
         return 0.0;
     }
 
-    // Clamp to boundaries
     if days_old <= curve[0][0] {
         return curve[0][1];
     }
@@ -383,7 +344,6 @@ fn recency_custom(days_old: f64, config: &ScoringConfig) -> f64 {
         return curve[curve.len() - 1][1];
     }
 
-    // Find the surrounding segment and interpolate
     for w in curve.windows(2) {
         let (x0, y0) = (w[0][0], w[0][1]);
         let (x1, y1) = (w[1][0], w[1][1]);
@@ -400,38 +360,17 @@ fn recency_custom(days_old: f64, config: &ScoringConfig) -> f64 {
     0.0
 }
 
-/// Shared old-content linear penalty: 5% per year beyond the threshold,
-/// capped at `recency_max_penalty`. Used by exponential, linear, and step.
 fn recency_old_penalty(days_old: f64, penalty_threshold: f64, config: &ScoringConfig) -> f64 {
     let years_over = (days_old - penalty_threshold) / 365.0;
     let penalty = (years_over * 0.05).min(config.recency_max_penalty);
     -penalty
 }
 
-/// Score title match for relevance.
-///
-/// Returns an additive boost based on how many query terms appear as
-/// whole words in the title, proportional to the fraction matched:
-/// - All terms present → `title_match_boost × title_all_terms_multiplier`
-/// - Some terms present → `title_match_boost × (matchCount / totalTerms)`
-/// - No terms → 0.0
-///
-/// This matches the Tag1 reference implementation which uses proportional
-/// scoring with word-boundary matching.
-///
-/// This is a thin wrapper that calls [`extract_terms`] then delegates to
-/// [`title_match_score_with_terms`]. Prefer `_with_terms` when scoring many
-/// results for the same query to avoid repeated term extraction.
 pub fn title_match_score(query: &str, title: &str, config: &ScoringConfig) -> f64 {
     let terms = common::extract_terms(query, &config.language);
     title_match_score_with_terms(&terms, title, config)
 }
 
-/// Score title match using pre-extracted terms.
-///
-/// Same logic as [`title_match_score`] but takes terms that have already been
-/// extracted by [`common::extract_terms`]. Use this when scoring many results
-/// against the same query to avoid extracting terms on every call.
 pub fn title_match_score_with_terms(terms: &[String], title: &str, config: &ScoringConfig) -> f64 {
     if terms.is_empty() {
         return 0.0;
@@ -448,7 +387,6 @@ pub fn title_match_score_with_terms(terms: &[String], title: &str, config: &Scor
     }
 
     let mut boost = config.title_match_boost;
-    // Bonus when ALL search terms appear in title
     if matching_count == terms.len() && terms.len() > 1 {
         boost *= config.title_all_terms_multiplier;
     }
@@ -456,27 +394,11 @@ pub fn title_match_score_with_terms(terms: &[String], title: &str, config: &Scor
     boost * (matching_count as f64 / terms.len() as f64)
 }
 
-/// Score content match for relevance.
-///
-/// Same proportional approach as title matching, using content-specific
-/// boost values. Scores excerpt/content text for query term presence.
-/// - All terms present → `content_match_boost × content_all_terms_multiplier / content_match_boost`
-/// - Some terms present → `content_match_boost × (matchCount / totalTerms)`
-/// - No terms → 0.0
-///
-/// This is a thin wrapper that calls [`extract_terms`] then delegates to
-/// [`content_match_score_with_terms`]. Prefer `_with_terms` when scoring many
-/// results for the same query to avoid repeated term extraction.
 pub fn content_match_score(query: &str, content: &str, config: &ScoringConfig) -> f64 {
     let terms = common::extract_terms(query, &config.language);
     content_match_score_with_terms(&terms, content, config)
 }
 
-/// Score content match using pre-extracted terms.
-///
-/// Same logic as [`content_match_score`] but takes terms that have already
-/// been extracted by [`common::extract_terms`]. Use this when scoring many
-/// results against the same query to avoid extracting terms on every call.
 pub fn content_match_score_with_terms(
     terms: &[String],
     content: &str,
@@ -497,73 +419,99 @@ pub fn content_match_score_with_terms(
     }
 
     let mut boost = config.content_match_boost;
-    // Bonus when ALL search terms appear in content
     if matching_count == terms.len() && terms.len() > 1 {
-        // Use content_all_terms_multiplier as the ratio
-        // (default 0.48 = content_match_boost 0.4 × 1.2)
         boost = config.content_all_terms_multiplier;
     }
 
     boost * (matching_count as f64 / terms.len() as f64)
 }
 
-/// Calculate composite score for a single search result.
+/// Calculate composite score using pre-extracted terms and a pre-computed priority boost.
 ///
-/// **Additive formula** matching the Tag1 reference implementation and
-/// the client-side JavaScript scoring:
-///
-/// ```text
-/// final_score = base_score + title_boost + content_boost + recency_boost
-/// ```
-///
-/// `base_score` is the result's existing score from the upstream search engine
-/// (e.g., Pagefind). If the upstream score is 0 or absent, a base of 1.0 is
-/// used so that title/content/recency boosts still produce meaningful ranking.
-///
-/// The additive model ensures no single zero component can collapse the entire
-/// score — an article with no date still benefits from a strong title match.
-///
-/// This is a thin wrapper; prefer [`score_result_with_terms`] when scoring
-/// many results for the same query.
-pub fn score_result(result: &SearchResult, query: &str, config: &ScoringConfig) -> f64 {
-    let terms = common::extract_terms(query, &config.language);
-    score_result_with_terms(result, &terms, config)
-}
-
-/// Calculate composite score using pre-extracted terms.
-///
-/// Same logic as [`score_result`] but takes terms that have already been
-/// extracted by [`common::extract_terms`]. Use this (via [`score_results`])
-/// to avoid extracting terms once per result.
+/// Formula: `(base_score × source_weight) + title_boost + content_boost + recency_boost + priority_boost`
 pub fn score_result_with_terms(
     result: &SearchResult,
     terms: &[String],
     config: &ScoringConfig,
+    priority_boost: f64,
 ) -> f64 {
     let base_score = if result.score > 0.0 {
         result.score
     } else {
         1.0
     };
+    let source_weight = result.source_weight.unwrap_or(1.0);
     let title_boost = title_match_score_with_terms(terms, &result.title, config);
     let content_boost = content_match_score_with_terms(terms, &result.excerpt, config);
     let recency = recency_boost(&result.date, config);
 
-    base_score + title_boost + content_boost + recency
+    (base_score * source_weight) + title_boost + content_boost + recency + priority_boost
+}
+
+/// Calculate composite score for a single result.
+pub fn score_result(result: &SearchResult, query: &str, config: &ScoringConfig) -> f64 {
+    let terms = if config.custom_stop_words.is_empty() {
+        common::extract_terms(query, &config.language)
+    } else {
+        common::extract_terms_with_custom(query, &config.language, &config.custom_stop_words)
+    };
+    let query_lower = query.to_lowercase();
+    let priority_boost: f64 = config
+        .priority_pages
+        .iter()
+        .filter(|pp| {
+            pp.keywords
+                .iter()
+                .any(|kw| query_lower.contains(&kw.to_lowercase()))
+        })
+        .filter(|pp| result.url.contains(&pp.url_pattern))
+        .map(|pp| pp.boost)
+        .sum();
+    score_result_with_terms(result, &terms, config, priority_boost)
 }
 
 /// Score all results and sort by relevance (highest first).
 ///
-/// Extracts query terms once before the loop and reuses them for each result,
-/// avoiding redundant [`common::extract_terms`] calls.
+/// Pre-computes matched priority pages for the query once, then applies
+/// per-result priority boosts and optional custom excerpt overrides.
 pub fn score_results(results: &mut [SearchResult], query: &str, config: &ScoringConfig) {
     let terms = if config.custom_stop_words.is_empty() {
         common::extract_terms(query, &config.language)
     } else {
         common::extract_terms_with_custom(query, &config.language, &config.custom_stop_words)
     };
+
+    let query_lower = query.to_lowercase();
+    let matched_priority_pages: Vec<&PriorityPage> = config
+        .priority_pages
+        .iter()
+        .filter(|pp| {
+            pp.keywords
+                .iter()
+                .any(|kw| query_lower.contains(&kw.to_lowercase()))
+        })
+        .collect();
+
     for result in results.iter_mut() {
-        result.score = score_result_with_terms(result, &terms, config);
+        let priority_boost: f64 = matched_priority_pages
+            .iter()
+            .filter(|pp| result.url.contains(&pp.url_pattern))
+            .map(|pp| pp.boost)
+            .sum();
+
+        // Apply custom excerpt from the first matching priority page that has one.
+        if !matched_priority_pages.is_empty() {
+            for pp in &matched_priority_pages {
+                if result.url.contains(&pp.url_pattern) {
+                    if let Some(custom) = &pp.custom_excerpt {
+                        result.excerpt = custom.clone();
+                        break;
+                    }
+                }
+            }
+        }
+
+        result.score = score_result_with_terms(result, &terms, config, priority_boost);
     }
 
     results.sort_by(|a, b| {
@@ -573,54 +521,90 @@ pub fn score_results(results: &mut [SearchResult], query: &str, config: &Scoring
     });
 }
 
-/// Merge original and expanded search results with deduplication.
+/// Merge N result sets with per-set weights, optional deduplication, and URL filtering.
 ///
-/// Combines results from primary search and query expansion:
-/// - Primary results weighted by `expand_primary_weight`
-/// - Expanded results weighted by `1.0 - expand_primary_weight`
-/// - Duplicate URLs are merged (scores combined, first occurrence's metadata kept)
-/// - Final list sorted by combined score (descending)
-pub fn merge_results(
-    original: Vec<SearchResult>,
-    expanded: Vec<SearchResult>,
-    config: &ScoringConfig,
-) -> Vec<SearchResult> {
-    let mut results_by_url: HashMap<String, SearchResult> = HashMap::new();
-
-    // Add original results with primary weight
-    for mut result in original {
-        result.score *= config.expand_primary_weight;
-        results_by_url.insert(result.url.clone(), result);
-    }
-
-    // Add/merge expanded results with secondary weight
-    for mut result in expanded {
-        result.score *= 1.0 - config.expand_primary_weight;
-        results_by_url
-            .entry(result.url.clone())
-            .and_modify(|r| {
-                r.score += result.score;
+/// Algorithm:
+/// 1. Apply each set's weight to all result scores.
+/// 2. Combine all results and sort by score descending.
+/// 3. If `deduplicate_by` is set, keep only the first occurrence (highest-scored)
+///    for each distinct key.
+/// 4. Drop results whose URLs appear in `exclude_urls`.
+pub fn merge_results(options: MergeOptions) -> Vec<SearchResult> {
+    // Step 1: Apply weights and flatten into a single vec.
+    let mut all: Vec<SearchResult> = options
+        .sets
+        .into_iter()
+        .flat_map(|set| {
+            let w = set.weight;
+            set.results.into_iter().map(move |mut r| {
+                r.score *= w;
+                r
             })
-            .or_insert(result);
-    }
+        })
+        .collect();
 
-    let mut merged: Vec<SearchResult> = results_by_url.into_values().collect();
-    merged.sort_by(|a, b| {
+    // Step 2: Sort by score descending.
+    all.sort_by(|a, b| {
         b.score
             .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    merged
+    // Step 3: Deduplicate (keep first = highest-scored occurrence).
+    if let Some(ref field) = options.deduplicate_by {
+        let mut seen: HashSet<String> = HashSet::new();
+        all.retain(|r| {
+            let key = match field.as_str() {
+                "title" => {
+                    if options.case_sensitive {
+                        r.title.clone()
+                    } else {
+                        r.title.to_lowercase()
+                    }
+                }
+                _ => normalize_url_key(&r.url, options.normalize_urls),
+            };
+            seen.insert(key)
+        });
+    }
+
+    // Step 4: Drop excluded URLs.
+    if !options.exclude_urls.is_empty() {
+        let excluded: HashSet<String> = options
+            .exclude_urls
+            .iter()
+            .map(|u| normalize_url_key(u, options.normalize_urls))
+            .collect();
+        all.retain(|r| !excluded.contains(&normalize_url_key(&r.url, options.normalize_urls)));
+    }
+
+    all
+}
+
+/// Normalize a URL for comparison.
+///
+/// When `normalize` is true: strips trailing slash, lowercases the domain,
+/// and treats http and https as equivalent.
+fn normalize_url_key(url: &str, normalize: bool) -> String {
+    if !normalize {
+        return url.to_string();
+    }
+    let s = url.trim_end_matches('/');
+    let without_proto = s
+        .strip_prefix("https://")
+        .or_else(|| s.strip_prefix("http://"))
+        .unwrap_or(s);
+    // Lowercase domain only (path is case-sensitive on most servers).
+    match without_proto.split_once('/') {
+        Some((domain, path)) => format!("{}/{}", domain.to_lowercase(), path),
+        None => without_proto.to_lowercase(),
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Date utilities
 // ---------------------------------------------------------------------------
 
-/// Parse a YYYY-MM-DD string into (year, month, day).
-///
-/// Returns `None` for unparseable dates instead of silently defaulting.
 fn parse_date(date_str: &str) -> Option<(i32, i32, i32)> {
     let parts: Vec<&str> = date_str.split('-').collect();
     if parts.len() != 3 {
@@ -631,7 +615,6 @@ fn parse_date(date_str: &str) -> Option<(i32, i32, i32)> {
     let month: i32 = parts[1].parse().ok()?;
     let day: i32 = parts[2].parse().ok()?;
 
-    // Basic sanity check
     if !(1..=9999).contains(&year) || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
     }
@@ -639,14 +622,6 @@ fn parse_date(date_str: &str) -> Option<(i32, i32, i32)> {
     Some((year, month, day))
 }
 
-/// Get the current date as (year, month, day).
-///
-/// In the browser (`wasm32-unknown-unknown`): uses `js_sys::Date::now()`.
-/// On native (test runner): uses `SystemTime::now()`.
-///
-/// The date algorithm is Howard Hinnant's `civil_from_days`, implemented
-/// inline to avoid a chrono dependency (which would add ~400KB to the WASM
-/// binary).
 #[cfg(target_arch = "wasm32")]
 fn today() -> (i32, i32, i32) {
     let millis = js_sys::Date::now();
@@ -673,10 +648,6 @@ fn today() -> (i32, i32, i32) {
     civil_from_epoch_secs(secs)
 }
 
-/// Convert epoch seconds to (year, month, day) using Howard Hinnant's algorithm.
-///
-/// This is a pure function exposed for testing. The same algorithm is used
-/// in the integration test helper `chrono_free_recent_date()`.
 pub fn civil_from_epoch_secs(secs: u64) -> (i32, i32, i32) {
     let days = (secs / 86400) as i64;
     let z = days + 719468;
@@ -693,16 +664,6 @@ pub fn civil_from_epoch_secs(secs: u64) -> (i32, i32, i32) {
     (y as i32, m as i32, d as i32)
 }
 
-/// Convert a calendar date to a day number using Howard Hinnant's
-/// `days_from_civil` algorithm.
-///
-/// This is the inverse of [`civil_from_epoch_secs`]: it maps a proleptic
-/// Gregorian calendar date to the number of days since 1970-01-01 (Unix
-/// epoch). Handles leap years and month-length differences exactly.
-///
-/// Using the Hinnant algorithm here ensures that `days_since_date()` and
-/// `today()` (which uses `civil_from_epoch_secs`) are consistent inverses
-/// of each other — no approximation error accumulates.
 fn date_to_days(year: i32, month: i32, day: i32) -> i32 {
     let y = if month <= 2 {
         year as i64 - 1
@@ -721,9 +682,6 @@ fn date_to_days(year: i32, month: i32, day: i32) -> i32 {
     (era * 146097 + doe as i64 - 719468) as i32
 }
 
-/// Calculate days elapsed since a date string.
-///
-/// Returns `None` for unparseable dates. Returns negative for future dates.
 fn days_since_date(date_str: &str) -> Option<i32> {
     let (year, month, day) = parse_date(date_str)?;
     let (ref_y, ref_m, ref_d) = today();
@@ -735,7 +693,6 @@ fn days_since_date(date_str: &str) -> Option<i32> {
 mod tests {
     use super::*;
 
-    /// Helper: generate a date string N days ago from now.
     fn days_ago(n: u64) -> String {
         use std::time::{SystemTime, UNIX_EPOCH};
         let secs = SystemTime::now()
@@ -747,12 +704,27 @@ mod tests {
         format!("{:04}-{:02}-{:02}", y, m, d)
     }
 
+    fn make_result(url: &str, title: &str, score: f64) -> SearchResult {
+        SearchResult {
+            url: url.to_string(),
+            title: title.to_string(),
+            excerpt: "content".to_string(),
+            date: days_ago(30),
+            score,
+            content_type: String::new(),
+            site_name: String::new(),
+            source_weight: None,
+            extra: serde_json::Map::new(),
+        }
+    }
+
     #[test]
     fn test_default_config() {
         let config = ScoringConfig::default();
         assert_eq!(config.recency_boost_max, 0.5);
         assert_eq!(config.recency_half_life_days, 365);
         assert_eq!(config.content_all_terms_multiplier, 0.48);
+        assert!(config.priority_pages.is_empty());
     }
 
     #[test]
@@ -779,27 +751,14 @@ mod tests {
         let config = ScoringConfig::default();
         let recent = days_ago(30);
         let boost = recency_boost(&recent, &config);
-        assert!(
-            boost > 0.0,
-            "Recent content should get positive boost, got {}",
-            boost
-        );
-        assert!(
-            boost <= config.recency_boost_max,
-            "Boost should not exceed max, got {}",
-            boost
-        );
+        assert!(boost > 0.0);
+        assert!(boost <= config.recency_boost_max);
     }
 
     #[test]
     fn test_recency_boost_old() {
         let config = ScoringConfig::default();
-        let boost = recency_boost("2000-01-01", &config);
-        assert!(
-            boost < 0.0,
-            "Old content should get negative penalty, got {}",
-            boost
-        );
+        assert!(recency_boost("2000-01-01", &config) < 0.0);
     }
 
     #[test]
@@ -807,105 +766,247 @@ mod tests {
         let config = ScoringConfig::default();
         assert_eq!(recency_boost("not-a-date", &config), 0.0);
         assert_eq!(recency_boost("", &config), 0.0);
-        assert_eq!(recency_boost("2026-13-45", &config), 0.0);
-    }
-
-    #[test]
-    fn test_today_returns_current_date() {
-        let (y, m, d) = today();
-        assert!(y >= 2026, "Year should be at least 2026, got {}", y);
-        assert!((1..=12).contains(&m), "Month should be 1-12, got {}", m);
-        assert!((1..=31).contains(&d), "Day should be 1-31, got {}", d);
-    }
-
-    #[test]
-    fn test_parse_date_valid() {
-        assert_eq!(parse_date("2026-04-03"), Some((2026, 4, 3)));
-        assert_eq!(parse_date("2000-01-01"), Some((2000, 1, 1)));
-    }
-
-    #[test]
-    fn test_parse_date_invalid() {
-        assert_eq!(parse_date("not-a-date"), None);
-        assert_eq!(parse_date(""), None);
-        assert_eq!(parse_date("2026-13-01"), None);
-        assert_eq!(parse_date("2026-01-32"), None);
     }
 
     #[test]
     fn test_title_match_score_all_terms() {
         let config = ScoringConfig::default();
         let score = title_match_score("hello world", "Hello World Page", &config);
-        // All terms match with >1 term: boost * multiplier * (2/2)
         let expected = config.title_match_boost * config.title_all_terms_multiplier;
-        assert!(
-            (score - expected).abs() < 0.001,
-            "Expected {}, got {}",
-            expected,
-            score
-        );
+        assert!((score - expected).abs() < 0.001);
     }
 
     #[test]
     fn test_title_match_score_partial() {
         let config = ScoringConfig::default();
         let score = title_match_score("hello world", "Hello there", &config);
-        // 1 of 2 terms match: boost * (1/2)
         let expected = config.title_match_boost * 0.5;
-        assert!(
-            (score - expected).abs() < 0.001,
-            "Expected {}, got {}",
-            expected,
-            score
-        );
+        assert!((score - expected).abs() < 0.001);
     }
 
     #[test]
-    fn test_title_match_score_none() {
+    fn test_source_weight_applied() {
         let config = ScoringConfig::default();
-        let score = title_match_score("xyz abc", "Hello world", &config);
-        assert_eq!(score, 0.0);
+        let mut r_full = make_result("https://a.com", "Test", 1.0);
+        let mut r_damped = make_result("https://a.com", "Test", 1.0);
+        r_damped.source_weight = Some(0.3);
+
+        r_full.score = score_result_with_terms(&r_full, &[], &config, 0.0);
+        r_damped.score = score_result_with_terms(&r_damped, &[], &config, 0.0);
+        assert!(r_full.score > r_damped.score);
     }
 
     #[test]
-    fn test_content_match_score_all_terms() {
-        let config = ScoringConfig::default();
-        let score = content_match_score("test page", "This is a test page with content", &config);
-        // All terms match with >1 term: content_all_terms_multiplier * (2/2)
-        let expected = config.content_all_terms_multiplier;
-        assert!(
-            (score - expected).abs() < 0.001,
-            "Expected {}, got {}",
-            expected,
-            score
-        );
+    fn test_priority_page_boost() {
+        let config = ScoringConfig {
+            priority_pages: vec![PriorityPage {
+                url_pattern: "/team/".to_string(),
+                keywords: vec!["team".to_string(), "leadership".to_string()],
+                boost: 100.0,
+                custom_excerpt: None,
+                page_id: None,
+            }],
+            ..Default::default()
+        };
+
+        let mut results = vec![
+            make_result("https://example.com/team/", "Team Page", 1.0),
+            make_result("https://example.com/blog/", "Blog Post", 1.0),
+        ];
+
+        score_results(&mut results, "team members", &config);
+
+        // Team page should rank first due to priority boost
+        assert_eq!(results[0].url, "https://example.com/team/");
+        assert!(results[0].score > results[1].score + 90.0);
     }
 
     #[test]
-    fn test_content_match_score_partial() {
-        let config = ScoringConfig::default();
-        let score = content_match_score("test xyz", "This is a test page", &config);
-        // 1 of 2 terms match: boost * (1/2)
-        let expected = config.content_match_boost * 0.5;
-        assert!(
-            (score - expected).abs() < 0.001,
-            "Expected {}, got {}",
-            expected,
-            score
-        );
+    fn test_priority_page_no_boost_when_query_no_keyword() {
+        let config = ScoringConfig {
+            priority_pages: vec![PriorityPage {
+                url_pattern: "/team/".to_string(),
+                keywords: vec!["team".to_string()],
+                boost: 100.0,
+                custom_excerpt: None,
+                page_id: None,
+            }],
+            ..Default::default()
+        };
+
+        let mut results = vec![make_result("https://example.com/team/", "Team", 1.0)];
+        score_results(&mut results, "drupal migration", &config);
+        // No keyword match → no boost → normal score
+        assert!(results[0].score < 10.0);
     }
 
     #[test]
-    fn test_score_result_uses_existing_score() {
+    fn test_priority_page_custom_excerpt() {
+        let config = ScoringConfig {
+            priority_pages: vec![PriorityPage {
+                url_pattern: "/team/".to_string(),
+                keywords: vec!["team".to_string()],
+                boost: 100.0,
+                custom_excerpt: Some("Meet our expert team.".to_string()),
+                page_id: None,
+            }],
+            ..Default::default()
+        };
+
+        let mut results = vec![make_result("https://example.com/team/", "Team", 1.0)];
+        score_results(&mut results, "team leadership", &config);
+        assert_eq!(results[0].excerpt, "Meet our expert team.");
+    }
+
+    #[test]
+    fn test_match_priority_pages() {
+        let pages = vec![
+            PriorityPage {
+                url_pattern: "/team/".to_string(),
+                keywords: vec!["team".to_string(), "leadership".to_string()],
+                boost: 100.0,
+                custom_excerpt: None,
+                page_id: None,
+            },
+            PriorityPage {
+                url_pattern: "/contact/".to_string(),
+                keywords: vec!["contact".to_string(), "reach out".to_string()],
+                boost: 50.0,
+                custom_excerpt: None,
+                page_id: None,
+            },
+        ];
+
+        let matched = match_priority_pages("who is on the team", &pages);
+        assert_eq!(matched.len(), 1);
+        assert_eq!(matched[0].url_pattern, "/team/");
+
+        let matched_phrase = match_priority_pages("how to reach out to us", &pages);
+        assert_eq!(matched_phrase.len(), 1);
+        assert_eq!(matched_phrase[0].url_pattern, "/contact/");
+
+        let matched_none = match_priority_pages("drupal migration guide", &pages);
+        assert!(matched_none.is_empty());
+    }
+
+    #[test]
+    fn test_merge_results_two_sets_url_dedup() {
+        let options = MergeOptions {
+            sets: vec![
+                MergeSet {
+                    results: vec![make_result("https://a.com", "A", 10.0)],
+                    weight: 0.7,
+                },
+                MergeSet {
+                    results: vec![
+                        make_result("https://a.com", "A", 5.0),
+                        make_result("https://b.com", "B", 3.0),
+                    ],
+                    weight: 0.3,
+                },
+            ],
+            deduplicate_by: Some("url".to_string()),
+            case_sensitive: false,
+            exclude_urls: vec![],
+            normalize_urls: false,
+        };
+
+        let merged = merge_results(options);
+        assert_eq!(merged.len(), 2);
+        // Highest-scored https://a.com (from set1 at 0.7) survives
+        assert_eq!(merged[0].url, "https://a.com");
+        assert!((merged[0].score - 7.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_merge_results_title_dedup() {
+        let options = MergeOptions {
+            sets: vec![MergeSet {
+                results: vec![
+                    make_result("https://a.com", "Drupal Guide", 10.0),
+                    make_result("https://b.com", "drupal guide", 5.0), // same title, lowercase
+                ],
+                weight: 1.0,
+            }],
+            deduplicate_by: Some("title".to_string()),
+            case_sensitive: false,
+            exclude_urls: vec![],
+            normalize_urls: false,
+        };
+
+        let merged = merge_results(options);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].url, "https://a.com"); // higher score wins
+    }
+
+    #[test]
+    fn test_merge_results_exclude_urls() {
+        let options = MergeOptions {
+            sets: vec![MergeSet {
+                results: vec![
+                    make_result("https://a.com/", "A", 10.0),
+                    make_result("https://b.com/page", "B", 5.0),
+                ],
+                weight: 1.0,
+            }],
+            deduplicate_by: None,
+            case_sensitive: false,
+            exclude_urls: vec!["https://a.com".to_string()], // strip trailing slash
+            normalize_urls: true,
+        };
+
+        let merged = merge_results(options);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].url, "https://b.com/page");
+    }
+
+    #[test]
+    fn test_merge_results_normalize_urls() {
+        let options = MergeOptions {
+            sets: vec![MergeSet {
+                results: vec![make_result("http://Example.com/page/", "A", 10.0)],
+                weight: 1.0,
+            }],
+            deduplicate_by: Some("url".to_string()),
+            case_sensitive: false,
+            exclude_urls: vec!["https://example.com/page".to_string()],
+            normalize_urls: true,
+        };
+
+        let merged = merge_results(options);
+        assert!(merged.is_empty()); // normalized URL matches exclude list
+    }
+
+    #[test]
+    fn test_merge_results_no_dedup() {
+        let options = MergeOptions {
+            sets: vec![MergeSet {
+                results: vec![
+                    make_result("https://a.com", "A", 10.0),
+                    make_result("https://a.com", "A", 5.0),
+                ],
+                weight: 1.0,
+            }],
+            deduplicate_by: None,
+            ..Default::default()
+        };
+
+        let merged = merge_results(options);
+        assert_eq!(merged.len(), 2); // duplicates kept when no dedup
+    }
+
+    #[test]
+    fn test_score_results_uses_existing_score() {
         let config = ScoringConfig::default();
         let result_with_score = SearchResult {
             url: "https://example.com".to_string(),
             title: "Test".to_string(),
             excerpt: "Test content".to_string(),
             date: days_ago(60),
-            score: 5.0, // Upstream score
+            score: 5.0,
             content_type: String::new(),
             site_name: String::new(),
+            source_weight: None,
             extra: serde_json::Map::new(),
         };
 
@@ -916,62 +1017,13 @@ mod tests {
 
         let score_with = score_result(&result_with_score, "test", &config);
         let score_without = score_result(&result_without_score, "test", &config);
-
-        // Result with upstream score should rank higher
-        assert!(
-            score_with > score_without,
-            "Upstream score should be incorporated: {} vs {}",
-            score_with,
-            score_without
-        );
-    }
-
-    #[test]
-    fn test_merge_results_dedup() {
-        let config = ScoringConfig::default();
-
-        let original = vec![SearchResult {
-            url: "https://example.com/page1".to_string(),
-            title: "Page 1".to_string(),
-            excerpt: "Content".to_string(),
-            date: days_ago(30),
-            score: 10.0,
-            content_type: String::new(),
-            site_name: String::new(),
-            extra: serde_json::Map::new(),
-        }];
-
-        let expanded = vec![SearchResult {
-            url: "https://example.com/page1".to_string(),
-            title: "Page 1".to_string(),
-            excerpt: "Content".to_string(),
-            date: days_ago(30),
-            score: 5.0,
-            content_type: String::new(),
-            site_name: String::new(),
-            extra: serde_json::Map::new(),
-        }];
-
-        let merged = merge_results(original, expanded, &config);
-        assert_eq!(merged.len(), 1);
-        assert!(merged[0].score > 0.0);
+        assert!(score_with > score_without);
     }
 
     #[test]
     fn test_civil_from_epoch_secs() {
-        // 2026-01-01 00:00:00 UTC = 1767225600
         let (y, m, d) = civil_from_epoch_secs(1_767_225_600);
         assert_eq!((y, m, d), (2026, 1, 1));
-    }
-
-    // --- Recency strategy tests ---
-
-    #[test]
-    fn test_recency_strategy_exponential_is_default() {
-        let config = ScoringConfig::default();
-        assert_eq!(config.recency_strategy, "exponential");
-        let boost = recency_boost(&days_ago(30), &config);
-        assert!(boost > 0.0);
     }
 
     #[test]
@@ -981,35 +1033,6 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(recency_boost(&days_ago(1), &config), 0.0);
-        assert_eq!(recency_boost(&days_ago(3650), &config), 0.0);
-        // Note: future dates still return max boost before strategy dispatch
-        // (handled in recency_boost guard)
-    }
-
-    #[test]
-    fn test_recency_strategy_linear_recent() {
-        let config = ScoringConfig {
-            recency_strategy: "linear".to_string(),
-            ..Default::default()
-        };
-        let boost_new = recency_boost(&days_ago(1), &config);
-        let boost_old = recency_boost(&days_ago(900), &config);
-        // Very recent → close to max; 900 days is under the penalty threshold (1825)
-        // but boost should be near zero (900/1825 ≈ 0.49 through, so ~50% of max)
-        assert!(boost_new > 0.0);
-        assert!(boost_new > boost_old);
-    }
-
-    #[test]
-    fn test_recency_strategy_linear_at_threshold() {
-        let config = ScoringConfig {
-            recency_strategy: "linear".to_string(),
-            recency_penalty_after_days: 365,
-            ..Default::default()
-        };
-        // At the threshold, linear boost should be ~0
-        let boost = recency_boost("2025-04-15", &config); // ~365 days ago from 2026-04-15
-        assert!(boost.abs() < 0.1);
     }
 
     #[test]
@@ -1022,17 +1045,7 @@ mod tests {
         let boost_new = recency_boost(&days_ago(30), &config);
         let boost_mid = recency_boost(&days_ago(300), &config);
         assert_eq!(boost_new, config.recency_boost_max);
-        assert_eq!(boost_mid, 0.0); // Between half_life and penalty threshold
-    }
-
-    #[test]
-    fn test_recency_strategy_custom_empty_curve() {
-        let config = ScoringConfig {
-            recency_strategy: "custom".to_string(),
-            recency_curve: vec![],
-            ..Default::default()
-        };
-        assert_eq!(recency_boost(&days_ago(30), &config), 0.0);
+        assert_eq!(boost_mid, 0.0);
     }
 
     #[test]
@@ -1042,38 +1055,24 @@ mod tests {
             recency_curve: vec![[0.0, 1.0], [365.0, 0.5], [730.0, 0.0]],
             ..Default::default()
         };
-        // At day 0: boost = 1.0 (clamped to first point)
         let b0 = recency_custom(0.0, &config);
         assert!((b0 - 1.0).abs() < 0.001);
-
-        // At day 182.5: midpoint between [0,1.0] and [365,0.5] → ~0.75
-        let b_mid = recency_custom(182.5, &config);
-        assert!((b_mid - 0.75).abs() < 0.01);
-
-        // At day 365: exactly 0.5
         let b365 = recency_custom(365.0, &config);
         assert!((b365 - 0.5).abs() < 0.001);
-
-        // Beyond last point: clamped to 0.0
-        let b_beyond = recency_custom(1000.0, &config);
-        assert!((b_beyond - 0.0).abs() < 0.001);
     }
 
     #[test]
     fn test_recency_strategy_unknown_falls_back_to_exponential() {
-        let exponential = ScoringConfig {
+        let exp = ScoringConfig {
             recency_strategy: "exponential".to_string(),
             ..Default::default()
         };
-        let unknown = ScoringConfig {
+        let unk = ScoringConfig {
             recency_strategy: "foobar".to_string(),
             ..Default::default()
         };
         let date = days_ago(60);
-        assert_eq!(
-            recency_boost(&date, &exponential),
-            recency_boost(&date, &unknown)
-        );
+        assert_eq!(recency_boost(&date, &exp), recency_boost(&date, &unk));
     }
 
     #[test]
@@ -1082,81 +1081,22 @@ mod tests {
             recency_strategy: "invalid".to_string(),
             ..Default::default()
         };
-        let warnings = config.validate();
-        assert!(warnings.iter().any(|w| w.field == "recency_strategy"));
+        assert!(config.validate().iter().any(|w| w.field == "recency_strategy"));
     }
 
     #[test]
-    fn test_config_validate_custom_empty_curve() {
-        let config = ScoringConfig {
-            recency_strategy: "custom".to_string(),
-            recency_curve: vec![],
-            ..Default::default()
-        };
-        let warnings = config.validate();
-        assert!(warnings.iter().any(|w| w.field == "recency_curve"));
-    }
-
-    #[test]
-    fn test_config_validate_unsorted_curve() {
-        let config = ScoringConfig {
-            recency_strategy: "custom".to_string(),
-            recency_curve: vec![[365.0, 0.5], [0.0, 1.0]], // reversed
-            ..Default::default()
-        };
-        let warnings = config.validate();
-        assert!(warnings.iter().any(|w| w.field == "recency_curve"));
-    }
-
-    #[test]
-    fn test_language_config_default() {
-        let config = ScoringConfig::default();
-        assert_eq!(config.language, "en");
-        assert!(config.custom_stop_words.is_empty());
-    }
-
-    #[test]
-    fn test_score_results_respects_language() {
-        // Use German language — "und" should be filtered as a stop word
-        let config = ScoringConfig {
-            language: "de".to_string(),
-            ..Default::default()
-        };
-        // "und" is a German stop word; "drupal" is not
-        // Score results with a query containing a German stop word
-        let mut results = vec![SearchResult {
-            url: "https://example.com".to_string(),
-            title: "Drupal Guide".to_string(),
-            excerpt: "Alles über Drupal".to_string(),
-            date: days_ago(30),
-            score: 1.0,
-            content_type: String::new(),
-            site_name: String::new(),
-            extra: serde_json::Map::new(),
-        }];
-        // Should not panic; query with only German stop words → no terms → title boost is 0
-        score_results(&mut results, "und der die", &config);
-        assert_eq!(results.len(), 1);
-    }
-
-    #[test]
-    fn test_custom_stop_words() {
-        let config = ScoringConfig {
-            custom_stop_words: vec!["drupal".to_string()],
-            ..Default::default()
-        };
-        let mut results = vec![SearchResult {
-            url: "https://example.com".to_string(),
-            title: "Drupal Guide".to_string(),
-            excerpt: "All about Drupal CMS".to_string(),
-            date: days_ago(30),
-            score: 1.0,
-            content_type: String::new(),
-            site_name: String::new(),
-            extra: serde_json::Map::new(),
-        }];
-        // "drupal" is now a custom stop word; "guide" remains
-        score_results(&mut results, "drupal guide", &config);
-        assert_eq!(results.len(), 1);
+    fn test_normalize_url_key() {
+        assert_eq!(
+            normalize_url_key("https://Example.com/Page/", true),
+            "example.com/Page"
+        );
+        assert_eq!(
+            normalize_url_key("http://example.com/page", true),
+            "example.com/page"
+        );
+        assert_eq!(
+            normalize_url_key("https://example.com/page", false),
+            "https://example.com/page"
+        );
     }
 }

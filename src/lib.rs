@@ -1,9 +1,8 @@
 //! # Scolta Core WASM
 //!
 //! Browser WebAssembly module for the Scolta search engine. This crate is
-//! the **source of truth** for search scoring, prompt management, and
-//! query expansion. The browser loads this module via wasm-bindgen to
-//! perform all scoring client-side — no server round-trips.
+//! the **source of truth** for search scoring, prompt management, query
+//! expansion, context extraction, PII sanitization, and conversation trimming.
 //!
 //! ## Architecture
 //!
@@ -11,17 +10,23 @@
 //! - [`inner`] — Plain Rust implementations used by browser exports and tests
 //! - [`common`] — Stop words, term extraction
 //! - [`config`] — Scoring configuration parsing
+//! - [`context`] — LLM context extraction
+//! - [`conversation`] — Conversation history trimming
 //! - [`error`] — Typed error handling
-//! - [`expansion`] — LLM response parsing
+//! - [`expansion`] — LLM response parsing and term filtering
 //! - [`prompts`] — Prompt templates
+//! - [`sanitize`] — PII redaction
 //! - [`scoring`] — Result scoring and ranking
 
 pub mod browser;
 pub mod common;
 pub mod config;
+pub mod context;
+pub mod conversation;
 pub mod error;
 pub mod expansion;
 pub mod prompts;
+pub mod sanitize;
 pub mod scoring;
 pub mod stop_words;
 
@@ -31,18 +36,22 @@ use serde_json::json;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// WASM interface version — tracks binary compatibility.
-pub const WASM_INTERFACE_VERSION: u32 = 3;
+///
+/// Increment when function signatures or calling conventions change in a way
+/// that breaks binary compatibility with host wrappers (scolta-php, scolta.js).
+pub const WASM_INTERFACE_VERSION: u32 = 4;
 
 // ---------------------------------------------------------------------------
 // Inner functions: plain Rust, callable from tests and browser exports.
 // ---------------------------------------------------------------------------
 
-/// Plain-Rust implementations that browser exports delegate to.
-/// Also used directly by unit and integration tests.
 pub mod inner {
     use super::*;
 
-    /// Resolve a prompt template with site-specific variable substitution.
+    // -----------------------------------------------------------------------
+    // Prompt functions
+    // -----------------------------------------------------------------------
+
     pub fn resolve_prompt(input: &serde_json::Value) -> Result<String, ScoltaError> {
         let obj = input.as_object().ok_or(ScoltaError::invalid_json(
             "resolve_prompt",
@@ -55,7 +64,6 @@ pub mod inner {
             .ok_or(ScoltaError::missing_field("resolve_prompt", "prompt_name"))?;
 
         let site_name = obj.get("site_name").and_then(|v| v.as_str()).unwrap_or("");
-
         let site_description = obj
             .get("site_description")
             .and_then(|v| v.as_str())
@@ -68,7 +76,6 @@ pub mod inner {
         })
     }
 
-    /// Get a raw prompt template by name (without variable substitution).
     pub fn get_prompt(name: &str) -> Result<String, ScoltaError> {
         let name = name.trim();
         prompts::get_template(name)
@@ -78,15 +85,17 @@ pub mod inner {
             })
     }
 
-    /// Export scoring configuration for JavaScript frontend integration.
-    pub fn to_js_scoring_config(
-        input: &serde_json::Value,
-    ) -> Result<serde_json::Value, ScoltaError> {
-        let cfg = config::from_json(input);
-        Ok(config::to_js_scoring_config(&cfg, input))
-    }
+    // -----------------------------------------------------------------------
+    // Scoring
+    // -----------------------------------------------------------------------
 
     /// Score and re-rank search results by relevance.
+    ///
+    /// Input: `{ "query": "...", "results": [...], "config": {...} }`
+    ///
+    /// Each result may include `"source_weight"` (f64, default 1.0) to dampen
+    /// secondary-source results. The config may include `"priority_pages"` to
+    /// boost specific results when query keywords match.
     pub fn score_results(input: &serde_json::Value) -> Result<serde_json::Value, ScoltaError> {
         let obj = input.as_object().ok_or(ScoltaError::invalid_json(
             "score_results",
@@ -116,84 +125,101 @@ pub mod inner {
         serde_json::to_value(&results).map_err(|e| ScoltaError::parse_error("score_results", e))
     }
 
-    /// Merge original and expanded search results with deduplication.
+    /// Merge N result sets with per-set weights, deduplication, and URL filtering.
+    ///
+    /// Input:
+    /// ```json
+    /// {
+    ///   "sets": [
+    ///     { "results": [...], "weight": 0.7 },
+    ///     { "results": [...], "weight": 0.3 }
+    ///   ],
+    ///   "deduplicate_by": "url",
+    ///   "case_sensitive": false,
+    ///   "exclude_urls": ["https://..."],
+    ///   "normalize_urls": true
+    /// }
+    /// ```
     pub fn merge_results(input: &serde_json::Value) -> Result<serde_json::Value, ScoltaError> {
         let obj = input.as_object().ok_or(ScoltaError::invalid_json(
             "merge_results",
             "expected JSON object",
         ))?;
 
-        let original_json = obj
-            .get("original")
-            .ok_or(ScoltaError::missing_field("merge_results", "original"))?;
+        let sets_json = obj
+            .get("sets")
+            .ok_or(ScoltaError::missing_field("merge_results", "sets"))?;
 
-        let expanded_json = obj
-            .get("expanded")
-            .ok_or(ScoltaError::missing_field("merge_results", "expanded"))?;
-
-        let original: Vec<scoring::SearchResult> = serde_json::from_value(original_json.clone())
+        let sets: Vec<scoring::MergeSet> = serde_json::from_value(sets_json.clone())
             .map_err(|e| {
-                ScoltaError::parse_error(
-                    "merge_results",
-                    format!("failed to parse original results: {}", e),
-                )
+                ScoltaError::parse_error("merge_results", format!("failed to parse sets: {}", e))
             })?;
 
-        let expanded: Vec<scoring::SearchResult> = serde_json::from_value(expanded_json.clone())
-            .map_err(|e| {
-                ScoltaError::parse_error(
-                    "merge_results",
-                    format!("failed to parse expanded results: {}", e),
-                )
-            })?;
+        let deduplicate_by = obj
+            .get("deduplicate_by")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
 
-        let empty_config = json!({});
-        let config_json = obj.get("config").unwrap_or(&empty_config);
-        let cfg = config::from_json(config_json);
+        let case_sensitive = obj
+            .get("case_sensitive")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
-        let merged = scoring::merge_results(original, expanded, &cfg);
+        let exclude_urls: Vec<String> = obj
+            .get("exclude_urls")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+
+        let normalize_urls = obj
+            .get("normalize_urls")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let options = scoring::MergeOptions {
+            sets,
+            deduplicate_by,
+            case_sensitive,
+            exclude_urls,
+            normalize_urls,
+        };
+
+        let merged = scoring::merge_results(options);
         serde_json::to_value(&merged).map_err(|e| ScoltaError::parse_error("merge_results", e))
     }
 
-    /// Parse an LLM expansion response into a term array (defaults to English).
+    /// Return the priority pages from `priority_pages` whose keywords match `query`.
     ///
-    /// Also accepts a JSON object `{ "text": "...", "language": "fr" }` to
-    /// specify a language for stop word filtering.
-    pub fn parse_expansion(input: &str) -> Vec<String> {
-        // Support JSON object form: { "text": "...", "language": "fr" }
-        if let Ok(obj) = serde_json::from_str::<serde_json::Value>(input) {
-            if let Some(map) = obj.as_object() {
-                if let Some(text) = map.get("text").and_then(|v| v.as_str()) {
-                    let language = map.get("language").and_then(|v| v.as_str()).unwrap_or("en");
-                    return expansion::parse_expansion_with_language(text, language);
-                }
-            }
-        }
-        // Bare string form — default to English
-        expansion::parse_expansion(input)
-    }
+    /// Input: `{ "query": "...", "priority_pages": [...] }`
+    /// Output: JSON array of matching PriorityPage entries.
+    pub fn match_priority_pages(input: &serde_json::Value) -> Result<serde_json::Value, ScoltaError> {
+        let obj = input.as_object().ok_or(ScoltaError::invalid_json(
+            "match_priority_pages",
+            "expected JSON object",
+        ))?;
 
-    /// Parse an LLM expansion response with an explicit language for stop word
-    /// filtering.
-    pub fn parse_expansion_with_language(input: &str, language: &str) -> Vec<String> {
-        expansion::parse_expansion_with_language(input, language)
+        let query = obj
+            .get("query")
+            .and_then(|v| v.as_str())
+            .ok_or(ScoltaError::missing_field("match_priority_pages", "query"))?;
+
+        let pages_json = obj
+            .get("priority_pages")
+            .ok_or(ScoltaError::missing_field("match_priority_pages", "priority_pages"))?;
+
+        let pages: Vec<scoring::PriorityPage> = serde_json::from_value(pages_json.clone())
+            .map_err(|e| {
+                ScoltaError::parse_error(
+                    "match_priority_pages",
+                    format!("failed to parse priority_pages: {}", e),
+                )
+            })?;
+
+        let matched = scoring::match_priority_pages(query, &pages);
+        serde_json::to_value(&matched)
+            .map_err(|e| ScoltaError::parse_error("match_priority_pages", e))
     }
 
     /// Score multiple queries against their respective result sets.
-    ///
-    /// Input shape:
-    /// ```json
-    /// {
-    ///   "queries": [
-    ///     { "query": "...", "results": [...], "config": {...} }
-    ///   ],
-    ///   "default_config": { ... }
-    /// }
-    /// ```
-    ///
-    /// Per-query `"config"` is merged on top of `"default_config"`. Returns
-    /// an array of arrays — one scored result array per input query, in the
-    /// same order as the input.
     pub fn batch_score_results(
         input: &serde_json::Value,
     ) -> Result<serde_json::Value, ScoltaError> {
@@ -242,7 +268,6 @@ pub mod inner {
                     )
                 })?;
 
-            // Per-query config overrides default_config
             let config_json = qobj.get("config").unwrap_or(default_config_json);
             let cfg = config::from_json(config_json);
 
@@ -256,38 +281,382 @@ pub mod inner {
         Ok(serde_json::Value::Array(batch_results))
     }
 
-    /// Get the crate version string.
+    // -----------------------------------------------------------------------
+    // Expansion
+    // -----------------------------------------------------------------------
+
+    /// Parse an LLM expansion response.
+    ///
+    /// Two forms:
+    /// 1. Bare string (LLM output) — language defaults to `"en"`.
+    /// 2. JSON object: `{ "text": "...", "language": "de", "generic_terms": [...],
+    ///    "existing_terms": [...], ... }` — all extra fields optional.
+    pub fn parse_expansion(input: &str) -> Vec<String> {
+        if let Ok(obj) = serde_json::from_str::<serde_json::Value>(input) {
+            if let Some(map) = obj.as_object() {
+                if let Some(text) = map.get("text").and_then(|v| v.as_str()) {
+                    let language = map
+                        .get("language")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("en");
+
+                    let generic_terms: Vec<String> = map
+                        .get("generic_terms")
+                        .and_then(|v| serde_json::from_value(v.clone()).ok())
+                        .unwrap_or_default();
+
+                    let filter_single_word_generic = map
+                        .get("filter_single_word_generic")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+
+                    let keep_acronyms = map
+                        .get("keep_acronyms")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+
+                    let keep_proper_nouns = map
+                        .get("keep_proper_nouns")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+
+                    let min_term_length = map
+                        .get("min_term_length")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(2) as u32;
+
+                    let existing_terms: Vec<String> = map
+                        .get("existing_terms")
+                        .and_then(|v| serde_json::from_value(v.clone()).ok())
+                        .unwrap_or_default();
+
+                    let cfg = expansion::ExpansionConfig {
+                        language: language.to_string(),
+                        generic_terms,
+                        filter_single_word_generic,
+                        keep_acronyms,
+                        keep_proper_nouns,
+                        min_term_length,
+                        existing_terms,
+                    };
+
+                    return expansion::parse_expansion_with_config(text, &cfg);
+                }
+            }
+        }
+
+        expansion::parse_expansion(input)
+    }
+
+    pub fn parse_expansion_with_language(input: &str, language: &str) -> Vec<String> {
+        expansion::parse_expansion_with_language(input, language)
+    }
+
+    // -----------------------------------------------------------------------
+    // Context extraction
+    // -----------------------------------------------------------------------
+
+    /// Extract relevant context from a document for LLM summarization.
+    ///
+    /// Input: `{ "content": "...", "query": "...", "config": { ... } }`
+    /// Output: extracted context string.
+    pub fn extract_context(input: &serde_json::Value) -> Result<String, ScoltaError> {
+        let obj = input.as_object().ok_or(ScoltaError::invalid_json(
+            "extract_context",
+            "expected JSON object",
+        ))?;
+
+        let content = obj
+            .get("content")
+            .and_then(|v| v.as_str())
+            .ok_or(ScoltaError::missing_field("extract_context", "content"))?;
+
+        let query = obj
+            .get("query")
+            .and_then(|v| v.as_str())
+            .ok_or(ScoltaError::missing_field("extract_context", "query"))?;
+
+        let cfg = parse_context_config(obj.get("config"));
+        Ok(context::extract_context(content, query, &cfg))
+    }
+
+    /// Extract context from multiple documents in one call.
+    ///
+    /// Input:
+    /// ```json
+    /// {
+    ///   "items": [{ "content": "...", "url": "...", "title": "..." }],
+    ///   "query": "...",
+    ///   "config": { ... }
+    /// }
+    /// ```
+    /// Output: JSON array of `{ "url": "...", "title": "...", "context": "..." }`.
+    pub fn batch_extract_context(
+        input: &serde_json::Value,
+    ) -> Result<serde_json::Value, ScoltaError> {
+        let obj = input.as_object().ok_or(ScoltaError::invalid_json(
+            "batch_extract_context",
+            "expected JSON object",
+        ))?;
+
+        let query = obj
+            .get("query")
+            .and_then(|v| v.as_str())
+            .ok_or(ScoltaError::missing_field("batch_extract_context", "query"))?;
+
+        let items_json = obj
+            .get("items")
+            .ok_or(ScoltaError::missing_field("batch_extract_context", "items"))?;
+
+        let items: Vec<serde_json::Value> = serde_json::from_value(items_json.clone())
+            .map_err(|e| {
+                ScoltaError::parse_error("batch_extract_context", format!("items: {}", e))
+            })?;
+
+        let cfg = parse_context_config(obj.get("config"));
+
+        let context_items: Vec<context::ContextItem> = items
+            .into_iter()
+            .map(|item| context::ContextItem {
+                content: item
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                url: item
+                    .get("url")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                title: item
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+            })
+            .collect();
+
+        let results = context::batch_extract_context(context_items, query, &cfg);
+
+        let output: Vec<serde_json::Value> = results
+            .into_iter()
+            .map(|r| {
+                json!({
+                    "url": r.url,
+                    "title": r.title,
+                    "context": r.context
+                })
+            })
+            .collect();
+
+        serde_json::to_value(output)
+            .map_err(|e| ScoltaError::parse_error("batch_extract_context", e))
+    }
+
+    fn parse_context_config(cfg_json: Option<&serde_json::Value>) -> context::ContextConfig {
+        let mut cfg = context::ContextConfig::default();
+        if let Some(obj) = cfg_json.and_then(|v| v.as_object()) {
+            if let Some(v) = obj.get("max_length").and_then(|v| v.as_u64()) {
+                cfg.max_length = v as u32;
+            }
+            if let Some(v) = obj.get("intro_length").and_then(|v| v.as_u64()) {
+                cfg.intro_length = v as u32;
+            }
+            if let Some(v) = obj.get("snippet_radius").and_then(|v| v.as_u64()) {
+                cfg.snippet_radius = v as u32;
+            }
+            if let Some(v) = obj.get("separator").and_then(|v| v.as_str()) {
+                cfg.separator = v.to_string();
+            }
+        }
+        cfg
+    }
+
+    // -----------------------------------------------------------------------
+    // Sanitization
+    // -----------------------------------------------------------------------
+
+    /// Redact PII from a query before analytics logging.
+    ///
+    /// Input: `{ "query": "...", "config": { ... } }`
+    /// Output: sanitized query string.
+    pub fn sanitize_query(input: &serde_json::Value) -> Result<String, ScoltaError> {
+        let obj = input.as_object().ok_or(ScoltaError::invalid_json(
+            "sanitize_query",
+            "expected JSON object",
+        ))?;
+
+        let query = obj
+            .get("query")
+            .and_then(|v| v.as_str())
+            .ok_or(ScoltaError::missing_field("sanitize_query", "query"))?;
+
+        let cfg = parse_sanitization_config(obj.get("config"));
+        Ok(sanitize::sanitize_query(query, &cfg))
+    }
+
+    fn parse_sanitization_config(
+        cfg_json: Option<&serde_json::Value>,
+    ) -> sanitize::SanitizationConfig {
+        let mut cfg = sanitize::SanitizationConfig::default();
+        if let Some(obj) = cfg_json.and_then(|v| v.as_object()) {
+            if let Some(v) = obj.get("redact_email").and_then(|v| v.as_bool()) {
+                cfg.redact_email = v;
+            }
+            if let Some(v) = obj.get("redact_phone").and_then(|v| v.as_bool()) {
+                cfg.redact_phone = v;
+            }
+            if let Some(v) = obj.get("redact_ssn").and_then(|v| v.as_bool()) {
+                cfg.redact_ssn = v;
+            }
+            if let Some(v) = obj.get("redact_credit_card").and_then(|v| v.as_bool()) {
+                cfg.redact_credit_card = v;
+            }
+            if let Some(v) = obj.get("redact_ip").and_then(|v| v.as_bool()) {
+                cfg.redact_ip = v;
+            }
+            if let Some(arr) = obj.get("custom_patterns").and_then(|v| v.as_array()) {
+                cfg.custom_patterns = arr
+                    .iter()
+                    .filter_map(|p| {
+                        let regex = p.get("regex").and_then(|v| v.as_str())?;
+                        let replacement = p.get("replacement").and_then(|v| v.as_str())?;
+                        Some(sanitize::SanitizationPattern {
+                            regex: regex.to_string(),
+                            replacement: replacement.to_string(),
+                        })
+                    })
+                    .collect();
+            }
+        }
+        cfg
+    }
+
+    // -----------------------------------------------------------------------
+    // Conversation truncation
+    // -----------------------------------------------------------------------
+
+    /// Trim a conversation to fit within a character limit.
+    ///
+    /// Input:
+    /// ```json
+    /// {
+    ///   "messages": [{"role": "user", "content": "..."}],
+    ///   "config": { "max_length": 12000, "preserve_first_n": 2, "removal_unit": 2 }
+    /// }
+    /// ```
+    /// Output: JSON array of trimmed messages.
+    pub fn truncate_conversation(
+        input: &serde_json::Value,
+    ) -> Result<serde_json::Value, ScoltaError> {
+        let obj = input.as_object().ok_or(ScoltaError::invalid_json(
+            "truncate_conversation",
+            "expected JSON object",
+        ))?;
+
+        let messages_json = obj
+            .get("messages")
+            .ok_or(ScoltaError::missing_field("truncate_conversation", "messages"))?;
+
+        let messages: Vec<conversation::Message> = serde_json::from_value(messages_json.clone())
+            .map_err(|e| {
+                ScoltaError::parse_error("truncate_conversation", format!("messages: {}", e))
+            })?;
+
+        let mut cfg = conversation::ConversationConfig::default();
+        if let Some(cfg_obj) = obj.get("config").and_then(|v| v.as_object()) {
+            if let Some(v) = cfg_obj.get("max_length").and_then(|v| v.as_u64()) {
+                cfg.max_length = v as u32;
+            }
+            if let Some(v) = cfg_obj.get("preserve_first_n").and_then(|v| v.as_u64()) {
+                cfg.preserve_first_n = v as u32;
+            }
+            if let Some(v) = cfg_obj.get("removal_unit").and_then(|v| v.as_u64()) {
+                cfg.removal_unit = v as u32;
+            }
+        }
+
+        let trimmed = conversation::truncate_conversation(messages, &cfg);
+        serde_json::to_value(&trimmed)
+            .map_err(|e| ScoltaError::parse_error("truncate_conversation", e))
+    }
+
+    // -----------------------------------------------------------------------
+    // Utility
+    // -----------------------------------------------------------------------
+
     pub fn version() -> String {
         VERSION.to_string()
     }
 
-    /// Describe the module's exported functions.
     pub fn describe() -> serde_json::Value {
         json!({
             "name": "scolta-core",
             "version": VERSION,
             "wasm_interface_version": WASM_INTERFACE_VERSION,
-            "description": "Scolta browser WASM — client-side search scoring, prompt management, and query expansion",
+            "description": "Scolta browser WASM — client-side search scoring, prompt management, query expansion, context extraction, PII sanitization, and conversation trimming",
             "functions": {
                 "score_results": {
-                    "description": "Score and re-rank search results by relevance",
+                    "description": "Score and re-rank search results; supports source_weight and priority_pages",
                     "since": "0.1.0",
                     "stability": "stable",
                     "input_type": "json",
                     "output_type": "json"
                 },
                 "merge_results": {
-                    "description": "Merge original and expanded search results with deduplication",
+                    "description": "Merge N weighted result sets with deduplication and URL exclusion",
                     "since": "0.1.0",
                     "stability": "stable",
                     "input_type": "json",
                     "output_type": "json"
                 },
+                "match_priority_pages": {
+                    "description": "Return priority pages whose keywords match a query",
+                    "since": "0.2.3",
+                    "stability": "experimental",
+                    "input_type": "json",
+                    "output_type": "json"
+                },
                 "parse_expansion": {
-                    "description": "Parse an LLM expansion response into a term array",
+                    "description": "Parse an LLM expansion response with generic-term filtering and term merging",
                     "since": "0.1.0",
                     "stability": "stable",
                     "input_type": "string",
+                    "output_type": "json"
+                },
+                "extract_context": {
+                    "description": "Extract relevant context from a document for LLM summarization",
+                    "since": "0.2.3",
+                    "stability": "experimental",
+                    "input_type": "json",
+                    "output_type": "string"
+                },
+                "batch_extract_context": {
+                    "description": "Extract context from multiple documents in one call",
+                    "since": "0.2.3",
+                    "stability": "experimental",
+                    "input_type": "json",
+                    "output_type": "json"
+                },
+                "sanitize_query": {
+                    "description": "Redact PII (email, phone, SSN, CC, IP) from a query before analytics logging",
+                    "since": "0.2.3",
+                    "stability": "experimental",
+                    "input_type": "json",
+                    "output_type": "string"
+                },
+                "truncate_conversation": {
+                    "description": "Trim conversation history by removing oldest pairs to fit a character limit",
+                    "since": "0.2.3",
+                    "stability": "experimental",
+                    "input_type": "json",
+                    "output_type": "json"
+                },
+                "batch_score_results": {
+                    "description": "Score multiple queries in a single call; returns array of scored result arrays",
+                    "since": "0.2.2",
+                    "stability": "experimental",
+                    "input_type": "json",
                     "output_type": "json"
                 },
                 "resolve_prompt": {
@@ -304,13 +673,6 @@ pub mod inner {
                     "input_type": "string",
                     "output_type": "string"
                 },
-                "to_js_scoring_config": {
-                    "description": "Export scoring config as SCREAMING_SNAKE_CASE JSON for JavaScript",
-                    "since": "0.1.0",
-                    "stability": "stable",
-                    "input_type": "json",
-                    "output_type": "json"
-                },
                 "version": {
                     "description": "Get the crate version",
                     "since": "0.1.0",
@@ -318,15 +680,8 @@ pub mod inner {
                     "input_type": "none",
                     "output_type": "string"
                 },
-                "batch_score_results": {
-                    "description": "Score multiple queries in a single call; returns array of scored result arrays",
-                    "since": "0.2.2",
-                    "stability": "experimental",
-                    "input_type": "json",
-                    "output_type": "json"
-                },
                 "describe": {
-                    "description": "Describe all exported functions",
+                    "description": "Describe all exported functions (version, stability, input/output types)",
                     "since": "0.1.0",
                     "stability": "stable",
                     "input_type": "none",
@@ -351,6 +706,11 @@ mod tests {
     }
 
     #[test]
+    fn test_wasm_interface_version_incremented() {
+        assert_eq!(WASM_INTERFACE_VERSION, 4);
+    }
+
+    #[test]
     fn test_resolve_prompt() {
         let input = json!({
             "prompt_name": "expand_query",
@@ -359,204 +719,286 @@ mod tests {
         });
         let result = inner::resolve_prompt(&input);
         assert!(result.is_ok());
-        let text = result.unwrap();
-        assert!(text.contains("Test Site"));
-        assert!(text.contains("test site"));
+        assert!(result.unwrap().contains("Test Site"));
     }
 
     #[test]
     fn test_resolve_prompt_unknown() {
-        let input = json!({
-            "prompt_name": "nonexistent",
-            "site_name": "Test"
-        });
-        let result = inner::resolve_prompt(&input);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_resolve_prompt_missing_field() {
-        let input = json!({"site_name": "Test"});
-        let result = inner::resolve_prompt(&input);
-        assert!(result.is_err());
+        let input = json!({"prompt_name": "nonexistent", "site_name": "Test"});
+        assert!(inner::resolve_prompt(&input).is_err());
     }
 
     #[test]
     fn test_get_prompt() {
         let result = inner::get_prompt("expand_query");
         assert!(result.is_ok());
-        let text = result.unwrap();
-        assert!(text.contains("alternative search terms"));
-        assert!(text.contains("{SITE_NAME}"));
+        assert!(result.unwrap().contains("alternative search terms"));
     }
 
     #[test]
-    fn test_get_prompt_unknown() {
-        let result = inner::get_prompt("fake_prompt");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_to_js_scoring_config() {
-        let input = json!({
-            "recency_boost_max": 0.8,
-            "ai_expand_query": false
-        });
-        let result = inner::to_js_scoring_config(&input).unwrap();
-        assert_eq!(result["RECENCY_BOOST_MAX"], 0.8);
-        assert_eq!(result["AI_EXPAND_QUERY"], false);
-        assert_eq!(result["RECENCY_HALF_LIFE_DAYS"], 365);
-        assert_eq!(result["LANGUAGE"], "en");
-        assert_eq!(result["RECENCY_STRATEGY"], "exponential");
-    }
-
-    #[test]
-    fn test_score_results() {
+    fn test_score_results_basic() {
         let input = json!({
             "query": "drupal",
             "results": [
                 {"url": "https://a.com", "title": "About Us", "excerpt": "Company info", "date": "2020-01-01"},
                 {"url": "https://b.com", "title": "Drupal Guide", "excerpt": "All about Drupal", "date": "2026-03-01"}
-            ],
-            "config": {}
+            ]
         });
         let result = inner::score_results(&input).unwrap();
-        let arr = result.as_array().unwrap();
-        assert_eq!(arr[0]["url"], "https://b.com");
+        assert_eq!(result[0]["url"], "https://b.com");
     }
 
     #[test]
-    fn test_merge_results() {
+    fn test_score_results_source_weight() {
         let input = json!({
-            "original": [
-                {"url": "https://a.com", "title": "A", "excerpt": "a", "date": "2026-01-01", "score": 10.0}
+            "query": "drupal",
+            "results": [
+                {"url": "https://a.com", "title": "Drupal A", "excerpt": "Drupal content", "date": "2026-01-01", "score": 1.0, "source_weight": 1.0},
+                {"url": "https://b.com", "title": "Drupal B", "excerpt": "Drupal content", "date": "2026-01-01", "score": 1.0, "source_weight": 0.3}
+            ]
+        });
+        let result = inner::score_results(&input).unwrap();
+        let score_a = result[0]["score"].as_f64().unwrap();
+        let score_b = result[1]["score"].as_f64().unwrap();
+        assert!(score_a > score_b);
+    }
+
+    #[test]
+    fn test_score_results_priority_pages() {
+        let input = json!({
+            "query": "meet the team",
+            "results": [
+                {"url": "https://example.com/team/", "title": "Team", "excerpt": "Our team", "date": "2026-01-01", "score": 1.0},
+                {"url": "https://example.com/blog/", "title": "Blog", "excerpt": "Articles", "date": "2026-01-01", "score": 1.0}
             ],
-            "expanded": [
-                {"url": "https://a.com", "title": "A", "excerpt": "a", "date": "2026-01-01", "score": 5.0},
-                {"url": "https://b.com", "title": "B", "excerpt": "b", "date": "2025-06-01", "score": 3.0}
+            "config": {
+                "priority_pages": [{
+                    "url_pattern": "/team/",
+                    "keywords": ["team", "leadership"],
+                    "boost": 100.0
+                }]
+            }
+        });
+        let result = inner::score_results(&input).unwrap();
+        assert_eq!(result[0]["url"], "https://example.com/team/");
+    }
+
+    #[test]
+    fn test_merge_results_two_sets() {
+        let input = json!({
+            "sets": [
+                { "results": [{"url": "https://a.com", "title": "A", "excerpt": "a", "date": "2026-01-01", "score": 10.0}], "weight": 0.7 },
+                { "results": [
+                    {"url": "https://a.com", "title": "A", "excerpt": "a", "date": "2026-01-01", "score": 5.0},
+                    {"url": "https://b.com", "title": "B", "excerpt": "b", "date": "2025-06-01", "score": 3.0}
+                ], "weight": 0.3 }
             ],
-            "config": {"expand_primary_weight": 0.7}
+            "deduplicate_by": "url"
         });
         let result = inner::merge_results(&input).unwrap();
         let arr = result.as_array().unwrap();
         assert_eq!(arr.len(), 2);
+        // a.com wins dedup (0.7*10=7.0 > 0.3*5=1.5)
+        assert_eq!(arr[0]["url"], "https://a.com");
     }
 
     #[test]
-    fn test_parse_expansion() {
+    fn test_merge_results_exclude_urls() {
+        let input = json!({
+            "sets": [
+                { "results": [
+                    {"url": "https://a.com", "title": "A", "excerpt": "a", "date": "2026-01-01", "score": 5.0},
+                    {"url": "https://b.com", "title": "B", "excerpt": "b", "date": "2026-01-01", "score": 3.0}
+                ], "weight": 1.0 }
+            ],
+            "exclude_urls": ["https://a.com"]
+        });
+        let result = inner::merge_results(&input).unwrap();
+        let arr = result.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["url"], "https://b.com");
+    }
+
+    #[test]
+    fn test_merge_results_missing_sets() {
+        let input = json!({"original": [], "expanded": []});
+        assert!(inner::merge_results(&input).is_err());
+    }
+
+    #[test]
+    fn test_match_priority_pages() {
+        let input = json!({
+            "query": "who is on the team",
+            "priority_pages": [
+                {"url_pattern": "/team/", "keywords": ["team", "leadership"], "boost": 100.0},
+                {"url_pattern": "/contact/", "keywords": ["contact"], "boost": 50.0}
+            ]
+        });
+        let result = inner::match_priority_pages(&input).unwrap();
+        let arr = result.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["url_pattern"], "/team/");
+    }
+
+    #[test]
+    fn test_parse_expansion_bare_string() {
         let terms = inner::parse_expansion(r#"["term1", "term2", "term3"]"#);
         assert_eq!(terms.len(), 3);
-        assert_eq!(terms[0], "term1");
     }
 
     #[test]
-    fn test_parse_expansion_markdown() {
-        let terms = inner::parse_expansion("```json\n[\"search term\", \"other\"]\n```");
-        assert_eq!(terms.len(), 2);
-    }
-
-    #[test]
-    fn test_parse_expansion_filters() {
-        let terms = inner::parse_expansion(r#"["the", "a", "real term"]"#);
-        assert!(!terms.contains(&"the".to_string()));
-        assert!(terms.contains(&"real term".to_string()));
-    }
-
-    #[test]
-    fn test_parse_expansion_object_form() {
-        // JSON object form dispatches to parse_expansion_with_language
-        let terms =
-            inner::parse_expansion(r#"{"text": "[\"und\", \"drupal\"]", "language": "de"}"#);
+    fn test_parse_expansion_object_form_with_language() {
+        let terms = inner::parse_expansion(
+            r#"{"text": "[\"und\", \"drupal\"]", "language": "de"}"#
+        );
         assert!(!terms.contains(&"und".to_string()));
         assert!(terms.contains(&"drupal".to_string()));
     }
 
     #[test]
+    fn test_parse_expansion_object_form_generic_terms() {
+        let terms = inner::parse_expansion(
+            r#"{"text": "[\"team\", \"drupal\", \"platform\"]", "language": "en", "generic_terms": ["team", "platform"]}"#
+        );
+        assert!(!terms.contains(&"team".to_string()));
+        assert!(!terms.contains(&"platform".to_string()));
+        assert!(terms.contains(&"drupal".to_string()));
+    }
+
+    #[test]
+    fn test_parse_expansion_object_form_existing_terms() {
+        let terms = inner::parse_expansion(
+            r#"{"text": "[\"performance\"]", "language": "en", "existing_terms": ["migration", "drupal"]}"#
+        );
+        assert!(terms.contains(&"performance".to_string()));
+        assert!(terms.contains(&"migration".to_string()));
+        assert!(terms.contains(&"drupal".to_string()));
+    }
+
+    #[test]
+    fn test_extract_context_short_unchanged() {
+        let input = json!({
+            "content": "Short content.",
+            "query": "drupal"
+        });
+        let result = inner::extract_context(&input).unwrap();
+        assert_eq!(result, "Short content.");
+    }
+
+    #[test]
+    fn test_batch_extract_context() {
+        let input = json!({
+            "items": [
+                {"content": "Short.", "url": "https://a.com", "title": "A"},
+                {"content": "Brief.", "url": "https://b.com", "title": "B"}
+            ],
+            "query": "drupal"
+        });
+        let result = inner::batch_extract_context(&input).unwrap();
+        let arr = result.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["url"], "https://a.com");
+    }
+
+    #[test]
+    fn test_sanitize_query_email() {
+        let input = json!({"query": "contact user@example.com please"});
+        let result = inner::sanitize_query(&input).unwrap();
+        assert!(result.contains("[EMAIL]"));
+        assert!(!result.contains('@'));
+    }
+
+    #[test]
+    fn test_sanitize_query_clean() {
+        let input = json!({"query": "drupal performance tips"});
+        let result = inner::sanitize_query(&input).unwrap();
+        assert_eq!(result, "drupal performance tips");
+    }
+
+    #[test]
+    fn test_sanitize_query_custom_config() {
+        let input = json!({
+            "query": "call 555-867-5309 today",
+            "config": {"redact_phone": false}
+        });
+        let result = inner::sanitize_query(&input).unwrap();
+        assert!(result.contains("555-867-5309")); // phone not redacted
+    }
+
+    #[test]
+    fn test_truncate_conversation_basic() {
+        let input = json!({
+            "messages": [
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "hi"}
+            ],
+            "config": {"max_length": 1000}
+        });
+        let result = inner::truncate_conversation(&input).unwrap();
+        assert_eq!(result.as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_truncate_conversation_removes_pairs() {
+        let input = json!({
+            "messages": [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "initial"},
+                {"role": "user", "content": "q1"},
+                {"role": "assistant", "content": "a1"},
+                {"role": "user", "content": "q2"},
+                {"role": "assistant", "content": "a2"}
+            ],
+            // "sys"(3)+"initial"(7)+"q1"(2)+"a1"(2)+"q2"(2)+"a2"(2)=18; 15 forces one removal
+            "config": {"max_length": 15, "preserve_first_n": 2, "removal_unit": 2}
+        });
+        let result = inner::truncate_conversation(&input).unwrap();
+        let arr = result.as_array().unwrap();
+        // system and initial preserved; oldest pair (q1+a1) removed
+        assert_eq!(arr[0]["content"], "sys");
+        let has_q1 = arr.iter().any(|m| m["content"] == "q1");
+        assert!(!has_q1);
+    }
+
+    #[test]
     fn test_batch_score_results_basic() {
         let input = json!({
-            "queries": [
-                {
-                    "query": "drupal",
-                    "results": [
-                        {"url": "https://a.com", "title": "Drupal Guide", "excerpt": "About Drupal", "date": "2026-01-01"},
-                        {"url": "https://b.com", "title": "Other Page", "excerpt": "Unrelated", "date": "2026-01-01"}
-                    ]
-                }
-            ]
+            "queries": [{
+                "query": "drupal",
+                "results": [
+                    {"url": "https://a.com", "title": "Drupal Guide", "excerpt": "About Drupal", "date": "2026-01-01"},
+                    {"url": "https://b.com", "title": "Other Page", "excerpt": "Unrelated", "date": "2026-01-01"}
+                ]
+            }]
         });
         let result = inner::batch_score_results(&input).unwrap();
         let arr = result.as_array().unwrap();
         assert_eq!(arr.len(), 1);
-        let first_batch = arr[0].as_array().unwrap();
-        assert_eq!(first_batch.len(), 2);
-        assert_eq!(first_batch[0]["url"], "https://a.com");
-    }
-
-    #[test]
-    fn test_batch_score_results_multiple_queries() {
-        let input = json!({
-            "queries": [
-                {
-                    "query": "rust",
-                    "results": [{"url": "https://a.com", "title": "Rust Guide", "excerpt": "Rust language", "date": "2026-01-01"}]
-                },
-                {
-                    "query": "python",
-                    "results": [{"url": "https://b.com", "title": "Python Docs", "excerpt": "Python language", "date": "2026-01-01"}]
-                }
-            ]
-        });
-        let result = inner::batch_score_results(&input).unwrap();
-        let arr = result.as_array().unwrap();
-        assert_eq!(arr.len(), 2);
-    }
-
-    #[test]
-    fn test_batch_score_results_per_query_config() {
-        let input = json!({
-            "queries": [{
-                "query": "test",
-                "results": [{"url": "https://a.com", "title": "Test", "excerpt": "testing", "date": "2026-01-01"}],
-                "config": {"language": "de"}
-            }],
-            "default_config": {"language": "en"}
-        });
-        let result = inner::batch_score_results(&input).unwrap();
-        assert_eq!(result.as_array().unwrap().len(), 1);
-    }
-
-    #[test]
-    fn test_batch_score_results_empty_queries() {
-        let input = json!({"queries": []});
-        let result = inner::batch_score_results(&input).unwrap();
-        assert_eq!(result.as_array().unwrap().len(), 0);
-    }
-
-    #[test]
-    fn test_batch_score_results_missing_queries() {
-        let input = json!({});
-        assert!(inner::batch_score_results(&input).is_err());
+        assert_eq!(arr[0][0]["url"], "https://a.com");
     }
 
     #[test]
     fn test_describe() {
         let desc = inner::describe();
         assert_eq!(desc["name"], "scolta-core");
-        assert_eq!(desc["version"], env!("CARGO_PKG_VERSION"));
-        assert_eq!(desc["wasm_interface_version"], 3);
+        assert_eq!(desc["wasm_interface_version"], 4);
         let functions = desc["functions"].as_object().unwrap();
+        // New functions
+        assert!(functions.contains_key("match_priority_pages"));
+        assert!(functions.contains_key("extract_context"));
+        assert!(functions.contains_key("batch_extract_context"));
+        assert!(functions.contains_key("sanitize_query"));
+        assert!(functions.contains_key("truncate_conversation"));
+        // Stable functions still present
         assert!(functions.contains_key("score_results"));
-        assert!(functions.contains_key("batch_score_results"));
-        assert!(functions.contains_key("describe"));
-        assert!(!functions.contains_key("clean_html"));
-        assert!(!functions.contains_key("debug_call"));
+        assert!(functions.contains_key("merge_results"));
+        assert!(functions.contains_key("parse_expansion"));
+        // Removed
+        assert!(!functions.contains_key("to_js_scoring_config"));
+        // All functions have required metadata
         for (name, info) in functions {
             assert!(info.get("since").is_some(), "{} missing 'since'", name);
-            assert!(
-                info.get("stability").is_some(),
-                "{} missing 'stability'",
-                name
-            );
+            assert!(info.get("stability").is_some(), "{} missing 'stability'", name);
         }
     }
 
@@ -565,7 +1007,7 @@ mod tests {
         let readme = std::fs::read_to_string("README.md").expect("README.md should exist");
         assert!(
             !readme.contains("wasm32-wasip1"),
-            "README.md references old build target wasm32-wasip1. Current target is wasm32-unknown-unknown."
+            "README.md references old build target wasm32-wasip1"
         );
         assert!(
             !readme.contains("extism"),

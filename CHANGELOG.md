@@ -6,6 +6,24 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [0.2.3] - Unreleased
 
+### Added
+
+- **`match_priority_pages`:** New WASM export and `inner::` function. Takes `{ query, priority_pages }` and returns pages whose `url_pattern` or `keywords` match the query. Enables pre-call priority page injection into `score_results`.
+- **Priority page boosting in `score_results`:** `ScoringConfig` gains `priority_pages` (array of `{ url_pattern, keywords, boost, custom_excerpt, page_id }` objects). Matching pages receive a `priority_boost` addend to their score; `custom_excerpt` overrides the excerpt in the returned result.
+- **Source weighting:** `SearchResult` gains `source_weight: Option<f64>`. When set, the base score is multiplied by this factor before all other boosts are applied.
+- **N-set `merge_results`:** Rewrote `merge_results` to accept `{ sets: [{ results, weight }], deduplicate_by, case_sensitive, exclude_urls, normalize_urls }`. Applies per-set weight multipliers, then deduplicates (by URL or title), then excludes listed URL patterns. Old `{ original, expanded }` format returns an error.
+- **`parse_expansion` generic-term filtering:** `parse_expansion` object form now accepts `generic_terms` (site-specific words to filter) and `existing_terms` (terms to merge into the output). Acronym exception: ≤3-char terms pass regardless of generic status. Proper noun exception: terms with an uppercase letter pass.
+- **`extract_context` / `batch_extract_context`:** New WASM exports. Extract the most relevant portion of article content for LLM context using intro + keyword-anchored snippets + sentence-boundary truncation.
+- **`sanitize_query`:** New WASM export. Redacts PII (email, phone, SSN, credit card, IPv4) from queries before analytics logging. Supports custom regex patterns via `custom_patterns`.
+- **`truncate_conversation`:** New WASM export. Trims a conversation message array to a character limit, always preserving the first N messages and removing oldest pairs.
+- **`WASM_INTERFACE_VERSION` bumped to 4** — reflects new exports and removal of `to_js_scoring_config`.
+- `regex = "1"` added as a dependency (for `sanitize_query` custom patterns).
+
+### Removed
+
+- **`to_js_scoring_config`:** Removed WASM export and `inner::` function. Callers should use the JSON config fields directly.
+- `UnknownFunction` and `ConfigWarning` error variants removed from `ScoltaError`.
+
 ## [0.2.2] - 2026-04-16
 
 ### Added

@@ -3,18 +3,10 @@
 //! Every error includes the originating function name so that when an error
 //! propagates to the calling JavaScript and lands in the browser console, the
 //! developer can immediately identify which WASM function produced it.
-//!
-//! The [`ScoltaError`] enum covers all error categories the crate can produce.
-//! Its [`Display`] implementation generates human-readable messages suitable
-//! for logging and error display.
 
 use std::fmt;
 
 /// Structured error type for all scolta-core operations.
-///
-/// Each variant includes enough context for a platform plugin maintainer
-/// to diagnose the problem without reading the Rust source. The `function`
-/// field (where present) names the WASM export that failed.
 #[derive(Debug, Clone)]
 pub enum ScoltaError {
     /// Input could not be parsed as valid JSON.
@@ -39,20 +31,10 @@ pub enum ScoltaError {
     /// The requested prompt template name does not exist.
     UnknownPrompt { name: String },
 
-    /// The function name passed to `debug_call` is not recognized.
-    UnknownFunction { name: String },
-
     /// Failed to parse or process input data.
     ParseError {
         function: &'static str,
         detail: String,
-    },
-
-    /// A configuration value is out of its valid range.
-    /// This is a warning-level issue: the operation proceeds with a default.
-    ConfigWarning {
-        field: &'static str,
-        message: String,
     },
 }
 
@@ -75,14 +57,8 @@ impl fmt::Display for ScoltaError {
             Self::UnknownPrompt { name } => {
                 write!(f, "resolve_prompt: unknown prompt template '{}'", name)
             }
-            Self::UnknownFunction { name } => {
-                write!(f, "debug_call: unknown function '{}'", name)
-            }
             Self::ParseError { function, detail } => {
                 write!(f, "{}: {}", function, detail)
-            }
-            Self::ConfigWarning { field, message } => {
-                write!(f, "config warning: field '{}': {}", field, message)
             }
         }
     }
@@ -90,7 +66,6 @@ impl fmt::Display for ScoltaError {
 
 impl std::error::Error for ScoltaError {}
 
-/// Convenience constructors for common error patterns.
 impl ScoltaError {
     pub fn invalid_json(function: &'static str, err: impl fmt::Display) -> Self {
         Self::InvalidJson {
@@ -139,16 +114,5 @@ mod tests {
         };
         assert!(err.to_string().contains("nonexistent"));
         assert!(err.to_string().contains("resolve_prompt"));
-    }
-
-    #[test]
-    fn test_error_display_config_warning() {
-        let err = ScoltaError::ConfigWarning {
-            field: "recency_boost_max",
-            message: "value 5.0 exceeds reasonable range (0.0-2.0), using default 0.5".into(),
-        };
-        let msg = err.to_string();
-        assert!(msg.contains("recency_boost_max"));
-        assert!(msg.contains("config warning"));
     }
 }

@@ -6,12 +6,16 @@
 //! # Exported functions
 //!
 //! - [`score_results`] — Score and rank search results
-//! - [`merge_results`] — Merge original + expanded results
+//! - [`merge_results`] — Merge N result sets with weights and deduplication
+//! - [`match_priority_pages`] — Find priority pages matching a query
 //! - [`parse_expansion`] — Parse LLM expansion response (string or JSON object)
 //! - [`batch_score_results`] — Score multiple queries in one call
 //! - [`resolve_prompt`] — Resolve prompt template
 //! - [`get_prompt`] — Get raw prompt template
-//! - [`to_js_scoring_config`] — Export scoring config for JS
+//! - [`extract_context`] — Extract relevant context from article content
+//! - [`batch_extract_context`] — Extract context from multiple items
+//! - [`sanitize_query`] — Redact PII from a query string
+//! - [`truncate_conversation`] — Trim conversation history to a character limit
 //! - [`version`] — Get crate version
 //! - [`describe`] — Self-describing function manifest
 //!
@@ -39,17 +43,50 @@ pub fn score_results(input: &str) -> Result<String, JsError> {
         .map_err(|e| JsError::new(&format!("JSON serialization failed: {}", e)))
 }
 
-/// Merge original and expanded search results.
+/// Merge N scored result sets with per-set weights and deduplication.
 ///
 /// Input: JSON string with shape:
-///   `{ "original": [...], "expanded": [...], "config": {...} }`
+/// ```json
+/// {
+///   "sets": [
+///     { "results": [...], "weight": 1.0 },
+///     { "results": [...], "weight": 0.7 }
+///   ],
+///   "deduplicate_by": "url",
+///   "case_sensitive": false,
+///   "exclude_urls": ["/admin"],
+///   "normalize_urls": true
+/// }
+/// ```
 ///
-/// Output: JSON string — merged and deduplicated results.
+/// Output: JSON string — merged, weighted, and deduplicated results array.
 #[wasm_bindgen]
 pub fn merge_results(input: &str) -> Result<String, JsError> {
     let value: serde_json::Value =
         serde_json::from_str(input).map_err(|e| JsError::new(&format!("Invalid JSON: {}", e)))?;
     let result = inner::merge_results(&value).map_err(|e| JsError::new(&e.to_string()))?;
+    serde_json::to_string(&result)
+        .map_err(|e| JsError::new(&format!("JSON serialization failed: {}", e)))
+}
+
+/// Find priority pages matching a query.
+///
+/// # Stability
+/// Status: experimental
+/// Since: 0.2.3
+///
+/// Input: JSON string with shape:
+/// ```json
+/// { "query": "search terms", "priority_pages": [...] }
+/// ```
+///
+/// Output: JSON string — array of matching priority page objects.
+#[wasm_bindgen]
+pub fn match_priority_pages(input: &str) -> Result<String, JsError> {
+    let value: serde_json::Value =
+        serde_json::from_str(input).map_err(|e| JsError::new(&format!("Invalid JSON: {}", e)))?;
+    let result =
+        inner::match_priority_pages(&value).map_err(|e| JsError::new(&e.to_string()))?;
     serde_json::to_string(&result)
         .map_err(|e| JsError::new(&format!("JSON serialization failed: {}", e)))
 }
@@ -63,9 +100,15 @@ pub fn merge_results(input: &str) -> Result<String, JsError> {
 ///    ["term1", "term2"]
 ///    ```
 ///
-/// 2. **JSON object** — allows specifying a language for stop word filtering.
+/// 2. **JSON object** — full configuration including language, generic-term filtering,
+///    and merging with an existing term set.
 ///    ```json
-///    { "text": "[\"term1\", \"term2\"]", "language": "de" }
+///    {
+///      "text": "[\"term1\", \"term2\"]",
+///      "language": "en",
+///      "generic_terms": ["platform", "solution"],
+///      "existing_terms": ["drupal"]
+///    }
 ///    ```
 ///
 /// Output: JSON string — array of extracted, filtered terms.
@@ -124,15 +167,102 @@ pub fn get_prompt(name: &str) -> Result<String, JsError> {
     inner::get_prompt(name).map_err(|e| JsError::new(&e.to_string()))
 }
 
-/// Convert scoring config to JavaScript-friendly format.
+/// Extract the most relevant portion of article content for LLM context.
 ///
-/// Input: JSON string of scoring config.
-/// Output: JSON string with JS-style keys (UPPER_SNAKE_CASE).
+/// # Stability
+/// Status: experimental
+/// Since: 0.2.3
+///
+/// Input: JSON string with shape:
+/// ```json
+/// {
+///   "content": "full article text...",
+///   "query": "search terms",
+///   "config": { "max_length": 6000, "intro_length": 2000, "snippet_radius": 500 }
+/// }
+/// ```
+///
+/// Output: JSON string — extracted context string.
 #[wasm_bindgen]
-pub fn to_js_scoring_config(input: &str) -> Result<String, JsError> {
+pub fn extract_context(input: &str) -> Result<String, JsError> {
     let value: serde_json::Value =
         serde_json::from_str(input).map_err(|e| JsError::new(&format!("Invalid JSON: {}", e)))?;
-    let result = inner::to_js_scoring_config(&value).map_err(|e| JsError::new(&e.to_string()))?;
+    let result = inner::extract_context(&value).map_err(|e| JsError::new(&e.to_string()))?;
+    serde_json::to_string(&result)
+        .map_err(|e| JsError::new(&format!("JSON serialization failed: {}", e)))
+}
+
+/// Extract context from multiple content items in one call.
+///
+/// # Stability
+/// Status: experimental
+/// Since: 0.2.3
+///
+/// Input: JSON string with shape:
+/// ```json
+/// {
+///   "items": [{ "content": "...", "url": "...", "title": "..." }],
+///   "query": "search terms",
+///   "config": { "max_length": 6000 }
+/// }
+/// ```
+///
+/// Output: JSON string — array of `{ url, title, context }` objects.
+#[wasm_bindgen]
+pub fn batch_extract_context(input: &str) -> Result<String, JsError> {
+    let value: serde_json::Value =
+        serde_json::from_str(input).map_err(|e| JsError::new(&format!("Invalid JSON: {}", e)))?;
+    let result =
+        inner::batch_extract_context(&value).map_err(|e| JsError::new(&e.to_string()))?;
+    serde_json::to_string(&result)
+        .map_err(|e| JsError::new(&format!("JSON serialization failed: {}", e)))
+}
+
+/// Redact PII from a query string before analytics logging.
+///
+/// # Stability
+/// Status: experimental
+/// Since: 0.2.3
+///
+/// Input: JSON string with shape:
+/// ```json
+/// {
+///   "query": "contact user@example.com",
+///   "config": { "redact_email": true, "redact_phone": true }
+/// }
+/// ```
+///
+/// Output: JSON string — sanitized query string.
+#[wasm_bindgen]
+pub fn sanitize_query(input: &str) -> Result<String, JsError> {
+    let value: serde_json::Value =
+        serde_json::from_str(input).map_err(|e| JsError::new(&format!("Invalid JSON: {}", e)))?;
+    let result = inner::sanitize_query(&value).map_err(|e| JsError::new(&e.to_string()))?;
+    serde_json::to_string(&result)
+        .map_err(|e| JsError::new(&format!("JSON serialization failed: {}", e)))
+}
+
+/// Trim conversation history to fit within a character limit.
+///
+/// # Stability
+/// Status: experimental
+/// Since: 0.2.3
+///
+/// Input: JSON string with shape:
+/// ```json
+/// {
+///   "messages": [{ "role": "user", "content": "..." }],
+///   "config": { "max_length": 12000, "preserve_first_n": 2, "removal_unit": 2 }
+/// }
+/// ```
+///
+/// Output: JSON string — trimmed messages array.
+#[wasm_bindgen]
+pub fn truncate_conversation(input: &str) -> Result<String, JsError> {
+    let value: serde_json::Value =
+        serde_json::from_str(input).map_err(|e| JsError::new(&format!("Invalid JSON: {}", e)))?;
+    let result =
+        inner::truncate_conversation(&value).map_err(|e| JsError::new(&e.to_string()))?;
     serde_json::to_string(&result)
         .map_err(|e| JsError::new(&format!("JSON serialization failed: {}", e)))
 }
@@ -183,16 +313,20 @@ mod tests {
     #[test]
     fn merge_results_json_roundtrip() {
         let input = serde_json::json!({
-            "original": [
-                {"title": "Page A", "url": "/a", "score": 0.9, "excerpt": "a", "date": "2025-01-01"}
-            ],
-            "expanded": [
-                {"title": "Page B", "url": "/b", "score": 0.8, "excerpt": "b", "date": "2025-01-01"}
-            ],
-            "config": {"expand_primary_weight": 0.7}
+            "sets": [
+                {
+                    "results": [{"title": "Page A", "url": "/a", "score": 0.9, "excerpt": "a", "date": "2025-01-01"}],
+                    "weight": 1.0
+                },
+                {
+                    "results": [{"title": "Page B", "url": "/b", "score": 0.8, "excerpt": "b", "date": "2025-01-01"}],
+                    "weight": 0.7
+                }
+            ]
         });
         let result = inner::merge_results(&input).unwrap();
         assert!(result.is_array());
+        assert_eq!(result.as_array().unwrap().len(), 2);
     }
 
     #[test]
@@ -204,13 +338,6 @@ mod tests {
         });
         let result = inner::resolve_prompt(&input).unwrap();
         assert!(result.contains("TestSite"));
-    }
-
-    #[test]
-    fn to_js_scoring_config_roundtrip() {
-        let input = serde_json::json!({"recency_boost_max": 0.8});
-        let result = inner::to_js_scoring_config(&input).unwrap();
-        assert_eq!(result["RECENCY_BOOST_MAX"], 0.8);
     }
 
     #[test]

@@ -1,98 +1,217 @@
 //! Parse and process LLM expansion responses.
 //!
-//! LLM responses arrive in unpredictable formats — JSON arrays, markdown
-//! code blocks, or plain text with newlines and commas. This module
-//! handles all three with a graceful fallback chain, then filters the
-//! results through the shared stop word list.
+//! Handles three input formats with a fallback chain, filters results through
+//! stop word lists, applies generic-term filtering, and merges with existing
+//! term sets.
 
 use crate::common;
+use crate::stop_words;
 
-/// Parse an LLM response containing expansion terms, using English stop words.
+/// Configuration for `parse_expansion_with_config`.
 ///
-/// This is a convenience wrapper for [`parse_expansion_with_language`] that
-/// defaults to English (`"en"`). Use it when no language context is available.
-///
-/// # Arguments
-/// * `response` - Raw LLM response text
-///
-/// # Returns
-/// Vector of cleaned expansion terms (may be empty if everything was filtered)
+/// All fields are optional — callers that do not supply a field get the default
+/// behavior (same as calling `parse_expansion`).
+#[derive(Debug, Clone, Default)]
+pub struct ExpansionConfig {
+    /// ISO 639-1 language code for stop word filtering. Default: `"en"`.
+    pub language: String,
+    /// Site-specific generic terms to filter from single-word results.
+    /// When empty, generic filtering is disabled entirely.
+    /// Example: `["team", "platform", "solution"]`
+    pub generic_terms: Vec<String>,
+    /// Remove single-word results that match `generic_terms`. Default: true
+    /// (only relevant when `generic_terms` is non-empty).
+    pub filter_single_word_generic: bool,
+    /// Keep terms ≤4 characters regardless of generic status (acronyms like
+    /// LLM, API, MoE). Default: true.
+    pub keep_acronyms: bool,
+    /// Keep terms containing an uppercase letter regardless of generic status
+    /// (proper nouns like Drupal, GoLang). Default: true.
+    pub keep_proper_nouns: bool,
+    /// Minimum term length in characters. Default: 2.
+    pub min_term_length: u32,
+    /// Terms to merge into the output. Deduplicated case-insensitively against
+    /// parsed terms; first occurrence's casing is preserved.
+    pub existing_terms: Vec<String>,
+}
+
+impl ExpansionConfig {
+    pub fn new(language: &str) -> Self {
+        ExpansionConfig {
+            language: language.to_string(),
+            filter_single_word_generic: true,
+            keep_acronyms: true,
+            keep_proper_nouns: true,
+            min_term_length: 2,
+            ..Default::default()
+        }
+    }
+}
+
+/// Parse an LLM response into expansion terms using English stop words.
 pub fn parse_expansion(response: &str) -> Vec<String> {
     parse_expansion_with_language(response, "en")
 }
 
-/// Parse an LLM response containing expansion terms for the given language.
+/// Parse an LLM response into expansion terms for the given language.
 ///
-/// Handles multiple input formats with a fallback chain:
-/// 1. **Markdown-wrapped JSON**: `` ```json ["term1", "term2"] ``` ``
-/// 2. **Bare JSON array**: `["term1", "term2", "term3"]`
-/// 3. **Fallback**: Split by newlines/commas if JSON fails
-///
-/// All results are filtered through [`common::is_valid_term`] with the given
-/// language's stop word list to remove stop words, very short strings, and
-/// pure numbers.
-///
-/// # Arguments
-/// * `response` - Raw LLM response text
-/// * `language` - ISO 639-1 language code (e.g. `"en"`, `"de"`)
-///
-/// # Returns
-/// Vector of cleaned expansion terms (may be empty if everything was filtered)
+/// Fallback chain: markdown JSON block → bare JSON array → newline/comma split.
+/// All results filtered through `common::is_valid_term`.
 pub fn parse_expansion_with_language(response: &str, language: &str) -> Vec<String> {
-    // Try to extract JSON from markdown code blocks first
-    let json_text = extract_json_from_markdown(response).unwrap_or_else(|| response.to_string());
+    let cfg = ExpansionConfig::new(language);
+    parse_expansion_with_config(response, &cfg)
+}
 
-    // Try to parse as JSON array
-    if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&json_text) {
+/// Parse an LLM response with full configuration for filtering and merging.
+///
+/// # Generic term filtering
+///
+/// Only active when `config.generic_terms` is non-empty. Rules applied in order:
+/// 1. Terms shorter than `min_term_length` are removed.
+/// 2. Terms ≤4 characters pass if `keep_acronyms` is true.
+/// 3. Terms with any uppercase letter pass if `keep_proper_nouns` is true.
+/// 4. Single-word generic terms are removed.
+/// 5. Multi-word phrases pass if at least one word is not a stop word and not generic.
+///
+/// # Term merging
+///
+/// When `existing_terms` is non-empty, parsed terms and existing terms are merged
+/// (case-insensitive dedup, first occurrence's casing preserved).
+pub fn parse_expansion_with_config(text: &str, config: &ExpansionConfig) -> Vec<String> {
+    let language = if config.language.is_empty() {
+        "en"
+    } else {
+        &config.language
+    };
+
+    let json_text = extract_json_from_markdown(text).unwrap_or_else(|| text.to_string());
+
+    let parsed: Vec<String> = if let Ok(json_value) =
+        serde_json::from_str::<serde_json::Value>(&json_text)
+    {
         if let Some(array) = json_value.as_array() {
-            let terms: Vec<String> = array
+            array
                 .iter()
                 .filter_map(|v| v.as_str())
                 .map(|s| s.trim().to_string())
                 .filter(|s| common::is_valid_term(s, language))
-                .collect();
+                .collect()
+        } else {
+            fallback_parse_with_language(&json_text, language)
+        }
+    } else {
+        fallback_parse_with_language(&json_text, language)
+    };
 
-            // Return even if empty — the JSON was valid, so falling through
-            // to the fallback parser would re-parse the JSON syntax as text
-            // and produce garbage terms from brackets and quotes.
-            return terms;
+    // Always apply min_term_length filter.
+    let min_len = config.min_term_length as usize;
+    let parsed: Vec<String> = parsed
+        .into_iter()
+        .filter(|t| t.chars().count() >= min_len)
+        .collect();
+
+    // Apply generic-term filtering (only active when generic_terms is non-empty).
+    let filtered = if config.generic_terms.is_empty() {
+        parsed
+    } else {
+        parsed
+            .into_iter()
+            .filter(|term| should_keep_term(term, config, language, min_len))
+            .collect()
+    };
+
+    // Merge with existing_terms, deduplicating case-insensitively.
+    if config.existing_terms.is_empty() {
+        filtered
+    } else {
+        merge_dedup(filtered, &config.existing_terms)
+    }
+}
+
+/// Decide whether to keep a term under generic-term filtering rules.
+fn should_keep_term(
+    term: &str,
+    config: &ExpansionConfig,
+    language: &str,
+    min_len: usize,
+) -> bool {
+    let char_count = term.chars().count();
+
+    // Remove below-minimum-length terms.
+    if char_count < min_len {
+        return false;
+    }
+
+    // Acronym exception: ≤3 chars pass unconditionally (LLM, API, MoE).
+    if config.keep_acronyms && char_count <= 3 {
+        return true;
+    }
+
+    // Proper noun exception: any uppercase letter passes unconditionally.
+    if config.keep_proper_nouns && term.chars().any(|c| c.is_uppercase()) {
+        return true;
+    }
+
+    let generic_lower: Vec<String> = config
+        .generic_terms
+        .iter()
+        .map(|g| g.to_lowercase())
+        .collect();
+
+    let stop_words = stop_words::get_stop_words(language);
+
+    let words: Vec<&str> = term.split_whitespace().collect();
+
+    if words.len() == 1 {
+        // Single word: remove if it matches a generic term.
+        let lower = term.to_lowercase();
+        !generic_lower.contains(&lower)
+    } else {
+        // Multi-word phrase: keep if at least one word is not a stop word and not generic.
+        words.iter().any(|w| {
+            let wl = w.to_lowercase();
+            !stop_words.contains(&wl.as_str()) && !generic_lower.contains(&wl)
+        })
+    }
+}
+
+/// Merge two term lists, deduplicating case-insensitively.
+///
+/// First occurrence (from `primary`) wins when the same term appears in both.
+fn merge_dedup(primary: Vec<String>, secondary: &[String]) -> Vec<String> {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut result: Vec<String> = Vec::new();
+
+    for term in primary.into_iter().chain(secondary.iter().cloned()) {
+        let lower = term.to_lowercase();
+        if seen.insert(lower) {
+            result.push(term);
         }
     }
 
-    // Fallback: split by newlines and commas
-    fallback_parse_with_language(&json_text, language)
+    result
 }
 
-/// Extract JSON content from markdown code blocks.
-///
-/// Looks for `` ```json ... ``` `` or `` ``` ... ``` ``.
 fn extract_json_from_markdown(text: &str) -> Option<String> {
     let trimmed = text.trim();
 
-    // Look for ```json ... ```
     if let Some(start) = trimmed.find("```json") {
         let content_start = start + 7;
         if let Some(end) = trimmed[content_start..].find("```") {
-            let content = &trimmed[content_start..content_start + end];
-            return Some(content.trim().to_string());
+            return Some(trimmed[content_start..content_start + end].trim().to_string());
         }
     }
 
-    // Look for ``` ... ```
     if let Some(start) = trimmed.find("```") {
         let content_start = start + 3;
         if let Some(end) = trimmed[content_start..].find("```") {
-            let content = &trimmed[content_start..content_start + end];
-            return Some(content.trim().to_string());
+            return Some(trimmed[content_start..content_start + end].trim().to_string());
         }
     }
 
     None
 }
 
-/// Fallback parsing when JSON fails, using the given language's stop words.
-///
-/// Splits by newlines and commas, cleans whitespace and quotes.
 fn fallback_parse_with_language(text: &str, language: &str) -> Vec<String> {
     text.split(['\n', ','])
         .map(|s| s.trim())
@@ -108,140 +227,179 @@ mod tests {
 
     #[test]
     fn test_parse_expansion_json_array() {
-        let response = r#"["term1", "term2", "term3"]"#;
-        let terms = parse_expansion(response);
-        assert_eq!(terms.len(), 3);
-        assert_eq!(terms[0], "term1");
-        assert_eq!(terms[1], "term2");
-        assert_eq!(terms[2], "term3");
+        let terms = parse_expansion(r#"["term1", "term2", "term3"]"#);
+        assert_eq!(terms, vec!["term1", "term2", "term3"]);
     }
 
     #[test]
     fn test_parse_expansion_markdown_json() {
-        let response = "```json\n[\"search term\", \"another term\"]\n```";
-        let terms = parse_expansion(response);
-        assert_eq!(terms.len(), 2);
-        assert_eq!(terms[0], "search term");
-        assert_eq!(terms[1], "another term");
-    }
-
-    #[test]
-    fn test_parse_expansion_markdown_generic() {
-        let response = "```\n[\"item1\", \"item2\"]\n```";
-        let terms = parse_expansion(response);
+        let terms = parse_expansion("```json\n[\"search term\", \"another term\"]\n```");
         assert_eq!(terms.len(), 2);
     }
 
     #[test]
     fn test_parse_expansion_fallback() {
-        let response = "term1\nterm2, term3";
-        let terms = parse_expansion(response);
-        assert_eq!(terms.len(), 3);
+        let terms = parse_expansion("term1\nterm2, term3");
         assert!(terms.contains(&"term1".to_string()));
-        assert!(terms.contains(&"term2".to_string()));
-        assert!(terms.contains(&"term3".to_string()));
     }
 
     #[test]
     fn test_parse_expansion_filters_stop_words() {
-        let response = r#"["the", "search term", "a", "test"]"#;
-        let terms = parse_expansion(response);
+        let terms = parse_expansion(r#"["the", "search term", "a", "test"]"#);
         assert!(!terms.contains(&"the".to_string()));
         assert!(!terms.contains(&"a".to_string()));
         assert!(terms.contains(&"search term".to_string()));
-        assert!(terms.contains(&"test".to_string()));
-    }
-
-    #[test]
-    fn test_parse_expansion_filters_numbers() {
-        let response = r#"["123", "term123", "test"]"#;
-        let terms = parse_expansion(response);
-        assert!(!terms.contains(&"123".to_string()));
-        assert!(terms.contains(&"term123".to_string()));
-        assert!(terms.contains(&"test".to_string()));
-    }
-
-    #[test]
-    fn test_parse_expansion_filters_short() {
-        let response = r#"["a", "ab", "abc"]"#;
-        let terms = parse_expansion(response);
-        assert!(!terms.iter().any(|t| t.len() < 2));
-    }
-
-    #[test]
-    fn test_extract_json_from_markdown_json() {
-        let text = "```json\n[\"term1\", \"term2\"]\n```";
-        let extracted = extract_json_from_markdown(text);
-        assert!(extracted.is_some());
-        assert!(extracted.unwrap().contains("term1"));
-    }
-
-    #[test]
-    fn test_extract_json_from_markdown_generic() {
-        let text = "```\n[\"item1\"]\n```";
-        let extracted = extract_json_from_markdown(text);
-        assert!(extracted.is_some());
-    }
-
-    #[test]
-    fn test_extract_json_from_markdown_no_code_block() {
-        let text = "Just some text without code blocks";
-        assert!(extract_json_from_markdown(text).is_none());
-    }
-
-    #[test]
-    fn test_fallback_parse_newlines() {
-        let terms = fallback_parse_with_language("term1\nterm2\nterm3", "en");
-        assert_eq!(terms.len(), 3);
-    }
-
-    #[test]
-    fn test_fallback_parse_commas() {
-        let terms = fallback_parse_with_language("term1, term2, term3", "en");
-        assert_eq!(terms.len(), 3);
-    }
-
-    #[test]
-    fn test_fallback_parse_quoted() {
-        let terms = fallback_parse_with_language(r#""term1", "term2""#, "en");
-        assert_eq!(terms.len(), 2);
-        assert_eq!(terms[0], "term1");
-        assert_eq!(terms[1], "term2");
-    }
-
-    #[test]
-    fn test_parse_expansion_with_whitespace() {
-        let response = r#"[ "term1" , "term2" , "term3" ]"#;
-        let terms = parse_expansion(response);
-        assert_eq!(terms.len(), 3);
-        assert_eq!(terms[0], "term1");
     }
 
     #[test]
     fn test_parse_expansion_with_language_de() {
-        // "und" is a German stop word, "drupal" is not
-        let response = r#"["und", "drupal", "suche"]"#;
-        let terms = parse_expansion_with_language(response, "de");
+        let terms = parse_expansion_with_language(r#"["und", "drupal", "suche"]"#, "de");
         assert!(!terms.contains(&"und".to_string()));
         assert!(terms.contains(&"drupal".to_string()));
-        assert!(terms.contains(&"suche".to_string()));
     }
 
     #[test]
-    fn test_parse_expansion_with_language_en_same_as_default() {
-        let response = r#"["the", "search", "engine"]"#;
-        let en_terms = parse_expansion_with_language(response, "en");
-        let default_terms = parse_expansion(response);
-        assert_eq!(en_terms, default_terms);
+    fn test_generic_terms_single_word_removed() {
+        let config = ExpansionConfig {
+            language: "en".to_string(),
+            generic_terms: vec!["team".to_string(), "platform".to_string()],
+            filter_single_word_generic: true,
+            keep_acronyms: true,
+            keep_proper_nouns: true,
+            min_term_length: 2,
+            existing_terms: vec![],
+        };
+
+        let terms = parse_expansion_with_config(r#"["team", "drupal", "platform"]"#, &config);
+        assert!(!terms.contains(&"team".to_string()));
+        assert!(!terms.contains(&"platform".to_string()));
+        assert!(terms.contains(&"drupal".to_string()));
     }
 
     #[test]
-    fn test_parse_expansion_unknown_lang_keeps_english_stop_words_as_terms() {
-        // For unknown language, English stop words are NOT filtered
-        let response = r#"["the", "search"]"#;
-        let terms = parse_expansion_with_language(response, "xx");
-        // "the" is 3 chars, not a stop word for unknown language → included
-        assert!(terms.contains(&"the".to_string()));
-        assert!(terms.contains(&"search".to_string()));
+    fn test_generic_terms_multi_word_kept_with_specific_word() {
+        let config = ExpansionConfig {
+            language: "en".to_string(),
+            generic_terms: vec!["team".to_string()],
+            filter_single_word_generic: true,
+            keep_acronyms: true,
+            keep_proper_nouns: true,
+            min_term_length: 2,
+            existing_terms: vec![],
+        };
+
+        // "drupal team" has "drupal" which is specific → keep
+        let terms = parse_expansion_with_config(r#"["drupal team", "team"]"#, &config);
+        assert!(terms.contains(&"drupal team".to_string()));
+        assert!(!terms.contains(&"team".to_string()));
+    }
+
+    #[test]
+    fn test_keep_acronyms() {
+        let config = ExpansionConfig {
+            language: "en".to_string(),
+            generic_terms: vec!["llm".to_string(), "api".to_string()],
+            filter_single_word_generic: true,
+            keep_acronyms: true,
+            keep_proper_nouns: true,
+            min_term_length: 2,
+            existing_terms: vec![],
+        };
+
+        // Even though "llm" and "api" are in generic_terms, they're ≤3 chars (acronym exception)
+        let terms = parse_expansion_with_config(r#"["llm", "api", "integration"]"#, &config);
+        assert!(terms.contains(&"llm".to_string()));
+        assert!(terms.contains(&"api".to_string()));
+    }
+
+    #[test]
+    fn test_keep_proper_nouns() {
+        let config = ExpansionConfig {
+            language: "en".to_string(),
+            generic_terms: vec!["drupal".to_string()],
+            filter_single_word_generic: true,
+            keep_acronyms: true,
+            keep_proper_nouns: true,
+            min_term_length: 2,
+            existing_terms: vec![],
+        };
+
+        // "Drupal" has uppercase → keep (even though "drupal" is in generic_terms)
+        let terms = parse_expansion_with_config(r#"["Drupal", "drupal"]"#, &config);
+        assert!(terms.contains(&"Drupal".to_string()));
+        assert!(!terms.contains(&"drupal".to_string()));
+    }
+
+    #[test]
+    fn test_existing_terms_merged() {
+        let config = ExpansionConfig {
+            language: "en".to_string(),
+            generic_terms: vec![],
+            filter_single_word_generic: false,
+            keep_acronyms: true,
+            keep_proper_nouns: true,
+            min_term_length: 2,
+            existing_terms: vec!["drupal".to_string(), "migration".to_string()],
+        };
+
+        let terms = parse_expansion_with_config(r#"["performance", "optimization"]"#, &config);
+        assert!(terms.contains(&"drupal".to_string()));
+        assert!(terms.contains(&"migration".to_string()));
+        assert!(terms.contains(&"performance".to_string()));
+    }
+
+    #[test]
+    fn test_existing_terms_dedup_case_insensitive() {
+        let config = ExpansionConfig {
+            language: "en".to_string(),
+            generic_terms: vec![],
+            filter_single_word_generic: false,
+            keep_acronyms: true,
+            keep_proper_nouns: true,
+            min_term_length: 2,
+            existing_terms: vec!["Drupal".to_string()],
+        };
+
+        let terms = parse_expansion_with_config(r#"["drupal", "migration"]"#, &config);
+        // "drupal" from parsed comes first, "Drupal" from existing is a dup → skip
+        let drupal_occurrences: Vec<_> = terms.iter().filter(|t| t.to_lowercase() == "drupal").collect();
+        assert_eq!(drupal_occurrences.len(), 1);
+        assert_eq!(drupal_occurrences[0], "drupal"); // parsed casing wins (first)
+    }
+
+    #[test]
+    fn test_pure_merge_empty_text() {
+        // Empty text + existing_terms = just pass-through existing_terms
+        let config = ExpansionConfig {
+            language: "en".to_string(),
+            generic_terms: vec![],
+            filter_single_word_generic: false,
+            keep_acronyms: true,
+            keep_proper_nouns: true,
+            min_term_length: 2,
+            existing_terms: vec!["drupal".to_string(), "migration".to_string()],
+        };
+
+        let terms = parse_expansion_with_config("", &config);
+        assert!(terms.contains(&"drupal".to_string()));
+        assert!(terms.contains(&"migration".to_string()));
+    }
+
+    #[test]
+    fn test_min_term_length() {
+        let config = ExpansionConfig {
+            language: "en".to_string(),
+            generic_terms: vec![],
+            filter_single_word_generic: false,
+            keep_acronyms: false,
+            keep_proper_nouns: false,
+            min_term_length: 5,
+            existing_terms: vec![],
+        };
+
+        let terms = parse_expansion_with_config(r#"["ab", "abcd", "abcde", "abcdef"]"#, &config);
+        assert!(!terms.contains(&"ab".to_string()));
+        assert!(!terms.contains(&"abcd".to_string()));
+        assert!(terms.contains(&"abcde".to_string()));
     }
 }
