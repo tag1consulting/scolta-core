@@ -85,8 +85,7 @@ pub fn merge_results(input: &str) -> Result<String, JsError> {
 pub fn match_priority_pages(input: &str) -> Result<String, JsError> {
     let value: serde_json::Value =
         serde_json::from_str(input).map_err(|e| JsError::new(&format!("Invalid JSON: {}", e)))?;
-    let result =
-        inner::match_priority_pages(&value).map_err(|e| JsError::new(&e.to_string()))?;
+    let result = inner::match_priority_pages(&value).map_err(|e| JsError::new(&e.to_string()))?;
     serde_json::to_string(&result)
         .map_err(|e| JsError::new(&format!("JSON serialization failed: {}", e)))
 }
@@ -212,8 +211,7 @@ pub fn extract_context(input: &str) -> Result<String, JsError> {
 pub fn batch_extract_context(input: &str) -> Result<String, JsError> {
     let value: serde_json::Value =
         serde_json::from_str(input).map_err(|e| JsError::new(&format!("Invalid JSON: {}", e)))?;
-    let result =
-        inner::batch_extract_context(&value).map_err(|e| JsError::new(&e.to_string()))?;
+    let result = inner::batch_extract_context(&value).map_err(|e| JsError::new(&e.to_string()))?;
     serde_json::to_string(&result)
         .map_err(|e| JsError::new(&format!("JSON serialization failed: {}", e)))
 }
@@ -261,8 +259,7 @@ pub fn sanitize_query(input: &str) -> Result<String, JsError> {
 pub fn truncate_conversation(input: &str) -> Result<String, JsError> {
     let value: serde_json::Value =
         serde_json::from_str(input).map_err(|e| JsError::new(&format!("Invalid JSON: {}", e)))?;
-    let result =
-        inner::truncate_conversation(&value).map_err(|e| JsError::new(&e.to_string()))?;
+    let result = inner::truncate_conversation(&value).map_err(|e| JsError::new(&e.to_string()))?;
     serde_json::to_string(&result)
         .map_err(|e| JsError::new(&format!("JSON serialization failed: {}", e)))
 }

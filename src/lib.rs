@@ -150,8 +150,8 @@ pub mod inner {
             .get("sets")
             .ok_or(ScoltaError::missing_field("merge_results", "sets"))?;
 
-        let sets: Vec<scoring::MergeSet> = serde_json::from_value(sets_json.clone())
-            .map_err(|e| {
+        let sets: Vec<scoring::MergeSet> =
+            serde_json::from_value(sets_json.clone()).map_err(|e| {
                 ScoltaError::parse_error("merge_results", format!("failed to parse sets: {}", e))
             })?;
 
@@ -191,7 +191,9 @@ pub mod inner {
     ///
     /// Input: `{ "query": "...", "priority_pages": [...] }`
     /// Output: JSON array of matching PriorityPage entries.
-    pub fn match_priority_pages(input: &serde_json::Value) -> Result<serde_json::Value, ScoltaError> {
+    pub fn match_priority_pages(
+        input: &serde_json::Value,
+    ) -> Result<serde_json::Value, ScoltaError> {
         let obj = input.as_object().ok_or(ScoltaError::invalid_json(
             "match_priority_pages",
             "expected JSON object",
@@ -202,9 +204,10 @@ pub mod inner {
             .and_then(|v| v.as_str())
             .ok_or(ScoltaError::missing_field("match_priority_pages", "query"))?;
 
-        let pages_json = obj
-            .get("priority_pages")
-            .ok_or(ScoltaError::missing_field("match_priority_pages", "priority_pages"))?;
+        let pages_json = obj.get("priority_pages").ok_or(ScoltaError::missing_field(
+            "match_priority_pages",
+            "priority_pages",
+        ))?;
 
         let pages: Vec<scoring::PriorityPage> = serde_json::from_value(pages_json.clone())
             .map_err(|e| {
@@ -295,10 +298,7 @@ pub mod inner {
         if let Ok(obj) = serde_json::from_str::<serde_json::Value>(input) {
             if let Some(map) = obj.as_object() {
                 if let Some(text) = map.get("text").and_then(|v| v.as_str()) {
-                    let language = map
-                        .get("language")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("en");
+                    let language = map.get("language").and_then(|v| v.as_str()).unwrap_or("en");
 
                     let generic_terms: Vec<String> = map
                         .get("generic_terms")
@@ -408,8 +408,8 @@ pub mod inner {
             .get("items")
             .ok_or(ScoltaError::missing_field("batch_extract_context", "items"))?;
 
-        let items: Vec<serde_json::Value> = serde_json::from_value(items_json.clone())
-            .map_err(|e| {
+        let items: Vec<serde_json::Value> =
+            serde_json::from_value(items_json.clone()).map_err(|e| {
                 ScoltaError::parse_error("batch_extract_context", format!("items: {}", e))
             })?;
 
@@ -554,9 +554,10 @@ pub mod inner {
             "expected JSON object",
         ))?;
 
-        let messages_json = obj
-            .get("messages")
-            .ok_or(ScoltaError::missing_field("truncate_conversation", "messages"))?;
+        let messages_json = obj.get("messages").ok_or(ScoltaError::missing_field(
+            "truncate_conversation",
+            "messages",
+        ))?;
 
         let messages: Vec<conversation::Message> = serde_json::from_value(messages_json.clone())
             .map_err(|e| {
@@ -848,9 +849,8 @@ mod tests {
 
     #[test]
     fn test_parse_expansion_object_form_with_language() {
-        let terms = inner::parse_expansion(
-            r#"{"text": "[\"und\", \"drupal\"]", "language": "de"}"#
-        );
+        let terms =
+            inner::parse_expansion(r#"{"text": "[\"und\", \"drupal\"]", "language": "de"}"#);
         assert!(!terms.contains(&"und".to_string()));
         assert!(terms.contains(&"drupal".to_string()));
     }
@@ -858,7 +858,7 @@ mod tests {
     #[test]
     fn test_parse_expansion_object_form_generic_terms() {
         let terms = inner::parse_expansion(
-            r#"{"text": "[\"team\", \"drupal\", \"platform\"]", "language": "en", "generic_terms": ["team", "platform"]}"#
+            r#"{"text": "[\"team\", \"drupal\", \"platform\"]", "language": "en", "generic_terms": ["team", "platform"]}"#,
         );
         assert!(!terms.contains(&"team".to_string()));
         assert!(!terms.contains(&"platform".to_string()));
@@ -868,7 +868,7 @@ mod tests {
     #[test]
     fn test_parse_expansion_object_form_existing_terms() {
         let terms = inner::parse_expansion(
-            r#"{"text": "[\"performance\"]", "language": "en", "existing_terms": ["migration", "drupal"]}"#
+            r#"{"text": "[\"performance\"]", "language": "en", "existing_terms": ["migration", "drupal"]}"#,
         );
         assert!(terms.contains(&"performance".to_string()));
         assert!(terms.contains(&"migration".to_string()));
@@ -998,7 +998,11 @@ mod tests {
         // All functions have required metadata
         for (name, info) in functions {
             assert!(info.get("since").is_some(), "{} missing 'since'", name);
-            assert!(info.get("stability").is_some(), "{} missing 'stability'", name);
+            assert!(
+                info.get("stability").is_some(),
+                "{} missing 'stability'",
+                name
+            );
         }
     }
 

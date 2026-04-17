@@ -1081,7 +1081,10 @@ mod tests {
             recency_strategy: "invalid".to_string(),
             ..Default::default()
         };
-        assert!(config.validate().iter().any(|w| w.field == "recency_strategy"));
+        assert!(config
+            .validate()
+            .iter()
+            .any(|w| w.field == "recency_strategy"));
     }
 
     #[test]

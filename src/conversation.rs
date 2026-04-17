@@ -93,12 +93,12 @@ mod tests {
     #[test]
     fn test_removes_oldest_pair() {
         let msgs = vec![
-            msg("system", "You are helpful."),          // preserved (index 0)
-            msg("user", "Initial context."),            // preserved (index 1)
-            msg("user", "Old question?"),               // oldest removable
-            msg("assistant", "Old answer."),            // oldest removable
-            msg("user", "New question?"),               // kept
-            msg("assistant", "New answer."),            // kept
+            msg("system", "You are helpful."), // preserved (index 0)
+            msg("user", "Initial context."),   // preserved (index 1)
+            msg("user", "Old question?"),      // oldest removable
+            msg("assistant", "Old answer."),   // oldest removable
+            msg("user", "New question?"),      // kept
+            msg("assistant", "New answer."),   // kept
         ];
         let cfg = ConversationConfig {
             max_length: 60, // force removal

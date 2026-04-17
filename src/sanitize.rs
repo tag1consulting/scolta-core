@@ -76,7 +76,9 @@ pub fn sanitize_query(query: &str, config: &SanitizationConfig) -> String {
 
     for pat in &config.custom_patterns {
         if let Ok(re) = Regex::new(&pat.regex) {
-            result = re.replace_all(&result, pat.replacement.as_str()).into_owned();
+            result = re
+                .replace_all(&result, pat.replacement.as_str())
+                .into_owned();
         }
     }
 
@@ -89,16 +91,12 @@ pub fn sanitize_query(query: &str, config: &SanitizationConfig) -> String {
 
 fn email_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}").unwrap()
-    })
+    RE.get_or_init(|| Regex::new(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}").unwrap())
 }
 
 fn phone_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"(\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}").unwrap()
-    })
+    RE.get_or_init(|| Regex::new(r"(\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}").unwrap())
 }
 
 fn ssn_regex() -> &'static Regex {
@@ -108,16 +106,12 @@ fn ssn_regex() -> &'static Regex {
 
 fn cc_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"\b\d{4}[\s\-]?\d{4}[\s\-]?\d{4}[\s\-]?\d{4}\b").unwrap()
-    })
+    RE.get_or_init(|| Regex::new(r"\b\d{4}[\s\-]?\d{4}[\s\-]?\d{4}[\s\-]?\d{4}\b").unwrap())
 }
 
 fn ip_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b").unwrap()
-    })
+    RE.get_or_init(|| Regex::new(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b").unwrap())
 }
 
 #[cfg(test)]

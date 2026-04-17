@@ -94,7 +94,11 @@ fn merge_results_two_sets_dedup() {
     let result = inner::merge_results(&input).unwrap();
     let arr = result.as_array().unwrap();
     let urls: Vec<&str> = arr.iter().map(|r| r["url"].as_str().unwrap()).collect();
-    assert_eq!(urls.iter().filter(|&&u| u == "/a").count(), 1, "URL /a should appear once");
+    assert_eq!(
+        urls.iter().filter(|&&u| u == "/a").count(),
+        1,
+        "URL /a should appear once"
+    );
     assert!(urls.contains(&"/b"));
 }
 
@@ -132,7 +136,7 @@ fn match_priority_pages_keyword_match() {
 #[test]
 fn parse_expansion_generic_terms_filtered() {
     let terms = inner::parse_expansion(
-        r#"{"text": "[\"drupal\", \"team\", \"platform\"]", "language": "en", "generic_terms": ["team", "platform"]}"#
+        r#"{"text": "[\"drupal\", \"team\", \"platform\"]", "language": "en", "generic_terms": ["team", "platform"]}"#,
     );
     assert!(terms.contains(&"drupal".to_string()));
     assert!(!terms.contains(&"team".to_string()));
@@ -142,7 +146,7 @@ fn parse_expansion_generic_terms_filtered() {
 #[test]
 fn parse_expansion_existing_terms_merged() {
     let terms = inner::parse_expansion(
-        r#"{"text": "[\"performance\"]", "language": "en", "existing_terms": ["migration"]}"#
+        r#"{"text": "[\"performance\"]", "language": "en", "existing_terms": ["migration"]}"#,
     );
     assert!(terms.contains(&"performance".to_string()));
     assert!(terms.contains(&"migration".to_string()));
@@ -230,7 +234,13 @@ fn truncate_conversation_removes_oldest_pair() {
     let contents: Vec<&str> = arr.iter().map(|m| m["content"].as_str().unwrap()).collect();
     assert!(contents.contains(&"sys"));
     assert!(contents.contains(&"initial"));
-    assert!(!contents.contains(&"q1"), "oldest pair q1 should be removed");
-    assert!(!contents.contains(&"a1"), "oldest pair a1 should be removed");
+    assert!(
+        !contents.contains(&"q1"),
+        "oldest pair q1 should be removed"
+    );
+    assert!(
+        !contents.contains(&"a1"),
+        "oldest pair a1 should be removed"
+    );
     assert!(contents.contains(&"q2"));
 }

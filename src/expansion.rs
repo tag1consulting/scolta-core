@@ -86,22 +86,21 @@ pub fn parse_expansion_with_config(text: &str, config: &ExpansionConfig) -> Vec<
 
     let json_text = extract_json_from_markdown(text).unwrap_or_else(|| text.to_string());
 
-    let parsed: Vec<String> = if let Ok(json_value) =
-        serde_json::from_str::<serde_json::Value>(&json_text)
-    {
-        if let Some(array) = json_value.as_array() {
-            array
-                .iter()
-                .filter_map(|v| v.as_str())
-                .map(|s| s.trim().to_string())
-                .filter(|s| common::is_valid_term(s, language))
-                .collect()
+    let parsed: Vec<String> =
+        if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&json_text) {
+            if let Some(array) = json_value.as_array() {
+                array
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| common::is_valid_term(s, language))
+                    .collect()
+            } else {
+                fallback_parse_with_language(&json_text, language)
+            }
         } else {
             fallback_parse_with_language(&json_text, language)
-        }
-    } else {
-        fallback_parse_with_language(&json_text, language)
-    };
+        };
 
     // Always apply min_term_length filter.
     let min_len = config.min_term_length as usize;
@@ -129,12 +128,7 @@ pub fn parse_expansion_with_config(text: &str, config: &ExpansionConfig) -> Vec<
 }
 
 /// Decide whether to keep a term under generic-term filtering rules.
-fn should_keep_term(
-    term: &str,
-    config: &ExpansionConfig,
-    language: &str,
-    min_len: usize,
-) -> bool {
+fn should_keep_term(term: &str, config: &ExpansionConfig, language: &str, min_len: usize) -> bool {
     let char_count = term.chars().count();
 
     // Remove below-minimum-length terms.
@@ -198,14 +192,22 @@ fn extract_json_from_markdown(text: &str) -> Option<String> {
     if let Some(start) = trimmed.find("```json") {
         let content_start = start + 7;
         if let Some(end) = trimmed[content_start..].find("```") {
-            return Some(trimmed[content_start..content_start + end].trim().to_string());
+            return Some(
+                trimmed[content_start..content_start + end]
+                    .trim()
+                    .to_string(),
+            );
         }
     }
 
     if let Some(start) = trimmed.find("```") {
         let content_start = start + 3;
         if let Some(end) = trimmed[content_start..].find("```") {
-            return Some(trimmed[content_start..content_start + end].trim().to_string());
+            return Some(
+                trimmed[content_start..content_start + end]
+                    .trim()
+                    .to_string(),
+            );
         }
     }
 
@@ -362,7 +364,10 @@ mod tests {
 
         let terms = parse_expansion_with_config(r#"["drupal", "migration"]"#, &config);
         // "drupal" from parsed comes first, "Drupal" from existing is a dup → skip
-        let drupal_occurrences: Vec<_> = terms.iter().filter(|t| t.to_lowercase() == "drupal").collect();
+        let drupal_occurrences: Vec<_> = terms
+            .iter()
+            .filter(|t| t.to_lowercase() == "drupal")
+            .collect();
         assert_eq!(drupal_occurrences.len(), 1);
         assert_eq!(drupal_occurrences[0], "drupal"); // parsed casing wins (first)
     }
