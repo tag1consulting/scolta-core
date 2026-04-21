@@ -1,6 +1,6 @@
 [package]
 name = "scolta-core"
-version = "0.2.4"
+version = "0.2.5-dev"
 edition = "2021"
 description = "Scolta search engine core - browser WASM module for client-side search scoring, prompt management, and query expansion"
 license = "MIT"
