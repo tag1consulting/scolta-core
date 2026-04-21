@@ -118,8 +118,7 @@ pub struct QueryInfo {
 /// * `language` - ISO 639-1 language code for stop-word filtering
 pub fn extract_query(query: &str, language: &str) -> QueryInfo {
     let stripped = query.trim();
-    let forced_phrase =
-        stripped.starts_with('"') && stripped.ends_with('"') && stripped.len() > 2;
+    let forced_phrase = stripped.starts_with('"') && stripped.ends_with('"') && stripped.len() > 2;
     let inner = if forced_phrase {
         &stripped[1..stripped.len() - 1]
     } else {
@@ -127,21 +126,20 @@ pub fn extract_query(query: &str, language: &str) -> QueryInfo {
     };
     let terms = extract_terms(inner, language);
     let is_phrase = terms.len() >= 2;
-    QueryInfo { terms, is_phrase, forced_phrase }
+    QueryInfo {
+        terms,
+        is_phrase,
+        forced_phrase,
+    }
 }
 
 /// Parse a query string into terms plus phrase intent signals, also excluding
 /// custom stop words.
 ///
 /// Equivalent to [`extract_query`] but additionally filters `custom`.
-pub fn extract_query_with_custom(
-    query: &str,
-    language: &str,
-    custom: &[String],
-) -> QueryInfo {
+pub fn extract_query_with_custom(query: &str, language: &str, custom: &[String]) -> QueryInfo {
     let stripped = query.trim();
-    let forced_phrase =
-        stripped.starts_with('"') && stripped.ends_with('"') && stripped.len() > 2;
+    let forced_phrase = stripped.starts_with('"') && stripped.ends_with('"') && stripped.len() > 2;
     let inner = if forced_phrase {
         &stripped[1..stripped.len() - 1]
     } else {
@@ -149,7 +147,11 @@ pub fn extract_query_with_custom(
     };
     let terms = extract_terms_with_custom(inner, language, custom);
     let is_phrase = terms.len() >= 2;
-    QueryInfo { terms, is_phrase, forced_phrase }
+    QueryInfo {
+        terms,
+        is_phrase,
+        forced_phrase,
+    }
 }
 
 /// Extract meaningful search terms from a query string.

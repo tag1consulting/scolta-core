@@ -466,11 +466,7 @@ pub fn content_match_score_with_terms(
 /// `locations` is the flat array of word-position integers from Pagefind's
 /// `result.data().locations` — all matched-term positions combined. Sorting
 /// and a sliding window of size `n` find the tightest cluster of `n` hits.
-fn phrase_proximity_multiplier(
-    terms: &[String],
-    locations: &[u32],
-    config: &ScoringConfig,
-) -> f64 {
+fn phrase_proximity_multiplier(terms: &[String], locations: &[u32], config: &ScoringConfig) -> f64 {
     let n = terms.len();
     if n < 2 || locations.len() < n {
         return 1.0;
@@ -508,12 +504,14 @@ pub fn score_result_with_query_info(
     config: &ScoringConfig,
     priority_boost: f64,
 ) -> f64 {
-    let base_score = if result.score > 0.0 { result.score } else { 1.0 };
+    let base_score = if result.score > 0.0 {
+        result.score
+    } else {
+        1.0
+    };
     let source_weight = result.source_weight.unwrap_or(1.0);
-    let title_boost =
-        title_match_score_with_terms(&query_info.terms, &result.title, config);
-    let content_boost =
-        content_match_score_with_terms(&query_info.terms, &result.excerpt, config);
+    let title_boost = title_match_score_with_terms(&query_info.terms, &result.title, config);
+    let content_boost = content_match_score_with_terms(&query_info.terms, &result.excerpt, config);
     let recency = recency_boost(&result.date, config);
     let phrase_mult = if query_info.is_phrase {
         result
@@ -1260,8 +1258,7 @@ mod tests {
         let mut results = vec![r1, r2];
         score_results(&mut results, "hello world", &config);
         assert_eq!(
-            results[0].url,
-            "https://example.com/2",
+            results[0].url, "https://example.com/2",
             "Adjacent phrase in body must rank first; got {}",
             results[0].url
         );
@@ -1291,8 +1288,7 @@ mod tests {
         let mut results = vec![r1, r2];
         score_results(&mut results, "hello world", &config);
         assert_eq!(
-            results[0].url,
-            "https://example.com/near",
+            results[0].url, "https://example.com/near",
             "Near phrase must rank above scattered; got {}",
             results[0].url
         );
@@ -1322,8 +1318,7 @@ mod tests {
         score_results(&mut results, "hello", &config);
         // Title match (r1) must still win for a single-term query.
         assert_eq!(
-            results[0].url,
-            "https://example.com/title",
+            results[0].url, "https://example.com/title",
             "Single-term query: title match must still rank first"
         );
     }
@@ -1377,8 +1372,7 @@ mod tests {
         // Quoted query → forced_phrase = true; terms = ["hello", "world"].
         score_results(&mut results, r#""hello world""#, &config);
         assert_eq!(
-            results[0].url,
-            "https://example.com/2",
+            results[0].url, "https://example.com/2",
             "Forced-phrase (quoted) query: exact phrase result must rank first; got {}",
             results[0].url
         );
