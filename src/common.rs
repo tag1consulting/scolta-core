@@ -93,6 +93,65 @@ pub fn is_valid_term_with_custom(term: &str, language: &str, custom: &[String]) 
     !is_stop_word_with_custom(term, language, custom)
 }
 
+/// Parsed representation of a search query with phrase intent signals.
+///
+/// Produced by [`extract_query`] and [`extract_query_with_custom`]. Downstream
+/// scoring functions use `is_phrase` and `forced_phrase` to decide whether to
+/// apply phrase-proximity multipliers.
+pub struct QueryInfo {
+    /// Meaningful, lowercased terms after stop-word filtering.
+    pub terms: Vec<String>,
+    /// True when two or more terms remain after filtering (multi-word query).
+    pub is_phrase: bool,
+    /// True when the original query was wrapped in double-quotes (e.g.
+    /// `"hello world"`), indicating the user expects an exact phrase match.
+    pub forced_phrase: bool,
+}
+
+/// Parse a query string into terms plus phrase intent signals.
+///
+/// Detects quoted phrases (`"hello world"` → `forced_phrase = true`),
+/// strips the quotes, and extracts the usual meaningful terms.
+///
+/// # Arguments
+/// * `query` - The raw query string (may be wrapped in `"…"`)
+/// * `language` - ISO 639-1 language code for stop-word filtering
+pub fn extract_query(query: &str, language: &str) -> QueryInfo {
+    let stripped = query.trim();
+    let forced_phrase =
+        stripped.starts_with('"') && stripped.ends_with('"') && stripped.len() > 2;
+    let inner = if forced_phrase {
+        &stripped[1..stripped.len() - 1]
+    } else {
+        stripped
+    };
+    let terms = extract_terms(inner, language);
+    let is_phrase = terms.len() >= 2;
+    QueryInfo { terms, is_phrase, forced_phrase }
+}
+
+/// Parse a query string into terms plus phrase intent signals, also excluding
+/// custom stop words.
+///
+/// Equivalent to [`extract_query`] but additionally filters `custom`.
+pub fn extract_query_with_custom(
+    query: &str,
+    language: &str,
+    custom: &[String],
+) -> QueryInfo {
+    let stripped = query.trim();
+    let forced_phrase =
+        stripped.starts_with('"') && stripped.ends_with('"') && stripped.len() > 2;
+    let inner = if forced_phrase {
+        &stripped[1..stripped.len() - 1]
+    } else {
+        stripped
+    };
+    let terms = extract_terms_with_custom(inner, language, custom);
+    let is_phrase = terms.len() >= 2;
+    QueryInfo { terms, is_phrase, forced_phrase }
+}
+
 /// Extract meaningful search terms from a query string.
 ///
 /// Splits on whitespace, lowercases, and filters stop words and

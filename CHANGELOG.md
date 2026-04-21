@@ -6,6 +6,15 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [0.2.4] - Unreleased
 
+### Added
+- **Phrase-proximity scoring**: `score_results()` now applies a phrase-proximity multiplier to the content boost when Pagefind word positions (`locations`) are available. Adjacent phrase (span ≤ terms−1): ×2.5 multiplier; near phrase (span ≤ `phrase_near_window`): ×1.5. Fixes the root cause of exact-phrase matches ranking below scattered single-term title hits.
+- **`extract_query()` / `extract_query_with_custom()`** in `common.rs`: Returns `QueryInfo { terms, is_phrase, forced_phrase }`. Detects double-quoted queries (`"hello world"`) and sets `forced_phrase = true` for downstream phrase scoring.
+- **`score_result_with_query_info()`**: New internal scoring entry point that accepts `QueryInfo` and applies phrase-proximity multiplier when `is_phrase` is true and `locations` data is present.
+- **`phrase_proximity_multiplier()`**: Internal function that converts Pagefind `locations` positions into an adjacent/near/scattered multiplier via a sliding-window minimum-span algorithm.
+- **`ScoringConfig` phrase fields**: `phrase_adjacent_multiplier` (default 2.5), `phrase_near_multiplier` (default 1.5), `phrase_near_window` (default 5), `phrase_window` (default 15).
+- **`SearchResult.locations`**: Optional `Vec<u32>` field (serde default = None) receiving Pagefind word-position data. Results without positions fall back to existing term-only scoring.
+- **Five regression tests** in `scoring.rs`: adjacent phrase > title hit; near phrase > scattered; single-term query unchanged; no-locations fallback; forced-phrase quoted query.
+
 ## [0.2.3] - 2026-04-17
 
 ### Added

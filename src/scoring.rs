@@ -58,6 +58,10 @@ pub struct PriorityPage {
 /// | `title_all_terms_multiplier` | 0.0–5.0 | 1.5 |
 /// | `content_match_boost` | 0.0–5.0 | 0.4 |
 /// | `content_all_terms_multiplier` | 0.0–5.0 | 0.48 |
+/// | `phrase_adjacent_multiplier` | 1.0–10.0 | 2.5 |
+/// | `phrase_near_multiplier` | 1.0–5.0 | 1.5 |
+/// | `phrase_near_window` | 1–50 | 5 |
+/// | `phrase_window` | 1–200 | 15 |
 /// | `excerpt_length` | 50–2000 | 300 |
 /// | `results_per_page` | 1–100 | 10 |
 /// | `max_pagefind_results` | 1–500 | 50 |
@@ -76,6 +80,17 @@ pub struct ScoringConfig {
     pub title_all_terms_multiplier: f64,
     pub content_match_boost: f64,
     pub content_all_terms_multiplier: f64,
+    /// Multiplier applied to `content_boost` when all query terms appear
+    /// adjacent to each other (span ≤ terms−1 word positions apart).
+    pub phrase_adjacent_multiplier: f64,
+    /// Multiplier applied to `content_boost` when all query terms appear
+    /// within `phrase_near_window` word positions of each other.
+    pub phrase_near_multiplier: f64,
+    /// Maximum word-position span for the "near phrase" bonus.
+    pub phrase_near_window: u32,
+    /// Maximum word-position span for a modest phrase bonus (larger than
+    /// near; no boost applied beyond this distance).
+    pub phrase_window: u32,
     pub excerpt_length: u32,
     pub results_per_page: u32,
     pub max_pagefind_results: u32,
@@ -100,6 +115,10 @@ impl Default for ScoringConfig {
             title_all_terms_multiplier: 1.5,
             content_match_boost: 0.4,
             content_all_terms_multiplier: 0.48,
+            phrase_adjacent_multiplier: 2.5,
+            phrase_near_multiplier: 1.5,
+            phrase_near_window: 5,
+            phrase_window: 15,
             excerpt_length: 300,
             results_per_page: 10,
             max_pagefind_results: 50,
@@ -226,6 +245,12 @@ pub struct SearchResult {
     /// field get the same scoring as before.
     #[serde(default)]
     pub source_weight: Option<f64>,
+    /// Word-position array from Pagefind for all query-matched terms in this
+    /// document. Populated by the JS layer from `result.data().locations`.
+    /// When present, enables phrase-proximity scoring. Absent for results
+    /// that pre-date this field or come from non-Pagefind sources.
+    #[serde(default)]
+    pub locations: Option<Vec<u32>>,
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
@@ -426,6 +451,86 @@ pub fn content_match_score_with_terms(
     boost * (matching_count as f64 / terms.len() as f64)
 }
 
+/// Compute a phrase-proximity multiplier from Pagefind word positions.
+///
+/// Returns a multiplier applied to `content_boost` when all query terms land
+/// within a small position window, rewarding results where the terms appear
+/// together rather than scattered across the document.
+///
+/// | Span | Multiplier |
+/// |------|------------|
+/// | ≤ `terms.len() − 1` (adjacent) | `config.phrase_adjacent_multiplier` |
+/// | ≤ `config.phrase_near_window` | `config.phrase_near_multiplier` |
+/// | anything wider | `1.0` (no bonus) |
+///
+/// `locations` is the flat array of word-position integers from Pagefind's
+/// `result.data().locations` — all matched-term positions combined. Sorting
+/// and a sliding window of size `n` find the tightest cluster of `n` hits.
+fn phrase_proximity_multiplier(
+    terms: &[String],
+    locations: &[u32],
+    config: &ScoringConfig,
+) -> f64 {
+    let n = terms.len();
+    if n < 2 || locations.len() < n {
+        return 1.0;
+    }
+    let mut sorted = locations.to_vec();
+    sorted.sort_unstable();
+    // Sliding window of size n → find minimum span (max − min of window).
+    let min_span = sorted
+        .windows(n)
+        .map(|w| w[n - 1] - w[0])
+        .min()
+        .unwrap_or(u32::MAX);
+    if min_span < n as u32 {
+        config.phrase_adjacent_multiplier
+    } else if min_span <= config.phrase_near_window {
+        config.phrase_near_multiplier
+    } else {
+        1.0
+    }
+}
+
+/// Calculate composite score using a [`QueryInfo`] and a pre-computed priority boost.
+///
+/// Extends [`score_result_with_terms`] with phrase-proximity scoring: when
+/// `query_info.is_phrase` is true and the result carries Pagefind `locations`,
+/// the content boost is multiplied by the phrase-proximity factor.
+///
+/// Formula:
+/// ```text
+/// final = (base × source_weight) + title_boost + (content_boost × phrase_mult) + recency + priority
+/// ```
+pub fn score_result_with_query_info(
+    result: &SearchResult,
+    query_info: &common::QueryInfo,
+    config: &ScoringConfig,
+    priority_boost: f64,
+) -> f64 {
+    let base_score = if result.score > 0.0 { result.score } else { 1.0 };
+    let source_weight = result.source_weight.unwrap_or(1.0);
+    let title_boost =
+        title_match_score_with_terms(&query_info.terms, &result.title, config);
+    let content_boost =
+        content_match_score_with_terms(&query_info.terms, &result.excerpt, config);
+    let recency = recency_boost(&result.date, config);
+    let phrase_mult = if query_info.is_phrase {
+        result
+            .locations
+            .as_deref()
+            .map(|locs| phrase_proximity_multiplier(&query_info.terms, locs, config))
+            .unwrap_or(1.0)
+    } else {
+        1.0
+    };
+    (base_score * source_weight)
+        + title_boost
+        + (content_boost * phrase_mult)
+        + recency
+        + priority_boost
+}
+
 /// Calculate composite score using pre-extracted terms and a pre-computed priority boost.
 ///
 /// Formula: `(base_score × source_weight) + title_boost + content_boost + recency_boost + priority_boost`
@@ -474,11 +579,13 @@ pub fn score_result(result: &SearchResult, query: &str, config: &ScoringConfig) 
 ///
 /// Pre-computes matched priority pages for the query once, then applies
 /// per-result priority boosts and optional custom excerpt overrides.
+/// Phrase-proximity scoring is applied when the query contains two or more
+/// terms and each result carries Pagefind `locations` data.
 pub fn score_results(results: &mut [SearchResult], query: &str, config: &ScoringConfig) {
-    let terms = if config.custom_stop_words.is_empty() {
-        common::extract_terms(query, &config.language)
+    let query_info = if config.custom_stop_words.is_empty() {
+        common::extract_query(query, &config.language)
     } else {
-        common::extract_terms_with_custom(query, &config.language, &config.custom_stop_words)
+        common::extract_query_with_custom(query, &config.language, &config.custom_stop_words)
     };
 
     let query_lower = query.to_lowercase();
@@ -511,7 +618,7 @@ pub fn score_results(results: &mut [SearchResult], query: &str, config: &Scoring
             }
         }
 
-        result.score = score_result_with_terms(result, &terms, config, priority_boost);
+        result.score = score_result_with_query_info(result, &query_info, config, priority_boost);
     }
 
     results.sort_by(|a, b| {
@@ -714,6 +821,28 @@ mod tests {
             content_type: String::new(),
             site_name: String::new(),
             source_weight: None,
+            locations: None,
+            extra: serde_json::Map::new(),
+        }
+    }
+
+    fn make_result_with_excerpt_and_locations(
+        url: &str,
+        title: &str,
+        excerpt: &str,
+        score: f64,
+        locations: Option<Vec<u32>>,
+    ) -> SearchResult {
+        SearchResult {
+            url: url.to_string(),
+            title: title.to_string(),
+            excerpt: excerpt.to_string(),
+            date: days_ago(30),
+            score,
+            content_type: String::new(),
+            site_name: String::new(),
+            source_weight: None,
+            locations,
             extra: serde_json::Map::new(),
         }
     }
@@ -1007,6 +1136,7 @@ mod tests {
             content_type: String::new(),
             site_name: String::new(),
             source_weight: None,
+            locations: None,
             extra: serde_json::Map::new(),
         };
 
@@ -1100,6 +1230,157 @@ mod tests {
         assert_eq!(
             normalize_url_key("https://example.com/page", false),
             "https://example.com/page"
+        );
+    }
+
+    // --- Phrase-proximity regression tests ---
+
+    // Test 1: Adjacent phrase in body must outrank a single-term title hit.
+    //
+    // r1 has "hello" in the title (one of two terms) → title boost only.
+    // r2 has "hello world" adjacent in the excerpt (positions 0, 1) → phrase
+    // multiplier fires and content boost beats title dominance.
+    #[test]
+    fn test_phrase_adjacent_ranks_above_single_term_title() {
+        let config = ScoringConfig::default();
+        let r1 = make_result_with_excerpt_and_locations(
+            "https://example.com/1",
+            "Hello Integrations",
+            "Some content about modules",
+            1.0,
+            Some(vec![0]), // only "hello" matched, at position 0
+        );
+        let r2 = make_result_with_excerpt_and_locations(
+            "https://example.com/2",
+            "Module Integration Guide",
+            "hello world module documentation",
+            1.0,
+            Some(vec![0, 1]), // "hello" at 0, "world" at 1 — adjacent phrase
+        );
+        let mut results = vec![r1, r2];
+        score_results(&mut results, "hello world", &config);
+        assert_eq!(
+            results[0].url,
+            "https://example.com/2",
+            "Adjacent phrase in body must rank first; got {}",
+            results[0].url
+        );
+    }
+
+    // Test 2: Near phrase (within window) must outrank scattered terms.
+    //
+    // r1 has "hello" and "world" scattered 50 positions apart (no phrase bonus).
+    // r2 has them within the near window (positions 0, 4) → near multiplier.
+    #[test]
+    fn test_phrase_near_ranks_above_scattered() {
+        let config = ScoringConfig::default();
+        let r1 = make_result_with_excerpt_and_locations(
+            "https://example.com/scattered",
+            "Title",
+            "hello many words world",
+            1.0,
+            Some(vec![0, 50]), // scattered — span 50 > phrase_window (15)
+        );
+        let r2 = make_result_with_excerpt_and_locations(
+            "https://example.com/near",
+            "Title",
+            "hello quick world",
+            1.0,
+            Some(vec![0, 4]), // span 4 ≤ phrase_near_window (5)
+        );
+        let mut results = vec![r1, r2];
+        score_results(&mut results, "hello world", &config);
+        assert_eq!(
+            results[0].url,
+            "https://example.com/near",
+            "Near phrase must rank above scattered; got {}",
+            results[0].url
+        );
+    }
+
+    // Test 3: Single-term queries are unaffected by phrase scoring.
+    #[test]
+    fn test_single_term_query_unchanged() {
+        let config = ScoringConfig::default();
+        // r1 has a title match (higher boost), r2 only content match.
+        // With no phrase scoring, title wins — same as pre-phrase behavior.
+        let r1 = make_result_with_excerpt_and_locations(
+            "https://example.com/title",
+            "Hello Page",
+            "some body text",
+            1.0,
+            Some(vec![0]),
+        );
+        let r2 = make_result_with_excerpt_and_locations(
+            "https://example.com/body",
+            "Other Page",
+            "hello in content",
+            1.0,
+            Some(vec![0]),
+        );
+        let mut results = vec![r1.clone(), r2];
+        score_results(&mut results, "hello", &config);
+        // Title match (r1) must still win for a single-term query.
+        assert_eq!(
+            results[0].url,
+            "https://example.com/title",
+            "Single-term query: title match must still rank first"
+        );
+    }
+
+    // Test 4: No locations data → falls back to existing term scoring (no crash).
+    #[test]
+    fn test_phrase_scoring_without_locations_no_crash() {
+        let config = ScoringConfig::default();
+        let r1 = make_result_with_excerpt_and_locations(
+            "https://example.com/1",
+            "Hello World Page",
+            "hello world content",
+            1.0,
+            None, // no locations — phrase multiplier must not fire
+        );
+        let r2 = make_result_with_excerpt_and_locations(
+            "https://example.com/2",
+            "Other Page",
+            "other content",
+            0.5,
+            None,
+        );
+        let mut results = vec![r1, r2];
+        score_results(&mut results, "hello world", &config);
+        // r1 must still rank first via title + content term matching.
+        assert_eq!(results[0].url, "https://example.com/1");
+    }
+
+    // Test 5: Forced-phrase (quoted) query must detect forced_phrase = true,
+    // strip quotes for term extraction, and apply phrase scoring.
+    #[test]
+    fn test_forced_phrase_quoted_query() {
+        let config = ScoringConfig::default();
+        // r1: title "Hello Integrations" — single term in title, neither adjacent.
+        let r1 = make_result_with_excerpt_and_locations(
+            "https://example.com/1",
+            "Hello Integrations",
+            "Some content about modules",
+            1.0,
+            Some(vec![0]),
+        );
+        // r2: "hello world" adjacent in excerpt.
+        let r2 = make_result_with_excerpt_and_locations(
+            "https://example.com/2",
+            "Module Guide",
+            "hello world documentation",
+            1.0,
+            Some(vec![0, 1]),
+        );
+        let mut results = vec![r1, r2];
+        // Quoted query → forced_phrase = true; terms = ["hello", "world"].
+        score_results(&mut results, r#""hello world""#, &config);
+        assert_eq!(
+            results[0].url,
+            "https://example.com/2",
+            "Forced-phrase (quoted) query: exact phrase result must rank first; got {}",
+            results[0].url
         );
     }
 }

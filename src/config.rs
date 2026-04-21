@@ -54,6 +54,22 @@ pub fn from_json(json: &serde_json::Value) -> ScoringConfig {
             .get("content_all_terms_multiplier")
             .and_then(|v| v.as_f64())
             .unwrap_or(0.48),
+        phrase_adjacent_multiplier: obj
+            .get("phrase_adjacent_multiplier")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(2.5),
+        phrase_near_multiplier: obj
+            .get("phrase_near_multiplier")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1.5),
+        phrase_near_window: obj
+            .get("phrase_near_window")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(5) as u32,
+        phrase_window: obj
+            .get("phrase_window")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(15) as u32,
         excerpt_length: obj
             .get("excerpt_length")
             .and_then(|v| v.as_u64())
