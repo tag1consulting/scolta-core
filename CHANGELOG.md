@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [0.2.4] - Unreleased
 
+### Fixed
+- **Phrase-match ranking regression:** exact-phrase body matches (e.g. "hello world" appearing together) previously ranked below documents with a single query term in the title (e.g. "Hello Integrations"). Root cause: `score_results()` applied per-term title/content boosts with no phrase-proximity signal — Pagefind tokenizes queries into OR'd terms, and the scorer had no way to know "hello" and "world" were adjacent in a document vs. scattered. Fixed by consuming Pagefind's word-position `locations[]` data through a new `QueryInfo` + `phrase_proximity_multiplier` path; see `### Added` below.
+
 ### Added
 - **Phrase-proximity scoring**: `score_results()` now applies a phrase-proximity multiplier to the content boost when Pagefind word positions (`locations`) are available. Adjacent phrase (span ≤ terms−1): ×2.5 multiplier; near phrase (span ≤ `phrase_near_window`): ×1.5. Fixes the root cause of exact-phrase matches ranking below scattered single-term title hits.
 - **`extract_query()` / `extract_query_with_custom()`** in `common.rs`: Returns `QueryInfo { terms, is_phrase, forced_phrase }`. Detects double-quoted queries (`"hello world"`) and sets `forced_phrase = true` for downstream phrase scoring.
