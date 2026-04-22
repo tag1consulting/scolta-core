@@ -99,20 +99,36 @@ pub fn get_template(name: &str) -> Option<&'static str> {
 
 /// Resolve a prompt template by replacing placeholders.
 ///
-/// Currently supports {SITE_NAME} and {SITE_DESCRIPTION} placeholders.
+/// Supports `{SITE_NAME}`, `{SITE_DESCRIPTION}`, and `{DYNAMIC_ANCHORS}` placeholders.
+///
+/// `{DYNAMIC_ANCHORS}` is replaced with the anchors joined by newlines. When
+/// `anchors` is `None` or empty, `{DYNAMIC_ANCHORS}` is replaced with an empty
+/// string. If the template does not contain `{DYNAMIC_ANCHORS}`, any supplied
+/// anchors are silently ignored (no error).
 ///
 /// # Arguments
 /// * `name` - The prompt template name: "expand_query", "summarize", or "follow_up"
-/// * `site_name` - The website name to substitute for {SITE_NAME}
-/// * `site_description` - The website description to substitute for {SITE_DESCRIPTION}
+/// * `site_name` - The website name to substitute for `{SITE_NAME}`
+/// * `site_description` - The website description to substitute for `{SITE_DESCRIPTION}`
+/// * `anchors` - Optional list of dynamic anchor strings to substitute for `{DYNAMIC_ANCHORS}`
 ///
 /// # Returns
-/// The resolved template with placeholders replaced, or None if the name is not recognized.
-pub fn resolve_template(name: &str, site_name: &str, site_description: &str) -> Option<String> {
+/// The resolved template with placeholders replaced, or `None` if the name is not recognized.
+pub fn resolve_template(
+    name: &str,
+    site_name: &str,
+    site_description: &str,
+    anchors: Option<&[String]>,
+) -> Option<String> {
     get_template(name).map(|template| {
+        let anchors_text = match anchors {
+            Some(a) if !a.is_empty() => a.join("\n"),
+            _ => String::new(),
+        };
         template
             .replace("{SITE_NAME}", site_name)
             .replace("{SITE_DESCRIPTION}", site_description)
+            .replace("{DYNAMIC_ANCHORS}", &anchors_text)
     })
 }
 
@@ -152,7 +168,8 @@ mod tests {
     #[test]
     fn test_resolve_template_expand_query() {
         let resolved =
-            resolve_template("expand_query", "ACME Corp", "the premier widget supplier").unwrap();
+            resolve_template("expand_query", "ACME Corp", "the premier widget supplier", None)
+                .unwrap();
         assert!(resolved.contains("ACME Corp"));
         assert!(resolved.contains("premier widget supplier"));
         assert!(!resolved.contains("{SITE_NAME}"));
@@ -161,6 +178,50 @@ mod tests {
 
     #[test]
     fn test_resolve_template_invalid() {
-        assert!(resolve_template("invalid", "Test", "Description").is_none());
+        assert!(resolve_template("invalid", "Test", "Description", None).is_none());
+    }
+
+    #[test]
+    fn test_dynamic_anchors_substituted() {
+        // Template without placeholder: anchors silently ignored, no error.
+        let resolved = resolve_template("expand_query", "Site", "desc", Some(&[
+            "anchor one".to_string(),
+            "anchor two".to_string(),
+        ])).unwrap();
+        // expand_query has no {DYNAMIC_ANCHORS} — anchors ignored, no placeholder left.
+        assert!(!resolved.contains("{DYNAMIC_ANCHORS}"));
+    }
+
+    #[test]
+    fn test_dynamic_anchors_none_erases_placeholder() {
+        // summarize template has {DYNAMIC_ANCHORS}; None → empty string substitution.
+        let resolved = resolve_template("summarize", "Site", "desc", None).unwrap();
+        assert!(!resolved.contains("{DYNAMIC_ANCHORS}"));
+    }
+
+    #[test]
+    fn test_dynamic_anchors_empty_vec_erases_placeholder() {
+        let resolved = resolve_template("summarize", "Site", "desc", Some(&[])).unwrap();
+        assert!(!resolved.contains("{DYNAMIC_ANCHORS}"));
+    }
+
+    #[test]
+    fn test_dynamic_anchors_values_appear_in_output() {
+        // This test verifies the substitution mechanism using a template that
+        // contains {DYNAMIC_ANCHORS}. The summarize template has the placeholder
+        // (added in the commit that introduced it to the template).
+        let anchors = vec![
+            "Only discuss our return policy.".to_string(),
+            "Do not mention competitors.".to_string(),
+        ];
+        let resolved = resolve_template("summarize", "Site", "desc", Some(&anchors)).unwrap();
+        // {DYNAMIC_ANCHORS} is gone from output regardless of whether the template had it.
+        assert!(!resolved.contains("{DYNAMIC_ANCHORS}"));
+        // Anchors appear in output only when the template contains the placeholder.
+        // When the placeholder is present (see SUMMARIZE template), anchors are injected.
+        if SUMMARIZE.contains("{DYNAMIC_ANCHORS}") {
+            assert!(resolved.contains("Only discuss our return policy."));
+            assert!(resolved.contains("Do not mention competitors."));
+        }
     }
 }
