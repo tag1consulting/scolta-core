@@ -767,8 +767,7 @@ mod tests {
 
     #[test]
     fn test_resolve_prompt_placeholder_with_anchors_substituted() {
-        // When the summarize template contains {DYNAMIC_ANCHORS}, anchors appear in output.
-        // Regardless, the placeholder string must not remain in the output.
+        // summarize template contains {DYNAMIC_ANCHORS}; anchors must appear in output.
         let result = inner::resolve_prompt(&json!({
             "prompt_name": "summarize",
             "site_name": "Site",
@@ -776,11 +775,8 @@ mod tests {
             "dynamic_anchors": ["Focus on pricing.", "Do not mention competitors."]
         })).unwrap();
         assert!(!result.contains("{DYNAMIC_ANCHORS}"));
-        // When the template has the placeholder (added in commit 2.2), anchors appear.
-        if prompts::SUMMARIZE.contains("{DYNAMIC_ANCHORS}") {
-            assert!(result.contains("Focus on pricing."));
-            assert!(result.contains("Do not mention competitors."));
-        }
+        assert!(result.contains("Focus on pricing."));
+        assert!(result.contains("Do not mention competitors."));
     }
 
     #[test]

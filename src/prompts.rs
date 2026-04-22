@@ -27,6 +27,7 @@ pub const SUMMARIZE: &str = r#"You are a search assistant for the {SITE_NAME} we
 
 Given a user's search query and excerpts from relevant pages, provide a brief, scannable summary that helps users quickly find what they need.
 
+{DYNAMIC_ANCHORS}
 FORMAT RULES:
 - Start with 1-2 sentences that directly answer the query or point to the right resource.
 - Then, if the excerpts contain useful additional details (related sections, programs, contacts, phone numbers, locations, services), add a bulleted list of those details. Include everything relevant — don't hold back if the information is there.
@@ -207,21 +208,18 @@ mod tests {
 
     #[test]
     fn test_dynamic_anchors_values_appear_in_output() {
-        // This test verifies the substitution mechanism using a template that
-        // contains {DYNAMIC_ANCHORS}. The summarize template has the placeholder
-        // (added in the commit that introduced it to the template).
+        // The summarize template contains {DYNAMIC_ANCHORS}; verify anchors are injected.
+        assert!(
+            SUMMARIZE.contains("{DYNAMIC_ANCHORS}"),
+            "summarize template must contain {{DYNAMIC_ANCHORS}} placeholder"
+        );
         let anchors = vec![
             "Only discuss our return policy.".to_string(),
             "Do not mention competitors.".to_string(),
         ];
         let resolved = resolve_template("summarize", "Site", "desc", Some(&anchors)).unwrap();
-        // {DYNAMIC_ANCHORS} is gone from output regardless of whether the template had it.
         assert!(!resolved.contains("{DYNAMIC_ANCHORS}"));
-        // Anchors appear in output only when the template contains the placeholder.
-        // When the placeholder is present (see SUMMARIZE template), anchors are injected.
-        if SUMMARIZE.contains("{DYNAMIC_ANCHORS}") {
-            assert!(resolved.contains("Only discuss our return policy."));
-            assert!(resolved.contains("Do not mention competitors."));
-        }
+        assert!(resolved.contains("Only discuss our return policy."));
+        assert!(resolved.contains("Do not mention competitors."));
     }
 }
