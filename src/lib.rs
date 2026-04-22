@@ -73,15 +73,10 @@ pub mod inner {
             .get("dynamic_anchors")
             .and_then(|v| serde_json::from_value(v.clone()).ok());
 
-        prompts::resolve_template(
-            prompt_name,
-            site_name,
-            site_description,
-            anchors.as_deref(),
-        )
-        .ok_or_else(|| ScoltaError::UnknownPrompt {
-            name: prompt_name.to_string(),
-        })
+        prompts::resolve_template(prompt_name, site_name, site_description, anchors.as_deref())
+            .ok_or_else(|| ScoltaError::UnknownPrompt {
+                name: prompt_name.to_string(),
+            })
     }
 
     pub fn get_prompt(name: &str) -> Result<String, ScoltaError> {
@@ -744,13 +739,15 @@ mod tests {
             "prompt_name": "expand_query",
             "site_name": "Site",
             "site_description": "desc"
-        })).unwrap();
+        }))
+        .unwrap();
         let with_none = inner::resolve_prompt(&json!({
             "prompt_name": "expand_query",
             "site_name": "Site",
             "site_description": "desc",
             "dynamic_anchors": null
-        })).unwrap();
+        }))
+        .unwrap();
         assert_eq!(without, with_none);
     }
 
@@ -761,7 +758,8 @@ mod tests {
             "prompt_name": "summarize",
             "site_name": "Site",
             "site_description": "desc"
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(!result.contains("{DYNAMIC_ANCHORS}"));
     }
 
@@ -773,7 +771,8 @@ mod tests {
             "site_name": "Site",
             "site_description": "desc",
             "dynamic_anchors": ["Focus on pricing.", "Do not mention competitors."]
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(!result.contains("{DYNAMIC_ANCHORS}"));
         assert!(result.contains("Focus on pricing."));
         assert!(result.contains("Do not mention competitors."));
@@ -786,13 +785,15 @@ mod tests {
             "prompt_name": "expand_query",
             "site_name": "Site",
             "site_description": "desc"
-        })).unwrap();
+        }))
+        .unwrap();
         let with_anchors = inner::resolve_prompt(&json!({
             "prompt_name": "expand_query",
             "site_name": "Site",
             "site_description": "desc",
             "dynamic_anchors": ["Some anchor."]
-        })).unwrap();
+        }))
+        .unwrap();
         // Output is identical: anchors are silently dropped when no placeholder exists.
         assert_eq!(without_anchors, with_anchors);
     }

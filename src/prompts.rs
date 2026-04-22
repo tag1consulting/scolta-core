@@ -169,9 +169,13 @@ mod tests {
 
     #[test]
     fn test_resolve_template_expand_query() {
-        let resolved =
-            resolve_template("expand_query", "ACME Corp", "the premier widget supplier", None)
-                .unwrap();
+        let resolved = resolve_template(
+            "expand_query",
+            "ACME Corp",
+            "the premier widget supplier",
+            None,
+        )
+        .unwrap();
         assert!(resolved.contains("ACME Corp"));
         assert!(resolved.contains("premier widget supplier"));
         assert!(!resolved.contains("{SITE_NAME}"));
@@ -186,10 +190,13 @@ mod tests {
     #[test]
     fn test_dynamic_anchors_substituted() {
         // Template without placeholder: anchors silently ignored, no error.
-        let resolved = resolve_template("expand_query", "Site", "desc", Some(&[
-            "anchor one".to_string(),
-            "anchor two".to_string(),
-        ])).unwrap();
+        let resolved = resolve_template(
+            "expand_query",
+            "Site",
+            "desc",
+            Some(&["anchor one".to_string(), "anchor two".to_string()]),
+        )
+        .unwrap();
         // expand_query has no {DYNAMIC_ANCHORS} — anchors ignored, no placeholder left.
         assert!(!resolved.contains("{DYNAMIC_ANCHORS}"));
     }
