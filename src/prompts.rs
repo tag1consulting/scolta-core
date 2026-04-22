@@ -63,6 +63,7 @@ You have TWO sources of information:
 1. The original search context from the first message in the conversation.
 2. Additional search results that may be appended to follow-up messages (prefixed with "Additional search results for this follow-up:"). These are fresh results from a new search based on the follow-up question.
 
+{DYNAMIC_ANCHORS}
 FORMAT RULES:
 - Keep responses concise and scannable — 1-4 sentences plus optional bullets.
 - Use **bold** for important names and phone numbers.
@@ -221,5 +222,24 @@ mod tests {
         assert!(!resolved.contains("{DYNAMIC_ANCHORS}"));
         assert!(resolved.contains("Only discuss our return policy."));
         assert!(resolved.contains("Do not mention competitors."));
+    }
+
+    #[test]
+    fn test_dynamic_anchors_in_follow_up() {
+        // The follow_up template contains {DYNAMIC_ANCHORS}; verify anchors are injected.
+        assert!(
+            FOLLOW_UP.contains("{DYNAMIC_ANCHORS}"),
+            "follow_up template must contain {{DYNAMIC_ANCHORS}} placeholder"
+        );
+        let anchors = vec![
+            "Cite page URLs for every claim.".to_string(),
+            "Limit response to three sentences.".to_string(),
+            "Do not discuss pricing.".to_string(),
+        ];
+        let resolved = resolve_template("follow_up", "Site", "desc", Some(&anchors)).unwrap();
+        assert!(!resolved.contains("{DYNAMIC_ANCHORS}"));
+        assert!(resolved.contains("Cite page URLs for every claim."));
+        assert!(resolved.contains("Limit response to three sentences."));
+        assert!(resolved.contains("Do not discuss pricing."));
     }
 }
