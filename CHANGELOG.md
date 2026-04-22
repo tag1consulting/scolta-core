@@ -6,6 +6,10 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [0.2.5] - Unreleased
 
+### Added
+- **`{DYNAMIC_ANCHORS}` placeholder in `resolve_prompt`**: Callers can now pass `dynamic_anchors: string[]` in the `resolve_prompt` JSON input. When the `summarize` or `follow_up` template is used, anchors are joined with newlines and injected before the FORMAT RULES block. When anchors are absent or the template has no placeholder, the call is a no-op — fully backward-compatible with all existing callers.
+- **`resolve_template` `anchors` parameter**: `resolve_template` gains `anchors: Option<&[String]>`. Silent no-op when the template has no `{DYNAMIC_ANCHORS}` placeholder; erases the placeholder to an empty string when anchors are `None` or empty.
+
 ## [0.2.4] - 2026-04-21
 
 ### Fixed

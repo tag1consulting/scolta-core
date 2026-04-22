@@ -69,11 +69,14 @@ pub mod inner {
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        prompts::resolve_template(prompt_name, site_name, site_description).ok_or_else(|| {
-            ScoltaError::UnknownPrompt {
+        let anchors: Option<Vec<String>> = obj
+            .get("dynamic_anchors")
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+        prompts::resolve_template(prompt_name, site_name, site_description, anchors.as_deref())
+            .ok_or_else(|| ScoltaError::UnknownPrompt {
                 name: prompt_name.to_string(),
-            }
-        })
+            })
     }
 
     pub fn get_prompt(name: &str) -> Result<String, ScoltaError> {
@@ -727,6 +730,72 @@ mod tests {
     fn test_resolve_prompt_unknown() {
         let input = json!({"prompt_name": "nonexistent", "site_name": "Test"});
         assert!(inner::resolve_prompt(&input).is_err());
+    }
+
+    #[test]
+    fn test_resolve_prompt_no_placeholder_no_anchors_unchanged() {
+        // expand_query has no {DYNAMIC_ANCHORS}; omitting dynamic_anchors → no change.
+        let without = inner::resolve_prompt(&json!({
+            "prompt_name": "expand_query",
+            "site_name": "Site",
+            "site_description": "desc"
+        }))
+        .unwrap();
+        let with_none = inner::resolve_prompt(&json!({
+            "prompt_name": "expand_query",
+            "site_name": "Site",
+            "site_description": "desc",
+            "dynamic_anchors": null
+        }))
+        .unwrap();
+        assert_eq!(without, with_none);
+    }
+
+    #[test]
+    fn test_resolve_prompt_placeholder_no_anchors_erased() {
+        // summarize has {DYNAMIC_ANCHORS}; no anchors supplied → placeholder removed.
+        let result = inner::resolve_prompt(&json!({
+            "prompt_name": "summarize",
+            "site_name": "Site",
+            "site_description": "desc"
+        }))
+        .unwrap();
+        assert!(!result.contains("{DYNAMIC_ANCHORS}"));
+    }
+
+    #[test]
+    fn test_resolve_prompt_placeholder_with_anchors_substituted() {
+        // summarize template contains {DYNAMIC_ANCHORS}; anchors must appear in output.
+        let result = inner::resolve_prompt(&json!({
+            "prompt_name": "summarize",
+            "site_name": "Site",
+            "site_description": "desc",
+            "dynamic_anchors": ["Focus on pricing.", "Do not mention competitors."]
+        }))
+        .unwrap();
+        assert!(!result.contains("{DYNAMIC_ANCHORS}"));
+        assert!(result.contains("Focus on pricing."));
+        assert!(result.contains("Do not mention competitors."));
+    }
+
+    #[test]
+    fn test_resolve_prompt_no_placeholder_anchors_ignored() {
+        // expand_query has no {DYNAMIC_ANCHORS}; anchors supplied → silently ignored.
+        let without_anchors = inner::resolve_prompt(&json!({
+            "prompt_name": "expand_query",
+            "site_name": "Site",
+            "site_description": "desc"
+        }))
+        .unwrap();
+        let with_anchors = inner::resolve_prompt(&json!({
+            "prompt_name": "expand_query",
+            "site_name": "Site",
+            "site_description": "desc",
+            "dynamic_anchors": ["Some anchor."]
+        }))
+        .unwrap();
+        // Output is identical: anchors are silently dropped when no placeholder exists.
+        assert_eq!(without_anchors, with_anchors);
     }
 
     #[test]
