@@ -4,7 +4,7 @@ All notable changes to scolta-core will be documented in this file.
 
 This project uses [Semantic Versioning](https://semver.org/). Major versions are synchronized across all Scolta packages.
 
-## [0.2.5] - Unreleased
+## [0.3.0] - 2026-04-23
 
 ### Added
 - **`{DYNAMIC_ANCHORS}` placeholder in `resolve_prompt`**: Callers can now pass `dynamic_anchors: string[]` in the `resolve_prompt` JSON input. When the `summarize` or `follow_up` template is used, anchors are joined with newlines and injected before the FORMAT RULES block. When anchors are absent or the template has no placeholder, the call is a no-op — fully backward-compatible with all existing callers.
