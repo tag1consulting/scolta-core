@@ -4,6 +4,11 @@ All notable changes to scolta-core will be documented in this file.
 
 This project uses [Semantic Versioning](https://semver.org/). Major versions are synchronized across all Scolta packages.
 
+## [0.3.1] - 2026-04-23
+
+### Fixed
+- **Release workflow**: Trigger now accepts both `v0.x.x` and bare `0.x.x` tag formats. The 0.3.0 tag lacked the `v` prefix, so the workflow never fired and no WASM assets were attached to the release.
+
 ## [0.3.0] - 2026-04-23
 
 ### Added
