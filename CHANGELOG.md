@@ -4,6 +4,11 @@ All notable changes to scolta-core will be documented in this file.
 
 This project uses [Semantic Versioning](https://semver.org/). Major versions are synchronized across all Scolta packages.
 
+## [0.3.2] - 2026-04-24
+
+### Changed
+- Version aligned with coordinated 0.3.2 release across Scolta packages. No Rust code changes since 0.3.1.
+
 ## [0.3.1] - 2026-04-23
 
 ### Fixed
