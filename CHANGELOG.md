@@ -6,6 +6,8 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-04-26
+
 ### Changed
 - **Config value clamping.** `ScoringConfig::clamp_and_validate()` added; `from_json_validated()` now uses it instead of the warn-only `validate()`. Out-of-range values (e.g. `recency_boost_max: 100.0`) are clamped to their documented boundaries — preventing misconfiguration from silently breaking search ranking. A warning is still emitted for each clamped field. Fields affected: `recency_boost_max` (0.0–2.0), `recency_half_life_days` (1–3650), `recency_max_penalty` (0.0–1.0), `results_per_page` (1–100), `max_pagefind_results` (1–500). String-enum and structural fields (`recency_strategy`, `recency_curve` sort order) remain warn-only. WASM rebuilt.
 
