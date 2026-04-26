@@ -224,6 +224,84 @@ impl ScoringConfig {
 
         warnings
     }
+
+    /// Clamp out-of-range values to their documented boundaries and return a
+    /// warning for each clamped field.
+    ///
+    /// Called by [`crate::config::from_json_validated`] after parsing, so
+    /// misconfigured sites (e.g. `recency_boost_max: 100.0`) get a corrected
+    /// config and a logged warning rather than silently broken scoring.
+    ///
+    /// Fields that cannot be meaningfully clamped to a range — string enums
+    /// (`recency_strategy`) and structural checks (`recency_curve` sort order)
+    /// — are left unchanged; their warnings come from `validate()` instead.
+    pub fn clamp_and_validate(&mut self) -> Vec<ConfigWarning> {
+        let mut warnings = Vec::new();
+
+        if self.recency_boost_max < 0.0 || self.recency_boost_max > 2.0 {
+            let clamped = self.recency_boost_max.clamp(0.0, 2.0);
+            warnings.push(ConfigWarning {
+                field: "recency_boost_max",
+                message: format!(
+                    "value {} outside range (0.0–2.0), clamped to {clamped}",
+                    self.recency_boost_max
+                ),
+            });
+            self.recency_boost_max = clamped;
+        }
+
+        if self.recency_half_life_days == 0 || self.recency_half_life_days > 3650 {
+            let clamped = self.recency_half_life_days.clamp(1, 3650);
+            warnings.push(ConfigWarning {
+                field: "recency_half_life_days",
+                message: format!(
+                    "value {} outside range (1–3650), clamped to {clamped}",
+                    self.recency_half_life_days
+                ),
+            });
+            self.recency_half_life_days = clamped;
+        }
+
+        if self.recency_max_penalty < 0.0 || self.recency_max_penalty > 1.0 {
+            let clamped = self.recency_max_penalty.clamp(0.0, 1.0);
+            warnings.push(ConfigWarning {
+                field: "recency_max_penalty",
+                message: format!(
+                    "value {} outside range (0.0–1.0), clamped to {clamped}",
+                    self.recency_max_penalty
+                ),
+            });
+            self.recency_max_penalty = clamped;
+        }
+
+        if self.results_per_page == 0 || self.results_per_page > 100 {
+            let clamped = self.results_per_page.clamp(1, 100);
+            warnings.push(ConfigWarning {
+                field: "results_per_page",
+                message: format!(
+                    "value {} outside range (1–100), clamped to {clamped}",
+                    self.results_per_page
+                ),
+            });
+            self.results_per_page = clamped;
+        }
+
+        if self.max_pagefind_results == 0 || self.max_pagefind_results > 500 {
+            let clamped = self.max_pagefind_results.clamp(1, 500);
+            warnings.push(ConfigWarning {
+                field: "max_pagefind_results",
+                message: format!(
+                    "value {} outside range (1–500), clamped to {clamped}",
+                    self.max_pagefind_results
+                ),
+            });
+            self.max_pagefind_results = clamped;
+        }
+
+        // Append non-clampable warnings from validate().
+        warnings.extend(self.validate());
+        warnings
+    }
 }
 
 /// A single search result with score.

@@ -6,11 +6,15 @@
 
 use crate::scoring::{ConfigWarning, ScoringConfig};
 
-/// Parse a JSON object into a ScoringConfig, returning warnings for
-/// any values outside their reasonable ranges.
+/// Parse a JSON object into a ScoringConfig, clamping out-of-range values
+/// to their documented boundaries and returning a warning for each.
+///
+/// Unlike `from_json`, values outside their reasonable ranges are clamped
+/// rather than accepted as-is — preventing misconfiguration (e.g.
+/// `recency_boost_max: 100.0`) from silently breaking search ranking.
 pub fn from_json_validated(json: &serde_json::Value) -> (ScoringConfig, Vec<ConfigWarning>) {
-    let config = from_json(json);
-    let warnings = config.validate();
+    let mut config = from_json(json);
+    let warnings = config.clamp_and_validate();
     (config, warnings)
 }
 
@@ -176,11 +180,15 @@ mod tests {
     }
 
     #[test]
-    fn test_from_json_validated_warns() {
+    fn test_from_json_validated_clamps_and_warns() {
         let json = json!({"recency_boost_max": 10.0, "results_per_page": 0});
         let (config, warnings) = from_json_validated(&json);
-        assert_eq!(config.recency_boost_max, 10.0);
+        // Values must be clamped to range boundaries.
+        assert_eq!(config.recency_boost_max, 2.0);
+        assert_eq!(config.results_per_page, 1);
         assert!(warnings.len() >= 2);
+        assert!(warnings.iter().any(|w| w.field == "recency_boost_max"));
+        assert!(warnings.iter().any(|w| w.field == "results_per_page"));
     }
 
     #[test]
