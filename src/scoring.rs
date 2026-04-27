@@ -1789,4 +1789,360 @@ mod tests {
             );
         }
     }
+
+    // -------------------------------------------------------------------
+    // Recency strategy values — verify exact formula outputs
+    // -------------------------------------------------------------------
+
+    mod recency_values {
+        use super::*;
+
+        // --- Exponential strategy (default) ---
+
+        #[test]
+        fn exponential_day_0_is_boost_max() {
+            let config = ScoringConfig::default();
+            let boost = recency_boost(&days_ago(0), &config);
+            assert!(
+                (boost - 0.5).abs() < 0.005,
+                "day 0 should be ~0.5, got {boost}"
+            );
+        }
+
+        #[test]
+        fn exponential_at_half_life_is_half_boost_max() {
+            // At half_life_days (365): boost = boost_max × exp(-ln2) = 0.5 × 0.5 = 0.25
+            let config = ScoringConfig::default();
+            let boost = recency_boost(&days_ago(365), &config);
+            assert!(
+                (boost - 0.25).abs() < 0.01,
+                "day 365 should be ~0.25, got {boost}"
+            );
+        }
+
+        #[test]
+        fn exponential_at_two_half_lives_is_quarter_boost_max() {
+            // At 2×half_life_days (730): boost = boost_max × exp(-2×ln2) = 0.5 × 0.25 = 0.125
+            let config = ScoringConfig::default();
+            let boost = recency_boost(&days_ago(730), &config);
+            assert!(
+                (boost - 0.125).abs() < 0.01,
+                "day 730 should be ~0.125, got {boost}"
+            );
+        }
+
+        #[test]
+        fn exponential_at_penalty_threshold_is_zero() {
+            // At penalty_after_days (1825): years_over=0, penalty=0 → result=0.0
+            let config = ScoringConfig::default();
+            let boost = recency_boost(&days_ago(1825), &config);
+            assert!(
+                boost.abs() < 0.01,
+                "day 1825 (penalty threshold) should be ~0.0, got {boost}"
+            );
+        }
+
+        #[test]
+        fn exponential_past_threshold_applies_penalty() {
+            // 5 years past threshold (1825+5×365=3650): years_over=5, penalty=0.25
+            let config = ScoringConfig::default();
+            let boost = recency_boost(&days_ago(3650), &config);
+            assert!(
+                (boost - (-0.25)).abs() < 0.01,
+                "day 3650 should be ~-0.25, got {boost}"
+            );
+        }
+
+        #[test]
+        fn exponential_penalty_capped_at_max() {
+            // 6 years past threshold (1825+6×365=4015): years_over=6, uncapped=0.3, capped=0.3
+            let config = ScoringConfig::default();
+            let boost = recency_boost(&days_ago(4015), &config);
+            assert!(
+                (boost - (-0.3)).abs() < 0.01,
+                "day 4015 should be ~-0.3 (capped), got {boost}"
+            );
+        }
+
+        #[test]
+        fn exponential_custom_half_life_and_boost_max() {
+            // half_life=30, boost_max=1.0: day 30 → 0.5, day 60 → 0.25
+            let config = ScoringConfig {
+                recency_boost_max: 1.0,
+                recency_half_life_days: 30,
+                ..Default::default()
+            };
+            let boost_30 = recency_boost(&days_ago(30), &config);
+            let boost_60 = recency_boost(&days_ago(60), &config);
+            assert!(
+                (boost_30 - 0.5).abs() < 0.01,
+                "day 30 (half_life=30, max=1.0) should be ~0.5, got {boost_30}"
+            );
+            assert!(
+                (boost_60 - 0.25).abs() < 0.01,
+                "day 60 (half_life=30, max=1.0) should be ~0.25, got {boost_60}"
+            );
+        }
+
+        #[test]
+        fn exponential_zero_half_life_returns_zero() {
+            let config = ScoringConfig {
+                recency_half_life_days: 0,
+                ..Default::default()
+            };
+            assert_eq!(
+                recency_boost(&days_ago(30), &config),
+                0.0,
+                "half_life_days=0 should return 0.0"
+            );
+        }
+
+        #[test]
+        fn future_date_returns_boost_max() {
+            let config = ScoringConfig::default();
+            let boost = recency_boost("2999-12-31", &config);
+            assert_eq!(
+                boost, config.recency_boost_max,
+                "future date should return boost_max"
+            );
+        }
+
+        // --- Linear strategy ---
+
+        #[test]
+        fn linear_day_0_is_boost_max() {
+            let config = ScoringConfig {
+                recency_strategy: "linear".to_string(),
+                ..Default::default()
+            };
+            let boost = recency_boost(&days_ago(0), &config);
+            assert!(
+                (boost - 0.5).abs() < 0.005,
+                "linear day 0 should be boost_max (0.5), got {boost}"
+            );
+        }
+
+        #[test]
+        fn linear_at_half_threshold_is_quarter_boost_max() {
+            // At threshold/2 (~912 days): fraction = 1 - 912/1825 ≈ 0.5, boost ≈ 0.25
+            let config = ScoringConfig {
+                recency_strategy: "linear".to_string(),
+                ..Default::default()
+            };
+            let boost = recency_boost(&days_ago(913), &config);
+            assert!(
+                (boost - 0.25).abs() < 0.01,
+                "linear at ~half threshold should be ~0.25, got {boost}"
+            );
+        }
+
+        #[test]
+        fn linear_at_threshold_is_zero() {
+            // At penalty_after_days (1825): fraction = 1 - 1825/1825 = 0 → boost = 0
+            let config = ScoringConfig {
+                recency_strategy: "linear".to_string(),
+                ..Default::default()
+            };
+            let boost = recency_boost(&days_ago(1825), &config);
+            assert!(
+                boost.abs() < 0.01,
+                "linear at penalty threshold should be ~0.0, got {boost}"
+            );
+        }
+
+        #[test]
+        fn linear_past_threshold_is_negative() {
+            let config = ScoringConfig {
+                recency_strategy: "linear".to_string(),
+                ..Default::default()
+            };
+            let boost = recency_boost(&days_ago(2200), &config);
+            assert!(
+                boost < 0.0,
+                "linear past threshold should be negative, got {boost}"
+            );
+        }
+
+        // --- Step strategy ---
+
+        #[test]
+        fn step_within_half_life_is_boost_max() {
+            // Below half_life_days (365): full boost
+            let config = ScoringConfig {
+                recency_strategy: "step".to_string(),
+                ..Default::default()
+            };
+            assert_eq!(
+                recency_boost(&days_ago(1), &config),
+                0.5,
+                "step day 1 should be boost_max"
+            );
+            assert_eq!(
+                recency_boost(&days_ago(364), &config),
+                0.5,
+                "step day 364 should be boost_max"
+            );
+        }
+
+        #[test]
+        fn step_at_and_beyond_half_life_is_zero() {
+            // At and past half_life_days (365): `days_old < half_life` is false → 0.0
+            let config = ScoringConfig {
+                recency_strategy: "step".to_string(),
+                ..Default::default()
+            };
+            assert_eq!(
+                recency_boost(&days_ago(365), &config),
+                0.0,
+                "step at half_life should be 0.0"
+            );
+            assert_eq!(
+                recency_boost(&days_ago(366), &config),
+                0.0,
+                "step past half_life should be 0.0"
+            );
+        }
+
+        #[test]
+        fn step_past_threshold_is_negative() {
+            let config = ScoringConfig {
+                recency_strategy: "step".to_string(),
+                ..Default::default()
+            };
+            let boost = recency_boost(&days_ago(2200), &config);
+            assert!(
+                boost < 0.0,
+                "step past penalty threshold should be negative, got {boost}"
+            );
+        }
+
+        // --- Custom curve strategy ---
+
+        #[test]
+        fn custom_curve_interpolates_between_points() {
+            let config = ScoringConfig {
+                recency_strategy: "custom".to_string(),
+                recency_curve: vec![[0.0, 1.0], [365.0, 0.5], [730.0, 0.0]],
+                ..Default::default()
+            };
+            assert!(
+                (recency_custom(0.0, &config) - 1.0).abs() < 0.001,
+                "day 0 should be 1.0"
+            );
+            assert!(
+                (recency_custom(182.0, &config) - 0.75).abs() < 0.01,
+                "day 182 should be ~0.75"
+            );
+            assert!(
+                (recency_custom(365.0, &config) - 0.5).abs() < 0.001,
+                "day 365 should be 0.5"
+            );
+            assert!(
+                (recency_custom(547.0, &config) - 0.25).abs() < 0.01,
+                "day 547 should be ~0.25"
+            );
+            assert!(
+                (recency_custom(730.0, &config) - 0.0).abs() < 0.001,
+                "day 730 should be 0.0"
+            );
+        }
+
+        #[test]
+        fn custom_curve_clamps_beyond_last_point() {
+            // Past the last point (730), result clamps to the last value (0.0)
+            let config = ScoringConfig {
+                recency_strategy: "custom".to_string(),
+                recency_curve: vec![[0.0, 1.0], [365.0, 0.5], [730.0, 0.0]],
+                ..Default::default()
+            };
+            assert!(
+                recency_custom(1000.0, &config).abs() < 0.001,
+                "past last curve point should clamp to 0.0"
+            );
+        }
+
+        #[test]
+        fn custom_curve_single_point_returns_that_value() {
+            let config = ScoringConfig {
+                recency_strategy: "custom".to_string(),
+                recency_curve: vec![[100.0, 0.5]],
+                ..Default::default()
+            };
+            assert!(
+                (recency_custom(0.0, &config) - 0.5).abs() < 0.001,
+                "before single point: should return its value"
+            );
+            assert!(
+                (recency_custom(100.0, &config) - 0.5).abs() < 0.001,
+                "at single point: should return its value"
+            );
+            assert!(
+                (recency_custom(500.0, &config) - 0.5).abs() < 0.001,
+                "after single point: should return its value"
+            );
+        }
+
+        #[test]
+        fn custom_curve_empty_returns_zero() {
+            let config = ScoringConfig {
+                recency_strategy: "custom".to_string(),
+                recency_curve: vec![],
+                ..Default::default()
+            };
+            assert_eq!(recency_custom(0.0, &config), 0.0, "empty curve: day 0");
+            assert_eq!(recency_custom(365.0, &config), 0.0, "empty curve: day 365");
+        }
+
+        // --- None strategy ---
+
+        #[test]
+        fn none_strategy_always_returns_zero() {
+            let config = ScoringConfig {
+                recency_strategy: "none".to_string(),
+                ..Default::default()
+            };
+            assert_eq!(recency_boost(&days_ago(0), &config), 0.0, "none: day 0");
+            assert_eq!(recency_boost(&days_ago(365), &config), 0.0, "none: day 365");
+            assert_eq!(
+                recency_boost(&days_ago(3650), &config),
+                0.0,
+                "none: day 3650"
+            );
+        }
+
+        // --- Penalty boundary tests ---
+
+        #[test]
+        fn penalty_one_year_past_threshold() {
+            // 1825 + 365 = 2190 days: years_over=1, penalty=min(0.05, 0.3)=0.05
+            let config = ScoringConfig::default();
+            let boost = recency_boost(&days_ago(2190), &config);
+            assert!(
+                (boost - (-0.05)).abs() < 0.01,
+                "1 year past threshold should be ~-0.05, got {boost}"
+            );
+        }
+
+        #[test]
+        fn penalty_six_years_past_threshold_is_capped() {
+            // 1825 + 6×365 = 4015 days: years_over=6, uncapped=0.30, capped=0.3
+            let config = ScoringConfig::default();
+            let boost = recency_boost(&days_ago(4015), &config);
+            assert!(
+                (boost - (-0.3)).abs() < 0.01,
+                "6 years past threshold should be ~-0.3 (capped), got {boost}"
+            );
+        }
+
+        #[test]
+        fn penalty_twenty_years_past_threshold_is_still_capped() {
+            // 1825 + 20×365 = 9125 days: years_over=20, uncapped=1.0, capped at max_penalty=0.3
+            let config = ScoringConfig::default();
+            let boost = recency_boost(&days_ago(9125), &config);
+            assert!(
+                (boost - (-0.3)).abs() < 0.001,
+                "20 years past threshold should be capped at -0.3, got {boost}"
+            );
+        }
+    }
 }

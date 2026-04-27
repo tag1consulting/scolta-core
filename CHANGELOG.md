@@ -7,6 +7,7 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 ## [Unreleased]
 
 ### Added
+- **Recency strategy value tests.** New `mod recency_values` in `scoring::tests`: 24 tests verifying exact formula outputs for all five recency strategies (`exponential`, `linear`, `step`, `custom`, `none`). Covers: day-0 boost, half-life decay, two-half-life decay, penalty threshold, penalty cap, custom half_life/boost_max, zero half_life, future dates, interpolation between curve points, single-point and empty curves, and the 1/6/20-year penalty boundary cases.
 - **Ranking sensitivity tests.** New `mod ranking_sensitivity` in `scoring::tests`: 8 tests verifying that changing a scoring config parameter (`title_match_boost`, `recency_boost_max`, `recency_strategy`, `content_match_boost`, `content_all_terms_multiplier`, `phrase_adjacent_multiplier`, `recency_curve`, `title_all_terms_multiplier`) flips the ranking order as expected.
 
 ## [0.3.3] - 2026-04-26
