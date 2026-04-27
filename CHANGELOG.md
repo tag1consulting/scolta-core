@@ -8,6 +8,7 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ### Fixed
 - **`SearchResult.date` is now optional in JSON deserialization.** The `date` field lacked `#[serde(default)]`, so any caller omitting `date` from a result object received a deserialization error instead of scoring the result with a zero recency boost. Fixed by adding `#[serde(default)]`, making the field behave identically to `score`, `content_type`, and `site_name`. Revealed by the new malformed-input test suite.
+- **Expanded query results now receive title boost from primary query terms.** `score_results` accepts an optional `primary_query` field; when present, the title boost for each result is the maximum of the expanded-query title boost and the primary-query title boost. This fixes ranking bias that favored literal title matches over semantically correct results found via query expansion.
 
 ### Added
 - **Context extraction UTF-8 safety tests.** New `mod utf8_safety` in `context::tests`: 6 tests covering multi-byte char handling in snippet extraction and sentence truncation — large 2-byte-char content with a keyword, `caffè` keyword where snippet radius lands on an odd byte offset inside `è`, flag emoji (🇮🇹, 8 bytes) adjacent to the keyword, `truncate_at_sentence` finding a period before a 2-byte char, CJK content with no ASCII sentence terminators, and range merging across 200 bytes of `è` filler.

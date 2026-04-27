@@ -123,7 +123,12 @@ pub mod inner {
         let config_json = obj.get("config").unwrap_or(&empty_config);
         let cfg = config::from_json(config_json);
 
-        scoring::score_results(&mut results, query, &cfg);
+        let primary_terms: Option<Vec<String>> = obj
+            .get("primary_query")
+            .and_then(|v| v.as_str())
+            .map(|pq| common::extract_query(pq, &cfg.language).terms);
+
+        scoring::score_results_with_primary(&mut results, query, primary_terms.as_deref(), &cfg);
 
         serde_json::to_value(&results).map_err(|e| ScoltaError::parse_error("score_results", e))
     }

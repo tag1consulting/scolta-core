@@ -567,19 +567,20 @@ fn phrase_proximity_multiplier(terms: &[String], locations: &[u32], config: &Sco
     }
 }
 
-/// Calculate composite score using a [`QueryInfo`] and a pre-computed priority boost.
+/// Calculate composite score using a [`QueryInfo`], optional primary terms, and a priority boost.
 ///
-/// Extends [`score_result_with_terms`] with phrase-proximity scoring: when
-/// `query_info.is_phrase` is true and the result carries Pagefind `locations`,
-/// the content boost is multiplied by the phrase-proximity factor.
+/// When `primary_terms` is `Some`, the title boost is the maximum of the title
+/// boost computed from the current query's terms and the title boost computed
+/// from the primary query's terms. This allows expanded-query scoring passes to
+/// award a title boost to results whose titles match the original user query,
+/// fixing the structural bias that disadvantaged semantically correct results.
 ///
-/// Formula:
-/// ```text
-/// final = (base × source_weight) + title_boost + (content_boost × phrase_mult) + recency + priority
-/// ```
-pub fn score_result_with_query_info(
+/// When `primary_terms` is `None`, behavior is identical to
+/// [`score_result_with_query_info`].
+pub fn score_result_with_query_info_and_primary(
     result: &SearchResult,
     query_info: &common::QueryInfo,
+    primary_terms: Option<&[String]>,
     config: &ScoringConfig,
     priority_boost: f64,
 ) -> f64 {
@@ -589,7 +590,14 @@ pub fn score_result_with_query_info(
         1.0
     };
     let source_weight = result.source_weight.unwrap_or(1.0);
-    let title_boost = title_match_score_with_terms(&query_info.terms, &result.title, config);
+    let query_title_boost = title_match_score_with_terms(&query_info.terms, &result.title, config);
+    let title_boost = match primary_terms {
+        Some(pt) => {
+            let primary_title_boost = title_match_score_with_terms(pt, &result.title, config);
+            query_title_boost.max(primary_title_boost)
+        }
+        None => query_title_boost,
+    };
     let content_boost = content_match_score_with_terms(&query_info.terms, &result.excerpt, config);
     let recency = recency_boost(&result.date, config);
     let phrase_mult = if query_info.is_phrase {
@@ -606,6 +614,25 @@ pub fn score_result_with_query_info(
         + (content_boost * phrase_mult)
         + recency
         + priority_boost
+}
+
+/// Calculate composite score using a [`QueryInfo`] and a pre-computed priority boost.
+///
+/// Extends [`score_result_with_terms`] with phrase-proximity scoring: when
+/// `query_info.is_phrase` is true and the result carries Pagefind `locations`,
+/// the content boost is multiplied by the phrase-proximity factor.
+///
+/// Formula:
+/// ```text
+/// final = (base × source_weight) + title_boost + (content_boost × phrase_mult) + recency + priority
+/// ```
+pub fn score_result_with_query_info(
+    result: &SearchResult,
+    query_info: &common::QueryInfo,
+    config: &ScoringConfig,
+    priority_boost: f64,
+) -> f64 {
+    score_result_with_query_info_and_primary(result, query_info, None, config, priority_boost)
 }
 
 /// Calculate composite score using pre-extracted terms and a pre-computed priority boost.
@@ -654,11 +681,21 @@ pub fn score_result(result: &SearchResult, query: &str, config: &ScoringConfig) 
 
 /// Score all results and sort by relevance (highest first).
 ///
+/// When `primary_terms` is `Some`, the title boost for each result is the
+/// maximum of the current-query title boost and the primary-query title boost.
+/// This allows expanded-query scoring passes to award title boosts for results
+/// that match the original user query in their titles.
+///
 /// Pre-computes matched priority pages for the query once, then applies
 /// per-result priority boosts and optional custom excerpt overrides.
 /// Phrase-proximity scoring is applied when the query contains two or more
 /// terms and each result carries Pagefind `locations` data.
-pub fn score_results(results: &mut [SearchResult], query: &str, config: &ScoringConfig) {
+pub fn score_results_with_primary(
+    results: &mut [SearchResult],
+    query: &str,
+    primary_terms: Option<&[String]>,
+    config: &ScoringConfig,
+) {
     let query_info = if config.custom_stop_words.is_empty() {
         common::extract_query(query, &config.language)
     } else {
@@ -695,7 +732,13 @@ pub fn score_results(results: &mut [SearchResult], query: &str, config: &Scoring
             }
         }
 
-        result.score = score_result_with_query_info(result, &query_info, config, priority_boost);
+        result.score = score_result_with_query_info_and_primary(
+            result,
+            &query_info,
+            primary_terms,
+            config,
+            priority_boost,
+        );
     }
 
     results.sort_by(|a, b| {
@@ -703,6 +746,16 @@ pub fn score_results(results: &mut [SearchResult], query: &str, config: &Scoring
             .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
+}
+
+/// Score all results and sort by relevance (highest first).
+///
+/// Pre-computes matched priority pages for the query once, then applies
+/// per-result priority boosts and optional custom excerpt overrides.
+/// Phrase-proximity scoring is applied when the query contains two or more
+/// terms and each result carries Pagefind `locations` data.
+pub fn score_results(results: &mut [SearchResult], query: &str, config: &ScoringConfig) {
+    score_results_with_primary(results, query, None, config);
 }
 
 /// Merge N result sets with per-set weights, optional deduplication, and URL filtering.
@@ -2273,6 +2326,207 @@ mod tests {
             assert!(
                 (mult - 2.5).abs() < 0.001,
                 "expected adjacent (2.5) at u32 boundary, got {mult}"
+            );
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // Expanded title boost — cross-query primary_terms bridging
+    // -------------------------------------------------------------------
+
+    mod expanded_title_boost {
+        use super::*;
+
+        fn make_result_for_boost(url: &str, title: &str, excerpt: &str) -> SearchResult {
+            SearchResult {
+                url: url.to_string(),
+                title: title.to_string(),
+                excerpt: excerpt.to_string(),
+                date: days_ago(30),
+                score: 1.0,
+                content_type: String::new(),
+                site_name: String::new(),
+                source_weight: None,
+                locations: None,
+                extra: serde_json::Map::new(),
+            }
+        }
+
+        // Test 1: None primary_terms → identical to score_result_with_query_info.
+        #[test]
+        fn without_primary_terms_matches_original_scorer() {
+            let config = ScoringConfig::default();
+            let result = make_result_for_boost("/a", "Thai Green Curry Recipe", "A Thai dish");
+            let query_info = common::extract_query("Thai cuisine recipes", &config.language);
+
+            let score_original = score_result_with_query_info(&result, &query_info, &config, 0.0);
+            let score_new =
+                score_result_with_query_info_and_primary(&result, &query_info, None, &config, 0.0);
+
+            assert!(
+                (score_original - score_new).abs() < 0.0001,
+                "None primary_terms must produce same score as original: {} vs {}",
+                score_original,
+                score_new
+            );
+        }
+
+        // Test 2: Primary terms that match the title boost the score above no-primary-terms.
+        #[test]
+        fn primary_terms_matching_title_increase_score() {
+            let config = ScoringConfig::default();
+            // Expanded query terms "Southeast Asian cooking" don't match title "Thai Green Curry Recipe".
+            // Primary query terms "thai recipes" do match ("thai" appears in title).
+            let result =
+                make_result_for_boost("/a", "Thai Green Curry Recipe", "A delicious Thai dish");
+            let expanded_query_info =
+                common::extract_query("Southeast Asian cooking", &config.language);
+            let primary_terms: Vec<String> = vec!["thai".to_string(), "recipes".to_string()];
+
+            let score_without_primary = score_result_with_query_info_and_primary(
+                &result,
+                &expanded_query_info,
+                None,
+                &config,
+                0.0,
+            );
+            let score_with_primary = score_result_with_query_info_and_primary(
+                &result,
+                &expanded_query_info,
+                Some(&primary_terms),
+                &config,
+                0.0,
+            );
+
+            assert!(
+                score_with_primary > score_without_primary,
+                "Primary terms matching title must increase score: {} > {} (without)",
+                score_with_primary,
+                score_without_primary
+            );
+        }
+
+        // Test 3: max of the two title boosts is used, not the sum.
+        #[test]
+        fn title_boost_takes_maximum_not_sum() {
+            let config = ScoringConfig::default();
+            // Title "Apple Orange" matches both expanded terms ["apple"] and primary terms ["orange"].
+            let result = make_result_for_boost("/a", "Apple Orange Guide", "content here");
+            let expanded_query_info = common::extract_query("apple products", &config.language);
+            let primary_terms: Vec<String> = vec!["orange".to_string()];
+
+            // Compute expected: max(expanded_title_boost, primary_title_boost).
+            let expanded_title_boost = title_match_score_with_terms(
+                &expanded_query_info.terms,
+                "Apple Orange Guide",
+                &config,
+            );
+            let primary_title_boost =
+                title_match_score_with_terms(&primary_terms, "Apple Orange Guide", &config);
+            let expected_title_boost = expanded_title_boost.max(primary_title_boost);
+
+            // Score with both: extract base + recency to isolate title portion.
+            let score_with = score_result_with_query_info_and_primary(
+                &result,
+                &expanded_query_info,
+                Some(&primary_terms),
+                &config,
+                0.0,
+            );
+            // Score without primary should use only expanded_title_boost.
+            let score_without = score_result_with_query_info_and_primary(
+                &result,
+                &expanded_query_info,
+                None,
+                &config,
+                0.0,
+            );
+
+            let boost_difference = score_with - score_without;
+            let expected_difference = expected_title_boost - expanded_title_boost;
+
+            assert!(
+                (boost_difference - expected_difference).abs() < 0.0001,
+                "Title boost difference must equal max(exp,pri) - exp_boost: got {} expected {}",
+                boost_difference,
+                expected_difference
+            );
+        }
+
+        // Test 4: inner::score_results JSON API accepts primary_query without error.
+        #[test]
+        fn score_results_json_accepts_primary_query() {
+            use crate::inner;
+            use serde_json::json;
+
+            let with_primary = inner::score_results(&json!({
+                "query": "Southeast Asian cooking",
+                "primary_query": "traditional Thai recipes",
+                "results": [
+                    {"url": "/a", "title": "Thai Green Curry", "excerpt": "Thai cuisine", "date": "2026-01-01", "score": 1.0}
+                ]
+            }));
+            assert!(with_primary.is_ok(), "primary_query must not cause error");
+
+            let without_primary = inner::score_results(&json!({
+                "query": "Southeast Asian cooking",
+                "results": [
+                    {"url": "/a", "title": "Thai Green Curry", "excerpt": "Thai cuisine", "date": "2026-01-01", "score": 1.0}
+                ]
+            }));
+            assert!(
+                without_primary.is_ok(),
+                "omitting primary_query must still work"
+            );
+        }
+
+        // Test 5: primary_query causes title-matching result to outrank non-matching.
+        #[test]
+        fn primary_query_boosts_title_match_above_no_title_match() {
+            use crate::inner;
+            use serde_json::json;
+
+            // Result A: title matches primary query terms ("Thai").
+            // Result B: no title match for either query.
+            // With primary_query: A should rank above B (extra title boost).
+            // Without primary_query: scoring expanded terms only — both have no title match → equal.
+            let results_json = json!([
+                {"url": "/thai", "title": "Thai Green Curry", "excerpt": "A coconut curry", "date": "2026-01-01", "score": 1.0},
+                {"url": "/bread", "title": "Basic Bread Recipe", "excerpt": "A simple loaf", "date": "2026-01-01", "score": 1.0}
+            ]);
+
+            let with_primary = inner::score_results(&json!({
+                "query": "Southeast Asian cooking",
+                "primary_query": "traditional Thai recipes",
+                "results": results_json.clone()
+            }))
+            .unwrap();
+            let arr_with = with_primary.as_array().unwrap();
+            assert_eq!(
+                arr_with[0]["url"], "/thai",
+                "With primary_query: Thai title match must rank first; got {}",
+                arr_with[0]["url"]
+            );
+
+            let without_primary = inner::score_results(&json!({
+                "query": "Southeast Asian cooking",
+                "results": results_json
+            }))
+            .unwrap();
+            let arr_without = without_primary.as_array().unwrap();
+            // Without primary_query, expanded query "Southeast Asian cooking" doesn't match
+            // either title, so both get equal title boost (0). Scores should be equal.
+            let score_thai = arr_without.iter().find(|r| r["url"] == "/thai").unwrap()["score"]
+                .as_f64()
+                .unwrap();
+            let score_bread = arr_without.iter().find(|r| r["url"] == "/bread").unwrap()["score"]
+                .as_f64()
+                .unwrap();
+            assert!(
+                (score_thai - score_bread).abs() < 0.01,
+                "Without primary_query: no title match means equal scores ({} vs {})",
+                score_thai,
+                score_bread
             );
         }
     }
