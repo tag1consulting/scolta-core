@@ -382,4 +382,137 @@ mod tests {
         assert_eq!(results[0].url, "https://a.com");
         assert_eq!(results[1].url, "https://b.com");
     }
+
+    // -----------------------------------------------------------------------
+    // UTF-8 safety — snippet boundaries must never split a multi-byte char
+    // -----------------------------------------------------------------------
+
+    mod utf8_safety {
+        use super::*;
+
+        fn is_valid_utf8(s: &str) -> bool {
+            std::str::from_utf8(s.as_bytes()).is_ok()
+        }
+
+        // Content composed entirely of 2-byte chars (é) with a keyword buried
+        // inside.  Snippet radius expansion may land on an odd byte offset —
+        // byte_sub/byte_add must align to a char boundary.
+        #[test]
+        fn multibyte_content_contains_keyword() {
+            let intro = "é".repeat(2500); // 5000 bytes, 2500 chars
+            let body = " drupal ".to_string() + &"è".repeat(1000);
+            let content = intro + &body;
+
+            let cfg = ContextConfig {
+                max_length: 3000,
+                intro_length: 2000,
+                snippet_radius: 200,
+                separator: "\n...\n".to_string(),
+            };
+
+            let result = extract_context(&content, "drupal", &cfg);
+            assert!(is_valid_utf8(&result), "result must be valid UTF-8");
+            assert!(result.contains("drupal"), "result must contain keyword");
+            assert!(
+                result.chars().count() <= cfg.max_length as usize,
+                "result must fit within max_length"
+            );
+        }
+
+        // Keyword that itself contains a multi-byte char ("caffè").  The snippet
+        // radius may land one byte past an even position — inside an `è` — and
+        // byte_sub must back up to the char boundary.
+        #[test]
+        fn caffe_keyword_at_multibyte_boundary() {
+            let filler = "è".repeat(300); // 600 bytes; radius 299 → raw = 301 (odd)
+            let intro = "A".repeat(2000);
+            let body = filler + "caffè " + &"B".repeat(600);
+            let content = intro + &body;
+
+            let cfg = ContextConfig {
+                max_length: 4000,
+                intro_length: 2000,
+                snippet_radius: 299, // raw start = 600 - 299 = 301; not a char boundary
+                separator: "|".to_string(),
+            };
+
+            let result = extract_context(&content, "caffè", &cfg);
+            assert!(is_valid_utf8(&result), "result must be valid UTF-8");
+            assert!(result.contains("caffè"), "result must contain keyword");
+        }
+
+        // Flag emoji (🇮🇹, 8 bytes each) adjacent to the keyword.  Small radius
+        // makes it likely the snippet window boundary falls inside an emoji.
+        #[test]
+        fn emoji_neighbor_no_panic() {
+            let emoji = "🇮🇹"; // 8 bytes, 1 char (well, 2 code points rendered as 1 glyph)
+            let intro = "A".repeat(2000);
+            let body = format!("{} drupal {}", emoji.repeat(60), emoji.repeat(60));
+            let content = intro + &body;
+
+            let cfg = ContextConfig {
+                max_length: 3000,
+                intro_length: 2000,
+                snippet_radius: 9, // 9 < 16 (two emojis); likely to hit inside an emoji
+                separator: "|".to_string(),
+            };
+
+            let result = extract_context(&content, "drupal", &cfg);
+            assert!(is_valid_utf8(&result), "result must be valid UTF-8");
+            assert!(result.contains("drupal"), "result must contain keyword");
+        }
+
+        // truncate_at_sentence: period followed by a 2-byte char (È).
+        // The function must correctly find the sentence boundary even when the
+        // next character after `. ` is multi-byte.
+        #[test]
+        fn truncate_finds_period_before_multibyte() {
+            let s = "Hello world. È molto bello e lungo testo extra qui davvero.";
+            // max_chars=15 → truncated contains "Hello world. È " (bytes 0-15)
+            // Sentence boundary '.' at char 11 / byte 11, followed by ' '.
+            let result = truncate_at_sentence(s, 15);
+            assert_eq!(
+                result, "Hello world.",
+                "should truncate at sentence boundary"
+            );
+            assert!(is_valid_utf8(result), "result must be valid UTF-8");
+        }
+
+        // truncate_at_sentence with CJK content (no ASCII sentence terminators,
+        // no spaces) — must not panic, and must return valid UTF-8.
+        #[test]
+        fn truncate_cjk_no_ascii_terminator() {
+            // Chinese text with no ASCII periods or spaces.
+            let s = "这是很长的中文文本不包含标点符号需要截断处理验证不会崩溃";
+            let result = truncate_at_sentence(s, 5);
+            assert!(
+                result.chars().count() <= 5,
+                "result must not exceed max_chars"
+            );
+            assert!(is_valid_utf8(result), "result must be valid UTF-8");
+        }
+
+        // Two terms separated by a 100-char run of è (200 bytes).  With a radius
+        // large enough for the ranges to overlap, merge_ranges produces one
+        // combined range that must be a valid byte slice of `remaining`.
+        #[test]
+        fn multibyte_filler_ranges_merge_correctly() {
+            let filler = "è".repeat(100); // 200 bytes, 100 chars
+            let intro = "A".repeat(2000);
+            let body = "alpha ".to_string() + &filler + " beta " + &"C".repeat(1000);
+            let content = intro + &body;
+
+            let cfg = ContextConfig {
+                max_length: 5000,
+                intro_length: 2000,
+                snippet_radius: 300, // large enough for alpha+beta ranges to overlap
+                separator: "|".to_string(),
+            };
+
+            let result = extract_context(&content, "alpha beta", &cfg);
+            assert!(is_valid_utf8(&result), "result must be valid UTF-8");
+            assert!(result.contains("alpha"), "result must contain 'alpha'");
+            assert!(result.contains("beta"), "result must contain 'beta'");
+        }
+    }
 }
