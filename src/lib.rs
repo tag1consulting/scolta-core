@@ -178,10 +178,7 @@ pub mod inner {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let debug_mode = obj
-            .get("debug")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let debug_mode = obj.get("debug").and_then(|v| v.as_bool()).unwrap_or(false);
 
         let options = scoring::MergeOptions {
             sets,
@@ -200,8 +197,7 @@ pub mod inner {
             Ok(serde_json::json!({ "results": results_val, "debug": debug_val }))
         } else {
             let merged = scoring::merge_results(options);
-            serde_json::to_value(&merged)
-                .map_err(|e| ScoltaError::parse_error("merge_results", e))
+            serde_json::to_value(&merged).map_err(|e| ScoltaError::parse_error("merge_results", e))
         }
     }
 
@@ -920,7 +916,10 @@ mod tests {
             ]
         });
         let result = inner::merge_results(&input).unwrap();
-        assert!(result.is_array(), "without debug flag, output must be a plain array");
+        assert!(
+            result.is_array(),
+            "without debug flag, output must be a plain array"
+        );
     }
 
     #[test]
@@ -932,9 +931,18 @@ mod tests {
             "debug": true
         });
         let result = inner::merge_results(&input).unwrap();
-        assert!(result.is_object(), "with debug:true, output must be an object");
-        assert!(result.get("results").is_some(), "debug output must contain 'results' key");
-        assert!(result.get("debug").is_some(), "debug output must contain 'debug' key");
+        assert!(
+            result.is_object(),
+            "with debug:true, output must be an object"
+        );
+        assert!(
+            result.get("results").is_some(),
+            "debug output must contain 'results' key"
+        );
+        assert!(
+            result.get("debug").is_some(),
+            "debug output must contain 'debug' key"
+        );
     }
 
     #[test]
