@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Added
+- **Ranking sensitivity tests.** New `mod ranking_sensitivity` in `scoring::tests`: 8 tests verifying that changing a scoring config parameter (`title_match_boost`, `recency_boost_max`, `recency_strategy`, `content_match_boost`, `content_all_terms_multiplier`, `phrase_adjacent_multiplier`, `recency_curve`, `title_all_terms_multiplier`) flips the ranking order as expected.
+
 ## [0.3.3] - 2026-04-26
 
 ### Changed
