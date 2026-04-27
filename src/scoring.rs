@@ -2664,11 +2664,14 @@ mod tests {
 
         // Both should be base * multiplier * 1.0 (all terms match)
         assert!(
-            (title_score - config.title_match_boost * config.title_all_terms_multiplier).abs() < 1e-10,
+            (title_score - config.title_match_boost * config.title_all_terms_multiplier).abs()
+                < 1e-10,
             "title score mismatch"
         );
         assert!(
-            (content_score - config.content_match_boost * config.content_all_terms_multiplier).abs() < 1e-10,
+            (content_score - config.content_match_boost * config.content_all_terms_multiplier)
+                .abs()
+                < 1e-10,
             "content score mismatch"
         );
     }
