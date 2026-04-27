@@ -310,6 +310,7 @@ pub struct SearchResult {
     pub url: String,
     pub title: String,
     pub excerpt: String,
+    #[serde(default)]
     pub date: String,
     #[serde(default)]
     pub score: f64,
