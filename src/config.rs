@@ -57,7 +57,7 @@ pub fn from_json(json: &serde_json::Value) -> ScoringConfig {
         content_all_terms_multiplier: obj
             .get("content_all_terms_multiplier")
             .and_then(|v| v.as_f64())
-            .unwrap_or(0.48),
+            .unwrap_or(1.2),
         phrase_adjacent_multiplier: obj
             .get("phrase_adjacent_multiplier")
             .and_then(|v| v.as_f64())
@@ -122,7 +122,7 @@ mod tests {
         let config = from_json(&json);
         assert_eq!(config.recency_boost_max, 0.5);
         assert_eq!(config.recency_half_life_days, 365);
-        assert_eq!(config.content_all_terms_multiplier, 0.48);
+        assert_eq!(config.content_all_terms_multiplier, 1.2);
         assert_eq!(config.language, "en");
         assert!(config.custom_stop_words.is_empty());
         assert_eq!(config.recency_strategy, "exponential");
