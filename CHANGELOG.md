@@ -10,6 +10,15 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 - **`SearchResult.date` is now optional in JSON deserialization.** The `date` field lacked `#[serde(default)]`, so any caller omitting `date` from a result object received a deserialization error instead of scoring the result with a zero recency boost. Fixed by adding `#[serde(default)]`, making the field behave identically to `score`, `content_type`, and `site_name`. Revealed by the new malformed-input test suite.
 
 ### Added
+- **`merge_results` optional `debug` field.** When `"debug": true` is included in the input,
+  `merge_results` returns `{"results": [...], "debug": {...}}` instead of a plain array. The
+  `debug` object contains per-set `input_count` and `weight`, plus `total_before_dedup`,
+  `total_after_dedup`, and `excluded_count`. Omitting `debug` or setting it to `false` preserves
+  the existing plain-array response (fully backward-compatible).
+- **Prompt sync: all three prompt improvements from scolta-php.** `prompts.rs` updated to match
+  `DefaultPrompts.php`: rule 4 strengthened + rule 11 (audience qualifiers) in `expand_query`;
+  `GROUNDING CHECK` section added to both `summarize` and `follow_up`; per-excerpt scanning and
+  minimum bullet count instruction added to `summarize` FORMAT RULES.
 - **Context extraction UTF-8 safety tests.** New `mod utf8_safety` in `context::tests`: 6 tests covering multi-byte char handling in snippet extraction and sentence truncation — large 2-byte-char content with a keyword, `caffè` keyword where snippet radius lands on an odd byte offset inside `è`, flag emoji (🇮🇹, 8 bytes) adjacent to the keyword, `truncate_at_sentence` finding a period before a 2-byte char, CJK content with no ASCII sentence terminators, and range merging across 200 bytes of `è` filler.
 - **Malformed input tests.** New `mod malformed_input` in `lib::tests`: 42 tests verifying that every `inner::` entry point returns `Err` (never panics) when given a JSON array instead of an object, a missing required field, or a wrong field type. Also verifies that valid edge-case inputs (empty results arrays, missing optional fields, empty queries) succeed. Covers: `score_results`, `merge_results`, `match_priority_pages`, `batch_score_results`, `extract_context`, `batch_extract_context`, `sanitize_query`, `truncate_conversation`, `resolve_prompt`, and `parse_expansion`.
 - **Phrase-proximity value tests.** New `mod phrase_proximity_values` in `scoring::tests`: 11 tests verifying exact multiplier outputs for `phrase_proximity_multiplier`. Covers: empty locations (1.0), fewer locations than terms (1.0), single-term no-op (1.0), duplicate positions → adjacent (2.5), span = n−1 boundary for 2-term and 3-term queries (adjacent), span = n (near, not adjacent), span = `phrase_near_window` inclusive boundary (near), span = window+1 (no bonus), unsorted input sorting, and u32::MAX positions with no overflow.

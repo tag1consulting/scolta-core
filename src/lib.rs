@@ -178,6 +178,11 @@ pub mod inner {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
+        let debug_mode = obj
+            .get("debug")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
         let options = scoring::MergeOptions {
             sets,
             deduplicate_by,
@@ -186,8 +191,18 @@ pub mod inner {
             normalize_urls,
         };
 
-        let merged = scoring::merge_results(options);
-        serde_json::to_value(&merged).map_err(|e| ScoltaError::parse_error("merge_results", e))
+        if debug_mode {
+            let (merged, debug_info) = scoring::merge_results_with_debug(options);
+            let results_val = serde_json::to_value(&merged)
+                .map_err(|e| ScoltaError::parse_error("merge_results", e))?;
+            let debug_val = serde_json::to_value(&debug_info)
+                .map_err(|e| ScoltaError::parse_error("merge_results", e))?;
+            Ok(serde_json::json!({ "results": results_val, "debug": debug_val }))
+        } else {
+            let merged = scoring::merge_results(options);
+            serde_json::to_value(&merged)
+                .map_err(|e| ScoltaError::parse_error("merge_results", e))
+        }
     }
 
     /// Return the priority pages from `priority_pages` whose keywords match `query`.
@@ -893,6 +908,74 @@ mod tests {
     fn test_merge_results_missing_sets() {
         let input = json!({"original": [], "expanded": []});
         assert!(inner::merge_results(&input).is_err());
+    }
+
+    // ---- expansion-diagnostic debug field ----
+
+    #[test]
+    fn test_merge_results_no_debug_returns_array() {
+        let input = json!({
+            "sets": [
+                { "results": [{"url": "https://a.com", "title": "A", "excerpt": "", "date": "", "score": 1.0}], "weight": 1.0 }
+            ]
+        });
+        let result = inner::merge_results(&input).unwrap();
+        assert!(result.is_array(), "without debug flag, output must be a plain array");
+    }
+
+    #[test]
+    fn test_merge_results_debug_true_returns_object() {
+        let input = json!({
+            "sets": [
+                { "results": [{"url": "https://a.com", "title": "A", "excerpt": "", "date": "", "score": 1.0}], "weight": 1.0 }
+            ],
+            "debug": true
+        });
+        let result = inner::merge_results(&input).unwrap();
+        assert!(result.is_object(), "with debug:true, output must be an object");
+        assert!(result.get("results").is_some(), "debug output must contain 'results' key");
+        assert!(result.get("debug").is_some(), "debug output must contain 'debug' key");
+    }
+
+    #[test]
+    fn test_merge_results_debug_tracks_input_counts() {
+        let input = json!({
+            "sets": [
+                { "results": [
+                    {"url": "https://a.com", "title": "A", "excerpt": "", "date": "", "score": 2.0},
+                    {"url": "https://b.com", "title": "B", "excerpt": "", "date": "", "score": 1.0}
+                ], "weight": 1.0 },
+                { "results": [
+                    {"url": "https://c.com", "title": "C", "excerpt": "", "date": "", "score": 1.0}
+                ], "weight": 0.5 }
+            ],
+            "debug": true
+        });
+        let result = inner::merge_results(&input).unwrap();
+        let debug = &result["debug"];
+        let sets = debug["sets"].as_array().unwrap();
+        assert_eq!(sets.len(), 2);
+        assert_eq!(sets[0]["input_count"], 2);
+        assert_eq!(sets[1]["input_count"], 1);
+    }
+
+    #[test]
+    fn test_merge_results_debug_tracks_dedup_reduction() {
+        let input = json!({
+            "sets": [
+                { "results": [
+                    {"url": "https://a.com", "title": "A", "excerpt": "", "date": "", "score": 2.0},
+                    {"url": "https://a.com", "title": "A dup", "excerpt": "", "date": "", "score": 1.0},
+                    {"url": "https://b.com", "title": "B", "excerpt": "", "date": "", "score": 0.5}
+                ], "weight": 1.0 }
+            ],
+            "deduplicate_by": "url",
+            "debug": true
+        });
+        let result = inner::merge_results(&input).unwrap();
+        let debug = &result["debug"];
+        assert_eq!(debug["total_before_dedup"], 3);
+        assert_eq!(debug["total_after_dedup"], 2);
     }
 
     #[test]
