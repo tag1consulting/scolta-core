@@ -7,6 +7,7 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 ## [Unreleased]
 
 ### Added
+- **Context extraction UTF-8 safety tests.** New `mod utf8_safety` in `context::tests`: 6 tests covering multi-byte char handling in snippet extraction and sentence truncation — large 2-byte-char content with a keyword, `caffè` keyword where snippet radius lands on an odd byte offset inside `è`, flag emoji (🇮🇹, 8 bytes) adjacent to the keyword, `truncate_at_sentence` finding a period before a 2-byte char, CJK content with no ASCII sentence terminators, and range merging across 200 bytes of `è` filler.
 - **Ranking sensitivity tests.** New `mod ranking_sensitivity` in `scoring::tests`: 8 tests verifying that changing a scoring config parameter (`title_match_boost`, `recency_boost_max`, `recency_strategy`, `content_match_boost`, `content_all_terms_multiplier`, `phrase_adjacent_multiplier`, `recency_curve`, `title_all_terms_multiplier`) flips the ranking order as expected.
 
 ## [0.3.3] - 2026-04-26
