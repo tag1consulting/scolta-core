@@ -1468,21 +1468,41 @@ mod tests {
             // A: content match only. B: title match only.
             // Low boost → content (A) wins; high boost → title (B) wins.
             let a = make_result_with_excerpt_and_locations(
-                "/a", "Other Page", "apple content match", 1.0, None,
+                "/a",
+                "Other Page",
+                "apple content match",
+                1.0,
+                None,
             );
             let b = make_result_with_excerpt_and_locations(
-                "/b", "Apple Product", "no match here", 1.0, None,
+                "/b",
+                "Apple Product",
+                "no match here",
+                1.0,
+                None,
             );
 
             let mut low = vec![a.clone(), b.clone()];
-            let low_cfg = ScoringConfig { title_match_boost: 0.1, ..Default::default() };
+            let low_cfg = ScoringConfig {
+                title_match_boost: 0.1,
+                ..Default::default()
+            };
             score_results(&mut low, "apple", &low_cfg);
-            assert_eq!(low[0].url, "/a", "low title_match_boost: content result should rank first");
+            assert_eq!(
+                low[0].url, "/a",
+                "low title_match_boost: content result should rank first"
+            );
 
             let mut high = vec![a.clone(), b.clone()];
-            let high_cfg = ScoringConfig { title_match_boost: 5.0, ..Default::default() };
+            let high_cfg = ScoringConfig {
+                title_match_boost: 5.0,
+                ..Default::default()
+            };
             score_results(&mut high, "apple", &high_cfg);
-            assert_eq!(high[0].url, "/b", "high title_match_boost: title result should rank first");
+            assert_eq!(
+                high[0].url, "/b",
+                "high title_match_boost: title result should rank first"
+            );
         }
 
         #[test]
@@ -1490,36 +1510,54 @@ mod tests {
             // A: title match, 730 days old. B: content match, 1 day old.
             // Low boost_max → A's relevance wins; high → B's recency wins.
             let mut a = make_result_with_excerpt_and_locations(
-                "/a", "Apple Product", "no content match", 1.0, None,
+                "/a",
+                "Apple Product",
+                "no content match",
+                1.0,
+                None,
             );
             a.date = days_ago(730);
             let mut b = make_result_with_excerpt_and_locations(
-                "/b", "Other Page", "apple content here", 1.0, None,
+                "/b",
+                "Other Page",
+                "apple content here",
+                1.0,
+                None,
             );
             b.date = days_ago(1);
 
             let mut low = vec![a.clone(), b.clone()];
-            let low_cfg = ScoringConfig { recency_boost_max: 0.1, ..Default::default() };
+            let low_cfg = ScoringConfig {
+                recency_boost_max: 0.1,
+                ..Default::default()
+            };
             score_results(&mut low, "apple", &low_cfg);
-            assert_eq!(low[0].url, "/a", "low recency_boost_max: relevant old result should rank first");
+            assert_eq!(
+                low[0].url, "/a",
+                "low recency_boost_max: relevant old result should rank first"
+            );
 
             let mut high = vec![a.clone(), b.clone()];
-            let high_cfg = ScoringConfig { recency_boost_max: 2.0, ..Default::default() };
+            let high_cfg = ScoringConfig {
+                recency_boost_max: 2.0,
+                ..Default::default()
+            };
             score_results(&mut high, "apple", &high_cfg);
-            assert_eq!(high[0].url, "/b", "high recency_boost_max: recent result should rank first");
+            assert_eq!(
+                high[0].url, "/b",
+                "high recency_boost_max: recent result should rank first"
+            );
         }
 
         #[test]
         fn recency_strategy_none_eliminates_recency_effect() {
             // Same relevance (identical content match), different dates.
             // With "exponential": recent (B) wins. With "none": equal scores.
-            let mut a = make_result_with_excerpt_and_locations(
-                "/a", "Other", "apple content", 1.0, None,
-            );
+            let mut a =
+                make_result_with_excerpt_and_locations("/a", "Other", "apple content", 1.0, None);
             a.date = days_ago(730);
-            let mut b = make_result_with_excerpt_and_locations(
-                "/b", "Other", "apple content", 1.0, None,
-            );
+            let mut b =
+                make_result_with_excerpt_and_locations("/b", "Other", "apple content", 1.0, None);
             b.date = days_ago(1);
 
             let exp_cfg = ScoringConfig {
@@ -1528,7 +1566,10 @@ mod tests {
             };
             let mut exp_results = vec![a.clone(), b.clone()];
             score_results(&mut exp_results, "apple", &exp_cfg);
-            assert_eq!(exp_results[0].url, "/b", "exponential: recent result should rank first");
+            assert_eq!(
+                exp_results[0].url, "/b",
+                "exponential: recent result should rank first"
+            );
 
             let none_cfg = ScoringConfig {
                 recency_strategy: "none".to_string(),
@@ -1548,21 +1589,41 @@ mod tests {
             // A: title match only. B: content match only.
             // Low boost → title (A) wins; high boost → content (B) wins.
             let a = make_result_with_excerpt_and_locations(
-                "/a", "Apple Product", "no content match", 1.0, None,
+                "/a",
+                "Apple Product",
+                "no content match",
+                1.0,
+                None,
             );
             let b = make_result_with_excerpt_and_locations(
-                "/b", "Other Page", "apple content here", 1.0, None,
+                "/b",
+                "Other Page",
+                "apple content here",
+                1.0,
+                None,
             );
 
             let mut low = vec![a.clone(), b.clone()];
-            let low_cfg = ScoringConfig { content_match_boost: 0.1, ..Default::default() };
+            let low_cfg = ScoringConfig {
+                content_match_boost: 0.1,
+                ..Default::default()
+            };
             score_results(&mut low, "apple", &low_cfg);
-            assert_eq!(low[0].url, "/a", "low content_match_boost: title result should rank first");
+            assert_eq!(
+                low[0].url, "/a",
+                "low content_match_boost: title result should rank first"
+            );
 
             let mut high = vec![a.clone(), b.clone()];
-            let high_cfg = ScoringConfig { content_match_boost: 3.0, ..Default::default() };
+            let high_cfg = ScoringConfig {
+                content_match_boost: 3.0,
+                ..Default::default()
+            };
             score_results(&mut high, "apple", &high_cfg);
-            assert_eq!(high[0].url, "/b", "high content_match_boost: content result should rank first");
+            assert_eq!(
+                high[0].url, "/b",
+                "high content_match_boost: content result should rank first"
+            );
         }
 
         #[test]
@@ -1570,21 +1631,41 @@ mod tests {
             // 2-term query. A: all terms in content (2/2). B: all terms in title (2/2).
             // Low multiplier → B's title-all-terms boost dominates; high → A's content wins.
             let a = make_result_with_excerpt_and_locations(
-                "/a", "Other", "apple orange in content", 1.0, None,
+                "/a",
+                "Other",
+                "apple orange in content",
+                1.0,
+                None,
             );
             let b = make_result_with_excerpt_and_locations(
-                "/b", "Apple Orange Product", "no content match", 1.0, None,
+                "/b",
+                "Apple Orange Product",
+                "no content match",
+                1.0,
+                None,
             );
 
             let mut low = vec![a.clone(), b.clone()];
-            let low_cfg = ScoringConfig { content_all_terms_multiplier: 0.1, ..Default::default() };
+            let low_cfg = ScoringConfig {
+                content_all_terms_multiplier: 0.1,
+                ..Default::default()
+            };
             score_results(&mut low, "apple orange", &low_cfg);
-            assert_eq!(low[0].url, "/b", "low content_all_terms_multiplier: title result should rank first");
+            assert_eq!(
+                low[0].url, "/b",
+                "low content_all_terms_multiplier: title result should rank first"
+            );
 
             let mut high = vec![a.clone(), b.clone()];
-            let high_cfg = ScoringConfig { content_all_terms_multiplier: 3.0, ..Default::default() };
+            let high_cfg = ScoringConfig {
+                content_all_terms_multiplier: 3.0,
+                ..Default::default()
+            };
             score_results(&mut high, "apple orange", &high_cfg);
-            assert_eq!(high[0].url, "/a", "high content_all_terms_multiplier: all-content result should rank first");
+            assert_eq!(
+                high[0].url, "/a",
+                "high content_all_terms_multiplier: all-content result should rank first"
+            );
         }
 
         #[test]
@@ -1592,34 +1673,52 @@ mod tests {
             // 2-term query. A: all-terms title, no locations. B: all-terms content, adjacent positions.
             // Low multiplier → title (A) wins; high → adjacent phrase (B) wins.
             let a = make_result_with_excerpt_and_locations(
-                "/a", "Apple Orange Guide", "no content match", 1.0, None,
+                "/a",
+                "Apple Orange Guide",
+                "no content match",
+                1.0,
+                None,
             );
             let b = make_result_with_excerpt_and_locations(
-                "/b", "Other", "apple orange close together", 1.0, Some(vec![0, 1]),
+                "/b",
+                "Other",
+                "apple orange close together",
+                1.0,
+                Some(vec![0, 1]),
             );
 
             let mut low = vec![a.clone(), b.clone()];
-            let low_cfg = ScoringConfig { phrase_adjacent_multiplier: 1.0, ..Default::default() };
+            let low_cfg = ScoringConfig {
+                phrase_adjacent_multiplier: 1.0,
+                ..Default::default()
+            };
             score_results(&mut low, "apple orange", &low_cfg);
-            assert_eq!(low[0].url, "/a", "low phrase_adjacent_multiplier: title result should rank first");
+            assert_eq!(
+                low[0].url, "/a",
+                "low phrase_adjacent_multiplier: title result should rank first"
+            );
 
             let mut high = vec![a.clone(), b.clone()];
-            let high_cfg = ScoringConfig { phrase_adjacent_multiplier: 5.0, ..Default::default() };
+            let high_cfg = ScoringConfig {
+                phrase_adjacent_multiplier: 5.0,
+                ..Default::default()
+            };
             score_results(&mut high, "apple orange", &high_cfg);
-            assert_eq!(high[0].url, "/b", "high phrase_adjacent_multiplier: adjacent phrase result should rank first");
+            assert_eq!(
+                high[0].url, "/b",
+                "high phrase_adjacent_multiplier: adjacent phrase result should rank first"
+            );
         }
 
         #[test]
         fn custom_recency_curve_honored() {
             // Standard curve: newer → higher boost. Reversed curve: older → higher boost.
             // Same relevance on both results (identical content match); only date differs.
-            let mut a = make_result_with_excerpt_and_locations(
-                "/a", "Other", "apple content", 1.0, None,
-            );
+            let mut a =
+                make_result_with_excerpt_and_locations("/a", "Other", "apple content", 1.0, None);
             a.date = days_ago(1);
-            let mut b = make_result_with_excerpt_and_locations(
-                "/b", "Other", "apple content", 1.0, None,
-            );
+            let mut b =
+                make_result_with_excerpt_and_locations("/b", "Other", "apple content", 1.0, None);
             b.date = days_ago(600);
 
             let standard = ScoringConfig {
@@ -1653,14 +1752,25 @@ mod tests {
             //               B: all title (2/2 terms), no content match.
             // Low multiplier → A's partial-title+content wins; high → B's all-title wins.
             let a = make_result_with_excerpt_and_locations(
-                "/a", "Apple Guide", "apple orange content", 1.0, None,
+                "/a",
+                "Apple Guide",
+                "apple orange content",
+                1.0,
+                None,
             );
             let b = make_result_with_excerpt_and_locations(
-                "/b", "Apple Orange Product", "no content match", 1.0, None,
+                "/b",
+                "Apple Orange Product",
+                "no content match",
+                1.0,
+                None,
             );
 
             let mut low = vec![a.clone(), b.clone()];
-            let low_cfg = ScoringConfig { title_all_terms_multiplier: 0.1, ..Default::default() };
+            let low_cfg = ScoringConfig {
+                title_all_terms_multiplier: 0.1,
+                ..Default::default()
+            };
             score_results(&mut low, "apple orange", &low_cfg);
             assert_eq!(
                 low[0].url, "/a",
@@ -1668,7 +1778,10 @@ mod tests {
             );
 
             let mut high = vec![a.clone(), b.clone()];
-            let high_cfg = ScoringConfig { title_all_terms_multiplier: 5.0, ..Default::default() };
+            let high_cfg = ScoringConfig {
+                title_all_terms_multiplier: 5.0,
+                ..Default::default()
+            };
             score_results(&mut high, "apple orange", &high_cfg);
             assert_eq!(
                 high[0].url, "/b",
