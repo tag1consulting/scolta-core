@@ -57,7 +57,7 @@ pub struct PriorityPage {
 /// | `title_match_boost` | 0.0–5.0 | 1.0 |
 /// | `title_all_terms_multiplier` | 0.0–5.0 | 1.5 |
 /// | `content_match_boost` | 0.0–5.0 | 0.4 |
-/// | `content_all_terms_multiplier` | 0.0–5.0 | 0.48 |
+/// | `content_all_terms_multiplier` | 0.0–5.0 | 1.2 |
 /// | `phrase_adjacent_multiplier` | 1.0–10.0 | 2.5 |
 /// | `phrase_near_multiplier` | 1.0–5.0 | 1.5 |
 /// | `phrase_near_window` | 1–50 | 5 |
@@ -79,6 +79,8 @@ pub struct ScoringConfig {
     pub title_match_boost: f64,
     pub title_all_terms_multiplier: f64,
     pub content_match_boost: f64,
+    /// Multiplier applied to `content_match_boost` when all query terms appear
+    /// in the content (parallel to `title_all_terms_multiplier` for title scoring).
     pub content_all_terms_multiplier: f64,
     /// Multiplier applied to `content_boost` when all query terms appear
     /// adjacent to each other (span ≤ terms−1 word positions apart).
@@ -114,7 +116,7 @@ impl Default for ScoringConfig {
             title_match_boost: 1.0,
             title_all_terms_multiplier: 1.5,
             content_match_boost: 0.4,
-            content_all_terms_multiplier: 0.48,
+            content_all_terms_multiplier: 1.2,
             phrase_adjacent_multiplier: 2.5,
             phrase_near_multiplier: 1.5,
             phrase_near_window: 5,
@@ -541,7 +543,7 @@ pub fn content_match_score_with_terms(
 
     let mut boost = config.content_match_boost;
     if matching_count == terms.len() && terms.len() > 1 {
-        boost = config.content_all_terms_multiplier;
+        boost *= config.content_all_terms_multiplier;
     }
 
     boost * (matching_count as f64 / terms.len() as f64)
@@ -1073,7 +1075,7 @@ mod tests {
         let config = ScoringConfig::default();
         assert_eq!(config.recency_boost_max, 0.5);
         assert_eq!(config.recency_half_life_days, 365);
-        assert_eq!(config.content_all_terms_multiplier, 0.48);
+        assert_eq!(config.content_all_terms_multiplier, 1.2);
         assert!(config.priority_pages.is_empty());
     }
 
@@ -1803,7 +1805,7 @@ mod tests {
 
             let mut high = vec![a.clone(), b.clone()];
             let high_cfg = ScoringConfig {
-                content_all_terms_multiplier: 3.0,
+                content_all_terms_multiplier: 5.0,
                 ..Default::default()
             };
             score_results(&mut high, "apple orange", &high_cfg);
@@ -2620,5 +2622,57 @@ mod tests {
                 score_bread
             );
         }
+    }
+
+    #[test]
+    fn content_all_terms_multiplier_is_multiplicative() {
+        let mut config = ScoringConfig::default();
+        // With default 1.2 multiplier, all-terms content score should be
+        // content_match_boost * multiplier * 1.0 (all terms present)
+        let score = content_match_score_with_terms(
+            &["rust".to_string(), "wasm".to_string()],
+            "rust and wasm together",
+            &config,
+        );
+        let expected = config.content_match_boost * config.content_all_terms_multiplier * 1.0;
+        assert!(
+            (score - expected).abs() < 1e-10,
+            "all-terms content score {score} should equal base * multiplier {expected}"
+        );
+
+        // Changing base boost should proportionally affect all-terms score.
+        config.content_match_boost = 0.8;
+        let score2 = content_match_score_with_terms(
+            &["rust".to_string(), "wasm".to_string()],
+            "rust and wasm together",
+            &config,
+        );
+        let expected2 = 0.8 * config.content_all_terms_multiplier * 1.0;
+        assert!(
+            (score2 - expected2).abs() < 1e-10,
+            "changing content_match_boost should proportionally change all-terms score"
+        );
+    }
+
+    #[test]
+    fn title_and_content_multipliers_are_both_multiplicative() {
+        let config = ScoringConfig::default();
+        let terms = vec!["alpha".to_string(), "beta".to_string()];
+
+        let title_score = title_match_score_with_terms(&terms, "alpha beta", &config);
+        let content_score = content_match_score_with_terms(&terms, "alpha beta", &config);
+
+        // Both should be base * multiplier * 1.0 (all terms match)
+        assert!(
+            (title_score - config.title_match_boost * config.title_all_terms_multiplier).abs()
+                < 1e-10,
+            "title score mismatch"
+        );
+        assert!(
+            (content_score - config.content_match_boost * config.content_all_terms_multiplier)
+                .abs()
+                < 1e-10,
+            "content score mismatch"
+        );
     }
 }
