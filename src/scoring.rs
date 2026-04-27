@@ -356,6 +356,23 @@ pub struct MergeOptions {
     pub normalize_urls: bool,
 }
 
+/// Per-set diagnostic data returned by `merge_results_with_debug`.
+#[derive(Debug, Clone, Serialize)]
+pub struct MergeSetDebugInfo {
+    pub weight: f64,
+    pub input_count: usize,
+}
+
+/// Diagnostic data returned alongside merged results when `debug: true` is passed
+/// to `inner::merge_results`.
+#[derive(Debug, Clone, Serialize)]
+pub struct MergeDebugInfo {
+    pub sets: Vec<MergeSetDebugInfo>,
+    pub total_before_dedup: usize,
+    pub total_after_dedup: usize,
+    pub excluded_count: usize,
+}
+
 /// Return the priority pages whose keywords match the given query.
 ///
 /// Performs case-insensitive substring matching. Multi-word keywords must
@@ -816,6 +833,80 @@ pub fn merge_results(options: MergeOptions) -> Vec<SearchResult> {
     }
 
     all
+}
+
+/// Like `merge_results` but also returns `MergeDebugInfo` with per-set counts and
+/// deduplication statistics.
+pub fn merge_results_with_debug(options: MergeOptions) -> (Vec<SearchResult>, MergeDebugInfo) {
+    let set_debug: Vec<MergeSetDebugInfo> = options
+        .sets
+        .iter()
+        .map(|s| MergeSetDebugInfo {
+            weight: s.weight,
+            input_count: s.results.len(),
+        })
+        .collect();
+
+    let total_before_dedup = set_debug.iter().map(|s| s.input_count).sum();
+
+    let mut all: Vec<SearchResult> = options
+        .sets
+        .into_iter()
+        .flat_map(|set| {
+            let w = set.weight;
+            set.results.into_iter().map(move |mut r| {
+                r.score *= w;
+                r
+            })
+        })
+        .collect();
+
+    all.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    if let Some(ref field) = options.deduplicate_by {
+        let mut seen: HashSet<String> = HashSet::new();
+        all.retain(|r| {
+            let key = match field.as_str() {
+                "title" => {
+                    if options.case_sensitive {
+                        r.title.clone()
+                    } else {
+                        r.title.to_lowercase()
+                    }
+                }
+                _ => normalize_url_key(&r.url, options.normalize_urls),
+            };
+            seen.insert(key)
+        });
+    }
+
+    let total_after_dedup = all.len();
+
+    let excluded_count = if !options.exclude_urls.is_empty() {
+        let excluded: HashSet<String> = options
+            .exclude_urls
+            .iter()
+            .map(|u| normalize_url_key(u, options.normalize_urls))
+            .collect();
+        let before = all.len();
+        all.retain(|r| !excluded.contains(&normalize_url_key(&r.url, options.normalize_urls)));
+        before - all.len()
+    } else {
+        0
+    };
+
+    let debug = MergeDebugInfo {
+        sets: set_debug,
+        total_before_dedup,
+        total_after_dedup,
+        excluded_count,
+    };
+
+    (all, debug)
 }
 
 /// Normalize a URL for comparison.
