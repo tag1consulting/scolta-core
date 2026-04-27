@@ -6,6 +6,8 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-04-27
+
 ### Fixed
 - **Content all-terms multiplier is now multiplicative.** `content_match_score_with_terms` now applies `content_all_terms_multiplier` via `*=` (consistent with title scoring) rather than assignment. Default adjusted from `0.48` to `1.2` so that `content_match_boost (0.4) × 1.2 = 0.48` — identical output for default configurations, but users can now tune `content_match_boost` independently and have all-terms scoring scale proportionally.
 - **`SearchResult.date` is now optional in JSON deserialization.** The `date` field lacked `#[serde(default)]`, so any caller omitting `date` from a result object received a deserialization error instead of scoring the result with a zero recency boost. Fixed by adding `#[serde(default)]`, making the field behave identically to `score`, `content_type`, and `site_name`. Revealed by the new malformed-input test suite.
