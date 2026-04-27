@@ -2203,32 +2203,37 @@ mod tests {
         #[test]
         fn span_n_minus_1_is_adjacent_two_terms() {
             // [10, 11]: span 1 < n (2) → adjacent (2.5)
-            let mult =
-                phrase_proximity_multiplier(&terms(&["hello", "world"]), &[10, 11], &cfg());
-            assert!((mult - 2.5).abs() < 0.001, "expected adjacent (2.5), got {mult}");
+            let mult = phrase_proximity_multiplier(&terms(&["hello", "world"]), &[10, 11], &cfg());
+            assert!(
+                (mult - 2.5).abs() < 0.001,
+                "expected adjacent (2.5), got {mult}"
+            );
         }
 
         #[test]
         fn span_n_minus_1_is_adjacent_three_terms() {
             // [10, 11, 12]: span 2 < n (3) → adjacent (2.5)
-            let mult =
-                phrase_proximity_multiplier(&terms(&["a", "b", "c"]), &[10, 11, 12], &cfg());
-            assert!((mult - 2.5).abs() < 0.001, "expected adjacent (2.5), got {mult}");
+            let mult = phrase_proximity_multiplier(&terms(&["a", "b", "c"]), &[10, 11, 12], &cfg());
+            assert!(
+                (mult - 2.5).abs() < 0.001,
+                "expected adjacent (2.5), got {mult}"
+            );
         }
 
         #[test]
         fn span_eq_n_is_near_not_adjacent() {
             // [10, 12]: span 2 = n (2); NOT < 2 (not adjacent); 2 ≤ 5 (near window) → near (1.5)
-            let mult =
-                phrase_proximity_multiplier(&terms(&["hello", "world"]), &[10, 12], &cfg());
-            assert!((mult - 1.5).abs() < 0.001, "expected near (1.5), got {mult}");
+            let mult = phrase_proximity_multiplier(&terms(&["hello", "world"]), &[10, 12], &cfg());
+            assert!(
+                (mult - 1.5).abs() < 0.001,
+                "expected near (1.5), got {mult}"
+            );
         }
 
         #[test]
         fn span_eq_phrase_near_window_is_near() {
             // [10, 15]: span 5 ≤ phrase_near_window (5) → near (1.5) — ≤ is inclusive
-            let mult =
-                phrase_proximity_multiplier(&terms(&["hello", "world"]), &[10, 15], &cfg());
+            let mult = phrase_proximity_multiplier(&terms(&["hello", "world"]), &[10, 15], &cfg());
             assert!(
                 (mult - 1.5).abs() < 0.001,
                 "expected near (1.5) at boundary, got {mult}"
@@ -2238,19 +2243,18 @@ mod tests {
         #[test]
         fn span_exceeds_phrase_near_window_is_no_bonus() {
             // [10, 16]: span 6 > phrase_near_window (5) → 1.0
-            let mult =
-                phrase_proximity_multiplier(&terms(&["hello", "world"]), &[10, 16], &cfg());
-            assert!((mult - 1.0).abs() < 0.001, "expected no bonus (1.0), got {mult}");
+            let mult = phrase_proximity_multiplier(&terms(&["hello", "world"]), &[10, 16], &cfg());
+            assert!(
+                (mult - 1.0).abs() < 0.001,
+                "expected no bonus (1.0), got {mult}"
+            );
         }
 
         #[test]
         fn unsorted_locations_finds_adjacent_window() {
             // [50, 10, 30, 11] → sorted [10, 11, 30, 50]; window [10, 11]: span 1 < 2 → adjacent
-            let mult = phrase_proximity_multiplier(
-                &terms(&["hello", "world"]),
-                &[50, 10, 30, 11],
-                &cfg(),
-            );
+            let mult =
+                phrase_proximity_multiplier(&terms(&["hello", "world"]), &[50, 10, 30, 11], &cfg());
             assert!(
                 (mult - 2.5).abs() < 0.001,
                 "expected adjacent (2.5) from unsorted input, got {mult}"
