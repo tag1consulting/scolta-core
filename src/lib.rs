@@ -1274,8 +1274,7 @@ mod tests {
 
         #[test]
         fn batch_extract_context_empty_items_is_ok() {
-            let result =
-                inner::batch_extract_context(&json!({"query": "test", "items": []}));
+            let result = inner::batch_extract_context(&json!({"query": "test", "items": []}));
             assert!(result.is_ok());
             assert_eq!(result.unwrap().as_array().unwrap().len(), 0);
         }
@@ -1313,9 +1312,7 @@ mod tests {
 
         #[test]
         fn truncate_conversation_messages_is_string_is_err() {
-            assert!(
-                inner::truncate_conversation(&json!({"messages": "not an array"})).is_err()
-            );
+            assert!(inner::truncate_conversation(&json!({"messages": "not an array"})).is_err());
         }
 
         #[test]
