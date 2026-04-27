@@ -1087,4 +1087,286 @@ mod tests {
             "README.md references removed Extism dependency."
         );
     }
+
+    // -------------------------------------------------------------------
+    // Malformed input handling
+    //
+    // Verifies that every inner:: entry point returns Err (never panics)
+    // when given structurally or semantically invalid JSON. Also verifies
+    // that edge-case valid inputs (empty arrays, missing optional fields)
+    // succeed rather than error.
+    // -------------------------------------------------------------------
+    mod malformed_input {
+        use super::*;
+
+        // ---- score_results ----
+
+        #[test]
+        fn score_results_array_input_is_err() {
+            assert!(inner::score_results(&json!([1, 2, 3])).is_err());
+        }
+
+        #[test]
+        fn score_results_missing_query_is_err() {
+            assert!(inner::score_results(&json!({"results": []})).is_err());
+        }
+
+        #[test]
+        fn score_results_missing_results_is_err() {
+            assert!(inner::score_results(&json!({"query": "test"})).is_err());
+        }
+
+        #[test]
+        fn score_results_query_is_number_is_err() {
+            // query field exists but is not a string — as_str() returns None → missing_field error
+            assert!(inner::score_results(&json!({"query": 42, "results": []})).is_err());
+        }
+
+        #[test]
+        fn score_results_results_is_string_is_err() {
+            assert!(
+                inner::score_results(&json!({"query": "test", "results": "not an array"})).is_err()
+            );
+        }
+
+        #[test]
+        fn score_results_empty_results_array_is_ok() {
+            let result = inner::score_results(&json!({"query": "test", "results": []}));
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap().as_array().unwrap().len(), 0);
+        }
+
+        #[test]
+        fn score_results_result_without_date_is_ok() {
+            // date is optional — missing date defaults to ""
+            let result = inner::score_results(&json!({
+                "query": "test",
+                "results": [{"url": "/a", "title": "A", "excerpt": "content"}]
+            }));
+            assert!(result.is_ok());
+        }
+
+        #[test]
+        fn score_results_empty_query_is_ok() {
+            // empty query → terms extraction returns empty → results returned as-is
+            let result = inner::score_results(&json!({
+                "query": "",
+                "results": [{"url": "/a", "title": "A", "excerpt": "a", "date": "2026-01-01"}]
+            }));
+            assert!(result.is_ok());
+        }
+
+        // ---- merge_results ----
+
+        #[test]
+        fn merge_results_array_input_is_err() {
+            assert!(inner::merge_results(&json!([1, 2, 3])).is_err());
+        }
+
+        #[test]
+        fn merge_results_missing_sets_is_err() {
+            assert!(inner::merge_results(&json!({"deduplicate_by": "url"})).is_err());
+        }
+
+        #[test]
+        fn merge_results_sets_is_string_is_err() {
+            assert!(inner::merge_results(&json!({"sets": "not an array"})).is_err());
+        }
+
+        #[test]
+        fn merge_results_empty_sets_is_ok() {
+            let result = inner::merge_results(&json!({"sets": []}));
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap().as_array().unwrap().len(), 0);
+        }
+
+        // ---- match_priority_pages ----
+
+        #[test]
+        fn match_priority_pages_array_input_is_err() {
+            assert!(inner::match_priority_pages(&json!([1, 2, 3])).is_err());
+        }
+
+        #[test]
+        fn match_priority_pages_missing_query_is_err() {
+            assert!(inner::match_priority_pages(&json!({"priority_pages": []})).is_err());
+        }
+
+        #[test]
+        fn match_priority_pages_missing_priority_pages_is_err() {
+            assert!(inner::match_priority_pages(&json!({"query": "test"})).is_err());
+        }
+
+        #[test]
+        fn match_priority_pages_empty_pages_is_ok() {
+            let result =
+                inner::match_priority_pages(&json!({"query": "test", "priority_pages": []}));
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap().as_array().unwrap().len(), 0);
+        }
+
+        // ---- batch_score_results ----
+
+        #[test]
+        fn batch_score_results_array_input_is_err() {
+            assert!(inner::batch_score_results(&json!([1, 2, 3])).is_err());
+        }
+
+        #[test]
+        fn batch_score_results_missing_queries_is_err() {
+            assert!(inner::batch_score_results(&json!({"default_config": {}})).is_err());
+        }
+
+        #[test]
+        fn batch_score_results_query_entry_missing_results_is_err() {
+            assert!(inner::batch_score_results(&json!({
+                "queries": [{"query": "test"}]
+            }))
+            .is_err());
+        }
+
+        #[test]
+        fn batch_score_results_empty_queries_is_ok() {
+            let result = inner::batch_score_results(&json!({"queries": []}));
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap().as_array().unwrap().len(), 0);
+        }
+
+        // ---- extract_context ----
+
+        #[test]
+        fn extract_context_array_input_is_err() {
+            assert!(inner::extract_context(&json!([1, 2, 3])).is_err());
+        }
+
+        #[test]
+        fn extract_context_missing_content_is_err() {
+            assert!(inner::extract_context(&json!({"query": "test"})).is_err());
+        }
+
+        #[test]
+        fn extract_context_missing_query_is_err() {
+            assert!(inner::extract_context(&json!({"content": "hello world"})).is_err());
+        }
+
+        #[test]
+        fn extract_context_empty_content_is_ok() {
+            let result = inner::extract_context(&json!({"content": "", "query": "test"}));
+            assert!(result.is_ok());
+        }
+
+        // ---- batch_extract_context ----
+
+        #[test]
+        fn batch_extract_context_array_input_is_err() {
+            assert!(inner::batch_extract_context(&json!([1, 2, 3])).is_err());
+        }
+
+        #[test]
+        fn batch_extract_context_missing_query_is_err() {
+            assert!(inner::batch_extract_context(&json!({"items": []})).is_err());
+        }
+
+        #[test]
+        fn batch_extract_context_missing_items_is_err() {
+            assert!(inner::batch_extract_context(&json!({"query": "test"})).is_err());
+        }
+
+        #[test]
+        fn batch_extract_context_empty_items_is_ok() {
+            let result = inner::batch_extract_context(&json!({"query": "test", "items": []}));
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap().as_array().unwrap().len(), 0);
+        }
+
+        // ---- sanitize_query ----
+
+        #[test]
+        fn sanitize_query_array_input_is_err() {
+            assert!(inner::sanitize_query(&json!([1, 2, 3])).is_err());
+        }
+
+        #[test]
+        fn sanitize_query_missing_query_is_err() {
+            assert!(inner::sanitize_query(&json!({})).is_err());
+        }
+
+        #[test]
+        fn sanitize_query_empty_query_is_ok() {
+            let result = inner::sanitize_query(&json!({"query": ""}));
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), "");
+        }
+
+        // ---- truncate_conversation ----
+
+        #[test]
+        fn truncate_conversation_array_input_is_err() {
+            assert!(inner::truncate_conversation(&json!([1, 2, 3])).is_err());
+        }
+
+        #[test]
+        fn truncate_conversation_missing_messages_is_err() {
+            assert!(inner::truncate_conversation(&json!({})).is_err());
+        }
+
+        #[test]
+        fn truncate_conversation_messages_is_string_is_err() {
+            assert!(inner::truncate_conversation(&json!({"messages": "not an array"})).is_err());
+        }
+
+        #[test]
+        fn truncate_conversation_empty_messages_is_ok() {
+            let result = inner::truncate_conversation(&json!({"messages": []}));
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap().as_array().unwrap().len(), 0);
+        }
+
+        // ---- resolve_prompt ----
+
+        #[test]
+        fn resolve_prompt_array_input_is_err() {
+            assert!(inner::resolve_prompt(&json!([1, 2, 3])).is_err());
+        }
+
+        #[test]
+        fn resolve_prompt_missing_prompt_name_is_err() {
+            assert!(inner::resolve_prompt(&json!({"site_name": "Test"})).is_err());
+        }
+
+        #[test]
+        fn resolve_prompt_unknown_prompt_name_is_err() {
+            assert!(inner::resolve_prompt(&json!({"prompt_name": "nonexistent_xyz"})).is_err());
+        }
+
+        // ---- parse_expansion ----
+
+        #[test]
+        fn parse_expansion_complete_garbage_returns_empty() {
+            // Garbage that isn't JSON and doesn't contain useful terms
+            let terms = inner::parse_expansion("!!@#$%^&*()");
+            // Must not panic; may return empty or filtered terms
+            let _ = terms; // just verifying no panic
+        }
+
+        #[test]
+        fn parse_expansion_partial_json_does_not_panic() {
+            // Unclosed bracket — serde will fail to parse; falls back to expansion::parse_expansion
+            let terms = inner::parse_expansion(r#"["term1", "term2"#);
+            let _ = terms;
+        }
+
+        #[test]
+        fn parse_expansion_object_without_text_field_does_not_panic() {
+            // Valid JSON object but no "text" field → falls back to expansion::parse_expansion on the whole string
+            let terms = inner::parse_expansion(r#"{"key": "value"}"#);
+            let _ = terms;
+        }
+
+        #[test]
+        fn parse_expansion_empty_string_returns_empty() {
+            let terms = inner::parse_expansion("");
+            assert!(terms.is_empty());
+        }
+    }
 }
