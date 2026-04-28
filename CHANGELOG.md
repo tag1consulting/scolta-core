@@ -6,6 +6,12 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+_No changes yet._
+
+## [0.3.5] - 2026-04-28
+
+_No new entries — release synchronized with scolta-php/scolta-wp/scolta-drupal/scolta-laravel._
+
 ## [0.3.4] - 2026-04-27
 
 ### Fixed
