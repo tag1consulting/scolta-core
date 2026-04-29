@@ -8,6 +8,11 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 _No changes yet._
 
+## [0.3.6] - 2026-04-29
+
+### Changed
+- Version synchronized with coordinated 0.3.6 release across all Scolta packages. No Rust code changes since 0.3.4.
+
 ## [0.3.5] - 2026-04-28
 
 _No new entries — release synchronized with scolta-php/scolta-wp/scolta-drupal/scolta-laravel._
