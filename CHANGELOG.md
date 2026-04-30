@@ -8,6 +8,14 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 _No changes yet._
 
+## [0.3.7] - 2026-04-30
+
+### Improved
+- Documentation: clearer project positioning, cross-platform search consistency messaging.
+
+### Note
+- Version synchronized with coordinated 0.3.7 release across all Scolta packages. No Rust code changes since 0.3.6.
+
 ## [0.3.6] - 2026-04-29
 
 ### Changed
