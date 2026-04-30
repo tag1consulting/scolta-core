@@ -6,7 +6,7 @@ Rust/WASM scoring, ranking, and AI layer that runs in the browser, on top of Pag
 
 ## Status
 
-Beta. Scolta is installable and in active use. The API surface documented here will not break within the 0.x minor series without a deprecation notice and a replacement in place. Expect breaking changes before 1.0. Test in staging before deploying to production. File bugs at the repo issue tracker — the project moves fast and early feedback shapes what ships.
+Scolta is in active production use across Drupal, WordPress, and Laravel. The API documented here is stable within the 0.x minor series — no changes without a deprecation notice and a documented replacement in place. Some capabilities are still maturing toward a 1.0 release; test in staging when upgrading between minor versions. File bugs at the repo issue tracker — the project moves fast and early feedback shapes what ships.
 
 ## What Is Scolta?
 
@@ -138,18 +138,13 @@ const config = {
 
 See [scolta-php](https://github.com/tag1consulting/scolta-php) for the full config reference, including all scoring parameters and their defaults.
 
-## What Scolta Replaces (and What It Doesn't)
+## What Scolta Is Built For
 
-Scolta is a practical replacement for hosted search SaaS (Algolia, Coveo, SearchStax) and for small-to-medium self-hosted search installations used purely as a search backend — Solr or Elasticsearch where your use case is content search, not log analytics or general data querying.
+Scolta is designed for content search on publishing platforms: pages, posts, documentation, product catalogs, and other human-authored content indexed at build time and queried at read time. It runs identically on Drupal, WordPress, and Laravel — the platforms behind enterprise content operations, government and university portals, media publishing, and product-driven businesses.
 
-Scolta is not a replacement for:
+The static-index architecture eliminates the search server entirely. No Solr, no Elasticsearch, no hosted SaaS subscription to operate or pay for. Queries resolve in the visitor's browser against a pre-built index — which makes Scolta viable on managed hosting where running a search server is not possible.
 
-- Full-text database search with row-level access control (per-document permissions enforced at query time).
-- Log analytics or observability search built on Elasticsearch or OpenSearch.
-- Vector databases used as a general retrieval layer for RAG pipelines (pgvector, Weaviate, Pinecone).
-- Enterprise search with audit logging, retention policies, or SSO-gated document visibility.
-
-If you need any of those, Scolta is the wrong tool. If you need fast, tunable, privacy-respecting search on a content site with an optional AI layer on top, Scolta is worth a look.
+Scolta replaces hosted search SaaS (Algolia, Coveo, SearchStax) and Solr/Elasticsearch backends for content sites. The scoring model is tuned for content relevance: title match, recency, phrase proximity, and AI-expanded synonyms. Teams that need fast, tunable, privacy-respecting search with an optional AI layer on top — and do not need real-time per-user document filtering at the search layer — will find Scolta handles the full stack.
 
 ## Memory and Scale
 
