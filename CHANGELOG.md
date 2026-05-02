@@ -8,6 +8,11 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 _No changes yet._
 
+## [0.3.8] - 2026-05-01
+
+### Note
+- Version synchronized with scolta-php 0.3.8. No Rust code changes since 0.3.7; binary is unchanged.
+
 ## [0.3.7] - 2026-04-30
 
 ### Improved
