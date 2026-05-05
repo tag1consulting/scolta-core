@@ -8,6 +8,11 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 _No changes yet._
 
+## [0.3.10] - 2026-05-05
+
+### Note
+- Version synchronized with coordinated 0.3.10 release across all Scolta packages. No Rust code changes since 0.3.8; binary is unchanged.
+
 ## [0.3.9] - 2026-05-02
 
 ### Note
