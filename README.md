@@ -6,7 +6,7 @@ Rust/WASM scoring, ranking, and AI layer that runs in the browser, on top of Pag
 
 ## Status
 
-Scolta is in active production use across Drupal, WordPress, and Laravel. The API documented here is stable within the 0.x minor series — no changes without a deprecation notice and a documented replacement in place. Some capabilities are still maturing toward a 1.0 release; test in staging when upgrading between minor versions. File bugs at the repo issue tracker — the project moves fast and early feedback shapes what ships.
+Scolta 1.0 — the API documented here is stable. Breaking changes follow semantic versioning: no removal or signature change without a major version bump and a deprecation cycle. File bugs at the repo issue tracker.
 
 ## What Is Scolta?
 
@@ -34,7 +34,7 @@ import init, { score_results, version } from './pkg/scolta_core.js';
 
 // Load the WASM module once, at page init
 await init();
-console.log(version()); // e.g. "0.3.2"
+console.log(version()); // e.g. "1.0.0"
 
 // Run a Pagefind query first
 const pagefind = await import('/pagefind/pagefind.js');
@@ -289,5 +289,5 @@ MIT
 
 - [scolta-php](https://github.com/tag1consulting/scolta-php) — PHP library that indexes content into Pagefind-compatible indexes, plus the shared orchestration, memory-budget management, and AI client used by all CMS adapters.
 - [scolta-drupal](https://github.com/tag1consulting/scolta-drupal) — Drupal 10/11 Search API backend with Drush commands, admin settings form, and a search block.
-- [scolta-laravel](https://github.com/tag1consulting/scolta-laravel) — Laravel 11/12 package with Artisan commands, a `Searchable` trait for Eloquent models, and a Blade search component.
+- [scolta-laravel](https://github.com/tag1consulting/scolta-laravel) — Laravel 11/12/13 package with Artisan commands, a `Searchable` trait for Eloquent models, and a Blade search component.
 - [scolta-wp](https://github.com/tag1consulting/scolta-wp) — WordPress 6.x plugin with WP-CLI commands, Settings API page, and a `[scolta_search]` shortcode.
