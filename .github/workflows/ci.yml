@@ -96,6 +96,6 @@ jobs:
         run: |
           VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
           echo "Version: $VERSION"
-          echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-z]+)?$' || \
+          echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9]+)?$' || \
             (echo "FAIL: Invalid version format: $VERSION" && exit 1)
           echo "PASS"
