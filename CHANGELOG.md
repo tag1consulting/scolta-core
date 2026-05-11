@@ -4,13 +4,13 @@ All notable changes to scolta-core will be documented in this file.
 
 This project uses [Semantic Versioning](https://semver.org/). Major versions are synchronized across all Scolta packages.
 
-## [1.0.0] Unreleased
-
-First stable release — all features from 0.3.x promoted to 1.0 API surface.
-
 ## [Unreleased]
 
 _No changes yet._
+
+## [1.0.0-rc1] - 2026-05-11
+
+First stable release — all features from 0.3.x promoted to 1.0 API surface.
 
 ## [0.3.10] - 2026-05-05
 
