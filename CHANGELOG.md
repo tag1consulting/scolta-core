@@ -8,6 +8,11 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 _No changes yet._
 
+## [1.0.0-rc3] - 2026-05-13
+
+### Note
+- Version synchronized with coordinated 1.0.0-rc3 release across all Scolta packages.
+
 ## [1.0.0-rc2] - 2026-05-12
 
 ### Note
