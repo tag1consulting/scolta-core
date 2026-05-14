@@ -375,6 +375,75 @@ pub struct MergeDebugInfo {
     pub excluded_count: usize,
 }
 
+/// A sort override that replaces relevance-score ordering in `score_results`.
+///
+/// When present, results are filtered to those that carry `field` in their
+/// extra metadata map, then sorted by that field's value. Relevance score
+/// is used as a tiebreaker for equal field values.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SortOverride {
+    /// Metadata field name to sort by (looked up in [`SearchResult::extra`]).
+    pub field: String,
+    /// Sort direction: `"asc"` or `"desc"` (anything else treated as `"asc"`).
+    pub direction: String,
+}
+
+/// Apply a sort override to a scored result list.
+///
+/// 1. Retains only results that have `sort.field` in their `extra` map.
+/// 2. Sorts by that field's value: numeric strings are compared numerically,
+///    others lexicographically.
+/// 3. Uses relevance score (descending) as a tiebreaker for equal field values.
+pub fn apply_sort_override(results: &mut Vec<SearchResult>, sort: &SortOverride) {
+    results.retain(|r| r.extra.contains_key(&sort.field));
+
+    let descending = sort.direction == "desc";
+
+    results.sort_by(|a, b| {
+        let a_val = a.extra.get(&sort.field);
+        let b_val = b.extra.get(&sort.field);
+
+        let field_cmp = compare_meta_values(a_val, b_val);
+        let field_cmp = if descending {
+            field_cmp.reverse()
+        } else {
+            field_cmp
+        };
+
+        field_cmp
+            .then_with(|| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal))
+    });
+}
+
+/// Compare two optional metadata values: numeric strings numerically, others lexicographically.
+fn compare_meta_values(
+    a: Option<&serde_json::Value>,
+    b: Option<&serde_json::Value>,
+) -> std::cmp::Ordering {
+    match (a, b) {
+        (None, None) => std::cmp::Ordering::Equal,
+        (None, Some(_)) => std::cmp::Ordering::Less,
+        (Some(_), None) => std::cmp::Ordering::Greater,
+        (Some(a_val), Some(b_val)) => {
+            match (meta_value_to_f64(a_val), meta_value_to_f64(b_val)) {
+                (Some(af), Some(bf)) => {
+                    af.partial_cmp(&bf).unwrap_or(std::cmp::Ordering::Equal)
+                }
+                _ => {
+                    let a_str = a_val.as_str().unwrap_or("");
+                    let b_str = b_val.as_str().unwrap_or("");
+                    a_str.cmp(b_str)
+                }
+            }
+        }
+    }
+}
+
+/// Extract an f64 from a JSON value that is either a number or a parseable string.
+fn meta_value_to_f64(v: &serde_json::Value) -> Option<f64> {
+    v.as_f64().or_else(|| v.as_str()?.parse().ok())
+}
+
 /// Return the priority pages whose keywords match the given query.
 ///
 /// Performs case-insensitive substring matching. Multi-word keywords must
