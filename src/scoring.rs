@@ -410,8 +410,11 @@ pub fn apply_sort_override(results: &mut Vec<SearchResult>, sort: &SortOverride)
             field_cmp
         };
 
-        field_cmp
-            .then_with(|| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal))
+        field_cmp.then_with(|| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
     });
 }
 
@@ -424,18 +427,14 @@ fn compare_meta_values(
         (None, None) => std::cmp::Ordering::Equal,
         (None, Some(_)) => std::cmp::Ordering::Less,
         (Some(_), None) => std::cmp::Ordering::Greater,
-        (Some(a_val), Some(b_val)) => {
-            match (meta_value_to_f64(a_val), meta_value_to_f64(b_val)) {
-                (Some(af), Some(bf)) => {
-                    af.partial_cmp(&bf).unwrap_or(std::cmp::Ordering::Equal)
-                }
-                _ => {
-                    let a_str = a_val.as_str().unwrap_or("");
-                    let b_str = b_val.as_str().unwrap_or("");
-                    a_str.cmp(b_str)
-                }
+        (Some(a_val), Some(b_val)) => match (meta_value_to_f64(a_val), meta_value_to_f64(b_val)) {
+            (Some(af), Some(bf)) => af.partial_cmp(&bf).unwrap_or(std::cmp::Ordering::Equal),
+            _ => {
+                let a_str = a_val.as_str().unwrap_or("");
+                let b_str = b_val.as_str().unwrap_or("");
+                a_str.cmp(b_str)
             }
-        }
+        },
     }
 }
 
