@@ -128,7 +128,15 @@ pub mod inner {
             .and_then(|v| v.as_str())
             .map(|pq| common::extract_query(pq, &cfg.language).terms);
 
+        let sort_override: Option<scoring::SortOverride> = obj
+            .get("sort_override")
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+
         scoring::score_results_with_primary(&mut results, query, primary_terms.as_deref(), &cfg);
+
+        if let Some(ref sort) = sort_override {
+            scoring::apply_sort_override(&mut results, sort);
+        }
 
         serde_json::to_value(&results).map_err(|e| ScoltaError::parse_error("score_results", e))
     }

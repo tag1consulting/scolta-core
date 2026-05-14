@@ -71,6 +71,111 @@ fn score_results_priority_page_boost() {
     assert_eq!(result[0]["url"], "/contact");
 }
 
+// ── score_results: sort_override ──────────────────────────────────────────────
+
+#[test]
+fn score_results_sort_override_asc() {
+    let input = json!({
+        "query": "product",
+        "results": [
+            {"title": "Expensive", "url": "/expensive", "excerpt": "product", "date": "2026-01-01", "price": "99.99"},
+            {"title": "Cheap",     "url": "/cheap",     "excerpt": "product", "date": "2026-01-01", "price": "9.99"},
+            {"title": "Medium",    "url": "/medium",    "excerpt": "product", "date": "2026-01-01", "price": "49.99"}
+        ],
+        "sort_override": {"field": "price", "direction": "asc"}
+    });
+    let result = inner::score_results(&input).unwrap();
+    let arr = result.as_array().unwrap();
+    assert_eq!(arr[0]["url"], "/cheap");
+    assert_eq!(arr[1]["url"], "/medium");
+    assert_eq!(arr[2]["url"], "/expensive");
+}
+
+#[test]
+fn score_results_sort_override_desc() {
+    let input = json!({
+        "query": "product",
+        "results": [
+            {"title": "Cheap",     "url": "/cheap",     "excerpt": "product", "date": "2026-01-01", "price": "9.99"},
+            {"title": "Expensive", "url": "/expensive", "excerpt": "product", "date": "2026-01-01", "price": "99.99"},
+            {"title": "Medium",    "url": "/medium",    "excerpt": "product", "date": "2026-01-01", "price": "49.99"}
+        ],
+        "sort_override": {"field": "price", "direction": "desc"}
+    });
+    let result = inner::score_results(&input).unwrap();
+    let arr = result.as_array().unwrap();
+    assert_eq!(arr[0]["url"], "/expensive");
+    assert_eq!(arr[1]["url"], "/medium");
+    assert_eq!(arr[2]["url"], "/cheap");
+}
+
+#[test]
+fn score_results_sort_override_excludes_missing_field() {
+    let input = json!({
+        "query": "product",
+        "results": [
+            {"title": "Has Price", "url": "/has-price", "excerpt": "product", "date": "2026-01-01", "price": "50.00"},
+            {"title": "No Price",  "url": "/no-price",  "excerpt": "product", "date": "2026-01-01"}
+        ],
+        "sort_override": {"field": "price", "direction": "asc"}
+    });
+    let result = inner::score_results(&input).unwrap();
+    let arr = result.as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["url"], "/has-price");
+}
+
+#[test]
+fn score_results_sort_override_absent_unchanged() {
+    // Without sort_override, results are ranked by relevance score (same behavior as before).
+    let input = json!({
+        "query": "drupal performance",
+        "results": [
+            {"title": "Drupal Performance Guide", "url": "/a", "excerpt": "drupal performance tips", "date": "2026-01-01"},
+            {"title": "About Us",                 "url": "/b", "excerpt": "company info",            "date": "2026-01-01"}
+        ]
+    });
+    let result = inner::score_results(&input).unwrap();
+    let arr = result.as_array().unwrap();
+    assert_eq!(arr[0]["url"], "/a");
+}
+
+#[test]
+fn score_results_sort_override_tiebreaker_by_relevance() {
+    // Both results have the same price; the one with better query relevance should rank first.
+    let input = json!({
+        "query": "drupal product",
+        "results": [
+            {"title": "Product Page",   "url": "/a", "excerpt": "product",        "date": "2026-01-01", "price": "50.00"},
+            {"title": "Drupal Product", "url": "/b", "excerpt": "drupal product", "date": "2026-01-01", "price": "50.00"}
+        ],
+        "sort_override": {"field": "price", "direction": "asc"}
+    });
+    let result = inner::score_results(&input).unwrap();
+    let arr = result.as_array().unwrap();
+    // /b matches both query terms in title and excerpt → higher relevance score → first after tie.
+    assert_eq!(arr[0]["url"], "/b");
+}
+
+#[test]
+fn score_results_sort_override_string_sort() {
+    // Non-numeric values fall back to lexicographic ordering.
+    let input = json!({
+        "query": "post",
+        "results": [
+            {"title": "Post C", "url": "/c", "excerpt": "post", "date": "2026-01-01", "category": "zebra"},
+            {"title": "Post A", "url": "/a", "excerpt": "post", "date": "2026-01-01", "category": "apple"},
+            {"title": "Post B", "url": "/b", "excerpt": "post", "date": "2026-01-01", "category": "mango"}
+        ],
+        "sort_override": {"field": "category", "direction": "asc"}
+    });
+    let result = inner::score_results(&input).unwrap();
+    let arr = result.as_array().unwrap();
+    assert_eq!(arr[0]["url"], "/a");
+    assert_eq!(arr[1]["url"], "/b");
+    assert_eq!(arr[2]["url"], "/c");
+}
+
 // ── merge_results ─────────────────────────────────────────────────────────────
 
 #[test]

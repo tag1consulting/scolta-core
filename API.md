@@ -40,8 +40,10 @@ Score and re-rank search results by relevance to a query.
 - `query` — required string. The user's search query.
 - `results` — required array of `SearchResult` objects (see Section 4).
 - `config` — optional `ScoringConfig` object (see Section 4). Missing fields use defaults.
+- `sort_override` — optional object `{ "field": "...", "direction": "asc"|"desc" }`. When present, results that lack the named metadata field are excluded, and the remaining results are sorted by that field's value (numeric strings compared numerically, others lexicographically). Relevance score is used as a tiebreaker for equal field values. Omit to use the default relevance-ranked behavior.
+- `primary_query` — optional string. When provided, the title boost for each result is the maximum of the title boost computed from `query` and from `primary_query`. Used by AI query expansion to award title boosts for results whose titles match the original user query.
 
-**Output JSON:** Array of `SearchResult` objects sorted by computed score descending. Each result gains a `score` field with the computed relevance value.
+**Output JSON:** Array of `SearchResult` objects sorted by computed score descending (or by `sort_override` field when specified). Each result gains a `score` field with the computed relevance value.
 
 ```json
 [
