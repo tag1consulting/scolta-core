@@ -6,6 +6,10 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+_No changes yet._
+
+## [1.0.0-rc4] - 2026-05-18
+
 ### Added
 - `sort_override` field in `score_results` input: `{ "field": "...", "direction": "asc"|"desc" }`. When present, results are filtered to those carrying the named metadata field and sorted by its value (numeric strings compared numerically, others lexicographically) with relevance score as a tiebreaker. Omitting `sort_override` preserves the current relevance-ranked behavior. ([#21](https://github.com/tag1consulting/scolta-core/issues/21))
 
