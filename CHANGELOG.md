@@ -6,7 +6,8 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
-_No changes yet._
+### Changed
+- **Prompt templates synced with PHP canonical.** `expand_query`: JSON object response format (was JSON array), 12 rules (was 11) — added site-topic disambiguation (rule 9) and constraint queries (rule 12), plus 2 new examples. `summarize`: added CURATION RULES (filter, dig, scan, focus, variety, category, breadth), LANGUAGE RULES, METADATA RULES, CORPUS AWARENESS in grounding check; updated tone to "Direct, expert, helpful." `follow_up`: added NUMBERED RESULT REFERENCES, CURATION RULES, CORPUS AWARENESS in grounding check; updated tone to match summarize.
 
 ## [1.0.0-rc4] - 2026-05-18
 
