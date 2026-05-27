@@ -18,11 +18,6 @@
 //! - [`truncate_conversation`] — Trim conversation history to a character limit
 //! - [`version`] — Get crate version
 //! - [`describe`] — Self-describing function manifest
-//!
-//! # Not exported
-//!
-//! - `clean_html`, `build_pagefind_html` — build-time only (server WASM)
-//! - `debug_call` — server-side profiling tool
 
 use wasm_bindgen::prelude::*;
 
@@ -72,7 +67,7 @@ pub fn merge_results(input: &str) -> Result<String, JsError> {
 /// Find priority pages matching a query.
 ///
 /// # Stability
-/// Status: experimental
+/// Status: stable
 /// Since: 0.2.3
 ///
 /// Input: JSON string with shape:
@@ -169,7 +164,7 @@ pub fn get_prompt(name: &str) -> Result<String, JsError> {
 /// Extract the most relevant portion of article content for LLM context.
 ///
 /// # Stability
-/// Status: experimental
+/// Status: stable
 /// Since: 0.2.3
 ///
 /// Input: JSON string with shape:
@@ -194,7 +189,7 @@ pub fn extract_context(input: &str) -> Result<String, JsError> {
 /// Extract context from multiple content items in one call.
 ///
 /// # Stability
-/// Status: experimental
+/// Status: stable
 /// Since: 0.2.3
 ///
 /// Input: JSON string with shape:
@@ -219,7 +214,7 @@ pub fn batch_extract_context(input: &str) -> Result<String, JsError> {
 /// Redact PII from a query string before analytics logging.
 ///
 /// # Stability
-/// Status: experimental
+/// Status: stable
 /// Since: 0.2.3
 ///
 /// Input: JSON string with shape:
@@ -243,7 +238,7 @@ pub fn sanitize_query(input: &str) -> Result<String, JsError> {
 /// Trim conversation history to fit within a character limit.
 ///
 /// # Stability
-/// Status: experimental
+/// Status: stable
 /// Since: 0.2.3
 ///
 /// Input: JSON string with shape:

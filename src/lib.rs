@@ -641,7 +641,7 @@ pub mod inner {
                 "match_priority_pages": {
                     "description": "Return priority pages whose keywords match a query",
                     "since": "0.2.3",
-                    "stability": "experimental",
+                    "stability": "stable",
                     "input_type": "json",
                     "output_type": "json"
                 },
@@ -655,35 +655,35 @@ pub mod inner {
                 "extract_context": {
                     "description": "Extract relevant context from a document for LLM summarization",
                     "since": "0.2.3",
-                    "stability": "experimental",
+                    "stability": "stable",
                     "input_type": "json",
                     "output_type": "string"
                 },
                 "batch_extract_context": {
                     "description": "Extract context from multiple documents in one call",
                     "since": "0.2.3",
-                    "stability": "experimental",
+                    "stability": "stable",
                     "input_type": "json",
                     "output_type": "json"
                 },
                 "sanitize_query": {
                     "description": "Redact PII (email, phone, SSN, CC, IP) from a query before analytics logging",
                     "since": "0.2.3",
-                    "stability": "experimental",
+                    "stability": "stable",
                     "input_type": "json",
                     "output_type": "string"
                 },
                 "truncate_conversation": {
                     "description": "Trim conversation history by removing oldest pairs to fit a character limit",
                     "since": "0.2.3",
-                    "stability": "experimental",
+                    "stability": "stable",
                     "input_type": "json",
                     "output_type": "json"
                 },
                 "batch_score_results": {
                     "description": "Score multiple queries in a single call; returns array of scored result arrays",
                     "since": "0.2.2",
-                    "stability": "experimental",
+                    "stability": "stable",
                     "input_type": "json",
                     "output_type": "json"
                 },

@@ -2,11 +2,12 @@
 
 All notable changes to scolta-core will be documented in this file.
 
-This project uses [Semantic Versioning](https://semver.org/). Major versions are synchronized across all Scolta packages.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses [Semantic Versioning](https://semver.org/). Major versions are synchronized across all Scolta packages.
 
 ## [Unreleased]
 
 ### Changed
+- **Pre-1.0 cleanup.** Promoted all experimental functions to stable for 1.0 GA: `match_priority_pages`, `extract_context`, `batch_extract_context`, `sanitize_query`, `truncate_conversation`, `batch_score_results`. Removed stale references to deleted functions (`to_js_scoring_config`, `clean_html`, `build_pagefind_html`, `debug_call`) from documentation, tests, and doc comments. Rewrote API.md and IMPLEMENTATION.md from scratch. Fixed CHANGELOG section headers to use keepachangelog standard names. Added keepachangelog link references. CI now runs integration tests (`cargo test` instead of `cargo test --lib`). Added missing integration tests for `batch_score_results`, `resolve_prompt`, `get_prompt`, and `version`. Added `.gitattributes` and Cargo.toml packaging metadata. Fixed `repository` URL in Cargo.toml.
 - **Prompt templates synced with PHP canonical.** `expand_query`: JSON object response format (was JSON array), 12 rules (was 11) — added site-topic disambiguation (rule 9) and constraint queries (rule 12), plus 2 new examples. `summarize`: added CURATION RULES (filter, dig, scan, focus, variety, category, breadth), LANGUAGE RULES, METADATA RULES, CORPUS AWARENESS in grounding check; updated tone to "Direct, expert, helpful." `follow_up`: added NUMBERED RESULT REFERENCES, CURATION RULES, CORPUS AWARENESS in grounding check; updated tone to match summarize.
 
 ## [1.0.0-rc4] - 2026-05-18
@@ -16,12 +17,12 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [1.0.0-rc3] - 2026-05-13
 
-### Note
+### Changed
 - Version synchronized with coordinated 1.0.0-rc3 release across all Scolta packages.
 
 ## [1.0.0-rc2] - 2026-05-12
 
-### Note
+### Changed
 - Version synchronized with coordinated 1.0.0-rc2 release across all Scolta packages.
 
 ## [1.0.0-rc1] - 2026-05-11
@@ -30,25 +31,25 @@ First stable release — all features from 0.3.x promoted to 1.0 API surface.
 
 ## [0.3.10] - 2026-05-05
 
-### Note
+### Changed
 - Version synchronized with coordinated 0.3.10 release across all Scolta packages. No Rust code changes since 0.3.8; binary is unchanged.
 
 ## [0.3.9] - 2026-05-02
 
-### Note
+### Changed
 - Version synchronized with scolta-php 0.3.9 (scoring preset UI for adapter packages). No Rust code changes since 0.3.7; binary is unchanged.
 
 ## [0.3.8] - 2026-05-01
 
-### Note
+### Changed
 - Version synchronized with scolta-php 0.3.8. No Rust code changes since 0.3.7; binary is unchanged.
 
 ## [0.3.7] - 2026-04-30
 
-### Improved
+### Changed
 - Documentation: clearer project positioning, cross-platform search consistency messaging.
 
-### Note
+### Changed
 - Version synchronized with coordinated 0.3.7 release across all Scolta packages. No Rust code changes since 0.3.6.
 
 ## [0.3.6] - 2026-04-29
@@ -192,3 +193,25 @@ _No new entries — release synchronized with scolta-php/scolta-wp/scolta-drupal
 - OnceLock-cached regex compilation for HTML processing
 - Typed error enum with function-name attribution
 - Shared stop words and term extraction utilities
+
+[Unreleased]: https://github.com/tag1consulting/scolta-core/compare/v1.0.0-rc4...HEAD
+[1.0.0-rc4]: https://github.com/tag1consulting/scolta-core/compare/v1.0.0-rc3...v1.0.0-rc4
+[1.0.0-rc3]: https://github.com/tag1consulting/scolta-core/compare/v1.0.0-rc2...v1.0.0-rc3
+[1.0.0-rc2]: https://github.com/tag1consulting/scolta-core/compare/v1.0.0-rc1...v1.0.0-rc2
+[1.0.0-rc1]: https://github.com/tag1consulting/scolta-core/compare/v0.3.10...v1.0.0-rc1
+[0.3.10]: https://github.com/tag1consulting/scolta-core/compare/v0.3.9...v0.3.10
+[0.3.9]: https://github.com/tag1consulting/scolta-core/compare/v0.3.8...v0.3.9
+[0.3.8]: https://github.com/tag1consulting/scolta-core/compare/v0.3.7...v0.3.8
+[0.3.7]: https://github.com/tag1consulting/scolta-core/compare/v0.3.6...v0.3.7
+[0.3.6]: https://github.com/tag1consulting/scolta-core/compare/v0.3.5...v0.3.6
+[0.3.5]: https://github.com/tag1consulting/scolta-core/compare/v0.3.4...v0.3.5
+[0.3.4]: https://github.com/tag1consulting/scolta-core/compare/v0.3.3...v0.3.4
+[0.3.3]: https://github.com/tag1consulting/scolta-core/compare/v0.3.2...v0.3.3
+[0.3.2]: https://github.com/tag1consulting/scolta-core/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/tag1consulting/scolta-core/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/tag1consulting/scolta-core/compare/v0.2.4...v0.3.0
+[0.2.4]: https://github.com/tag1consulting/scolta-core/compare/v0.2.3...v0.2.4
+[0.2.3]: https://github.com/tag1consulting/scolta-core/compare/v0.2.2...v0.2.3
+[0.2.2]: https://github.com/tag1consulting/scolta-core/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/tag1consulting/scolta-core/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/tag1consulting/scolta-core/releases/tag/v0.2.0

@@ -100,10 +100,10 @@ mod tests {
 
     #[test]
     fn test_error_display_invalid_json() {
-        let err = ScoltaError::invalid_json("clean_html", "expected object");
+        let err = ScoltaError::invalid_json("score_results", "expected object");
         assert_eq!(
             err.to_string(),
-            "clean_html: invalid JSON input: expected object"
+            "score_results: invalid JSON input: expected object"
         );
     }
 

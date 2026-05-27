@@ -33,7 +33,7 @@ jobs:
             ~/.cargo/git/
             target/
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
-      - run: cargo test --lib
+      - run: cargo test
 
   build:
     name: WASM build

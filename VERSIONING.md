@@ -7,10 +7,8 @@ How Scolta versions its packages, what compatibility guarantees you get, how fun
 Scolta is a family of packages, not a single library:
 
 ```
-scolta-core          Rust/WASM — scoring, prompts, HTML cleaning, result merging
+scolta-core          Rust/WASM — scoring, prompts, query expansion, context extraction, result merging
 scolta-php           PHP Composer package — wraps scolta-core for PHP platforms
-scolta-python        Python pip package — wraps scolta-core for Python platforms
-scolta.js            JavaScript — browser-side scoring, Pagefind integration, UI
 scolta-drupal        Drupal module — depends on scolta-php
 scolta-wp            WordPress plugin — depends on scolta-php
 scolta-laravel       Laravel package — depends on scolta-php
@@ -40,27 +38,27 @@ Minor and patch versions are independent. Each package ships features and bug fi
 
 ## Development Versions (-dev Suffix)
 
-Between releases, the version in the repo carries a `-dev` pre-release suffix. The `-dev` suffix is a [semver pre-release identifier](https://semver.org/#spec-item-9) that sorts lower than the bare version (`0.2.0-dev < 0.2.0`).
+Between releases, the version in the repo carries a `-dev` pre-release suffix. The `-dev` suffix is a [semver pre-release identifier](https://semver.org/#spec-item-9) that sorts lower than the bare version (`1.1.0-dev < 1.1.0`).
 
 **Why we use it:** Scolta is a multi-package project with multiple contributors (human and automated). When someone opens `Cargo.toml` or `composer.json` in the repo, `-dev` makes the state self-documenting — you can immediately tell whether you're looking at a tagged release or unreleased work in progress, without cross-referencing git tags.
 
-**Ecosystem notes:** The `-dev` suffix is a first-class concept in Composer (PHP), where it maps to a stability level that prevents accidental installation in production (requires `minimum-stability: dev` or an explicit `@dev` flag). In Cargo (Rust), pre-release identifiers are valid semver and work correctly, but most Rust crates don't use them between releases — we do because of the multi-package coordination benefit. For scolta.js (npm), `-dev` is a valid pre-release identifier but npm's default behavior will tag a published pre-release as `latest` unless you explicitly use `--tag dev` or `--tag next` — **always use `npm publish --tag dev`** to prevent users from accidentally installing a pre-release via `npm install scolta.js`.
+**Ecosystem notes:** The `-dev` suffix is a first-class concept in Composer (PHP), where it maps to a stability level that prevents accidental installation in production (requires `minimum-stability: dev` or an explicit `@dev` flag). In Cargo (Rust), pre-release identifiers are valid semver and work correctly, but most Rust crates don't use them between releases — we do because of the multi-package coordination benefit.
 
 **The workflow:**
 
 ```
-0.1.0          ← tagged release
-0.2.0-dev      ← immediately after release, bump to next target + "-dev"
+1.0.0          ← tagged release
+1.1.0-dev      ← immediately after release, bump to next target + "-dev"
   ... commits, features, fixes ...
-0.2.0          ← strip "-dev" to release
-0.3.0-dev      ← immediately bump again
+1.1.0          ← strip "-dev" to release
+1.2.0-dev      ← immediately bump again
 ```
 
-For patch-only work on a released version: `0.1.1-dev` → `0.1.1`.
+For patch-only work on a released version: `1.0.1-dev` → `1.0.1`.
 
 **Rules:**
 
-1. **After tagging a release**, immediately bump the version to the next target with `-dev` appended. If you just released `0.3.0`, the repo should show `0.4.0-dev` (or `0.3.1-dev` if you expect only patches).
+1. **After tagging a release**, immediately bump the version to the next target with `-dev` appended. If you just released `1.0.0`, the repo should show `1.1.0-dev` (or `1.0.1-dev` if you expect only patches).
 
 2. **Multiple commits happen on a `-dev` version.** The `-dev` suffix means "this is unreleased work in progress." You do not increment the version for every commit during development.
 
@@ -69,21 +67,20 @@ For patch-only work on a released version: `0.1.1-dev` → `0.1.1`.
 4. **The version in the repo is always either a tagged release or a `-dev` pre-release.** A bare version like `0.4.0` in the repo means it has been (or is about to be) tagged. If the tag doesn't exist yet, the version should still have `-dev`.
 
 5. **Decide the target version based on what changed:**
-   - Only bug fixes since last release → next patch (`0.3.1-dev`)
-   - New features or deprecations → next minor (`0.4.0-dev`)
-   - Breaking changes → next major (`1.0.0-dev`) — coordinated across all packages
+   - Only bug fixes since last release → next patch (`1.0.1-dev`)
+   - New features or deprecations → next minor (`1.1.0-dev`)
+   - Breaking changes → next major (`2.0.0-dev`) — coordinated across all packages
 
-6. **npm publish safety (scolta.js only):** Always publish pre-release versions with an explicit dist-tag: `npm publish --tag dev`. Never publish a `-dev` version without a tag — npm's default is `latest`, which would make the pre-release the default install for all users.
 
 **Where the version lives:**
 
 | Package | File | Field |
 |---|---|---|
-| scolta-core | `Cargo.toml` | `version = "0.1.0"` |
-| scolta-php | `composer.json` | `"version": "0.1.0"` |
-| scolta-drupal | `composer.json` | `"version": "0.1.0"` |
+| scolta-core | `Cargo.toml` | `version = "1.0.0-rc4"` |
+| scolta-php | `composer.json` | `"version": "1.0.0-rc4"` |
+| scolta-drupal | `composer.json` | `"version": "1.0.0-rc4"` |
 | scolta-wp | `composer.json` + `scolta.php` | `"version"` + `SCOLTA_VERSION` constant + plugin header |
-| scolta-laravel | `composer.json` | `"version": "0.1.0"` |
+| scolta-laravel | `composer.json` | `"version": "1.0.0-rc4"` |
 
 For WordPress, the version appears in three places (composer.json, the plugin header comment, and the `SCOLTA_VERSION` constant). All three must match.
 
@@ -102,7 +99,7 @@ Each package declares what it needs from the tier above using caret constraints:
 
 This means "any 1.x version of scolta-php that's at least 1.2.0." If you have scolta-php 1.7 installed, it satisfies the constraint. If scolta-drupal later uses a feature added in scolta-php 1.5, its constraint tightens to `^1.5`. Composer, Cargo, pip, and npm all handle this automatically.
 
-scolta-core ships as a compiled WASM binary inside the scolta-php and scolta-python packages. You don't install scolta-core separately — it comes bundled. The scolta-core version used by scolta-php is documented in scolta-php's changelog.
+scolta-core ships as a compiled WASM binary inside the scolta-php package. You don't install scolta-core separately — it comes bundled. The scolta-core version used by scolta-php is documented in scolta-php's changelog.
 
 ## Function Lifecycle
 
@@ -211,14 +208,17 @@ No function goes from stable to removed without passing through deprecated first
 
 ## WASM Interface Version
 
-Separate from the package version, scolta-core declares a **WASM interface version** — a single integer that tracks binary compatibility between scolta-core and its host wrappers (scolta-php, scolta-python, scolta.js).
+Separate from the package version, scolta-core declares a **WASM interface version** — a single integer (currently **4**) that tracks binary compatibility between scolta-core and its host wrappers (scolta-php).
 
-```
-WASM interface version 1 → scolta-core 1.0 through 1.x
-WASM interface version 2 → scolta-core 2.0 through 2.x
-```
+The interface version is an internal protocol version that is incremented whenever the WASM binary's function signatures or calling conventions change in a way that breaks binary compatibility with host wrappers. It does not align with the package major version — it has been incremented multiple times within the 0.x and 1.0-rc series as exports were added or removed.
 
-The interface version increments when the WASM binary's function signatures or calling conventions change in a way that requires wrapper updates. In practice, this aligns with major versions, but it's tracked separately because:
+Historical progression:
+- Version 1 — initial wasm-bindgen exports (0.2.0)
+- Version 2 — removed `clean_html`, `build_pagefind_html`, `debug_call`; added context/sanitize/conversation functions (0.2.3)
+- Version 3 — added `batch_score_results` (0.2.2)
+- Version 4 — current; stabilized for 1.0
+
+The interface version is tracked separately from the package version because:
 
 - A major version bump in scolta-php might change PHP-side APIs without changing the WASM interface.
 - A WASM interface change always requires wrapper updates, but not necessarily public API changes.
@@ -226,8 +226,8 @@ The interface version increments when the WASM binary's function signatures or c
 scolta-php checks the interface version at load time. If it loads a WASM binary with an unexpected interface version, it fails immediately with a clear error:
 
 ```
-scolta-core reports WASM interface version 2, but this version of
-scolta-php expects version 1. Update scolta-php to ^2.0.
+scolta-core reports WASM interface version 4, but this version of
+scolta-php expects version 3. Update scolta-php to a compatible version.
 ```
 
 You should never see this in normal use — it's a safety net for development and version mismatches during manual upgrades.
