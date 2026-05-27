@@ -1,6 +1,6 @@
 # Scolta Core - Implementation Summary
 
-Complete Rust WebAssembly crate for the Scolta search engine core. Provides client-side search scoring, prompt management, and query expansion via wasm-bindgen.
+Rust WebAssembly crate for the Scolta search engine core. Provides client-side search scoring, prompt management, query expansion, context extraction, PII sanitization, and conversation trimming via wasm-bindgen.
 
 ## Project Structure
 
@@ -9,421 +9,172 @@ scolta-core/
 ├── Cargo.toml              # Package manifest (edition 2021, wasm-bindgen 0.2)
 ├── rustfmt.toml            # Formatting config (edition 2021)
 ├── README.md               # Usage and build instructions
-├── API.md                  # Complete API reference with language-specific guides
+├── API.md                  # Complete API reference
 ├── IMPLEMENTATION.md       # This file
+├── VERSIONING.md           # Version policy and function lifecycle
+├── CHANGELOG.md            # Release history
 ├── src/
 │   ├── lib.rs              # inner module + orchestration (plain Rust, tested without WASM)
-│   ├── common.rs           # Shared stop words, term extraction, validation
+│   ├── browser.rs          # wasm-bindgen exports (thin wrappers over inner::)
+│   ├── common.rs           # Language-aware stop words, term extraction, validation
+│   ├── config.rs           # ScoringConfig parsing and validation
+│   ├── context.rs          # LLM context extraction (intro + keyword-anchored snippets)
+│   ├── conversation.rs     # Conversation history trimming
 │   ├── error.rs            # Typed error enum (ScoltaError) with function attribution
-│   ├── prompts.rs          # Prompt templates and resolution
-│   ├── html.rs             # HTML processing (clean_html, build_pagefind_html)
-│   ├── scoring.rs          # Search scoring algorithm with recency/relevance
-│   ├── config.rs           # Configuration parsing, validation, and JS export
 │   ├── expansion.rs        # LLM response parsing (JSON, markdown, fallback)
-│   └── debug.rs            # Performance measurement and logging
+│   ├── prompts.rs          # Prompt templates and resolution
+│   ├── sanitize.rs         # PII redaction (email, phone, SSN, credit card, IP)
+│   ├── scoring.rs          # Search scoring algorithm with recency/relevance/phrase
+│   └── stop_words.rs       # Language-specific stop word lists (30 languages)
 └── tests/
-    ├── integration.rs      # Comprehensive integration tests
-    └── fixtures/
-        ├── drupal-page.html
-        ├── wordpress-post.html
-        └── expected-clean.txt
+    └── integration.rs      # Integration tests
 ```
 
 ## File-by-File Implementation
 
 ### Cargo.toml
 - Package name: `scolta-core`
-- Version: `0.2.1-dev`
+- Version: `1.0.0-rc4`
 - Edition: `2021`
 - Library type: `cdylib` + `rlib` (WASM module + library)
 - Dependencies:
-  - `wasm-bindgen = "0.2"` - WASM/JavaScript interop
-  - `js-sys = "0.3"` - JavaScript type bindings
-  - `serde = "1"` - Serialization with derive support
-  - `serde_json = "1"` - JSON support
-- Release profile: Optimized for size and strip symbols
-
-### rustfmt.toml
-Minimal formatting enforcement:
-- Edition: `2021`
-- Uses cargo fmt defaults for all other settings
+  - `wasm-bindgen = "0.2"` — WASM/JavaScript interop
+  - `js-sys = "0.3"` — JavaScript type bindings
+  - `serde = "1"` — Serialization with derive support
+  - `serde_json = "1"` — JSON support
+  - `regex = "1"` — Pattern matching for PII redaction
+- Release profile: `opt-level = "s"`, LTO, symbol stripping, `codegen-units = 1`, `panic = "abort"`
 
 ### src/browser.rs
-8 browser WASM exports via `#[wasm_bindgen]` — thin serialization wrappers over `inner::` functions. Delegates all logic to `inner::`.
+13 browser WASM exports via `#[wasm_bindgen]` — thin serialization wrappers over `inner::` functions. Delegates all logic to `inner::`. Each function parses a JSON string input, calls the corresponding `inner::` function, and serializes the result back to a JSON string (or propagates errors as `JsError`).
+
+Exports: `score_results`, `merge_results`, `match_priority_pages`, `parse_expansion`, `batch_score_results`, `resolve_prompt`, `get_prompt`, `extract_context`, `batch_extract_context`, `sanitize_query`, `truncate_conversation`, `version`, `describe`.
 
 ### src/lib.rs
-`inner` module with plain Rust implementations, callable from browser exports and unit tests. All inner functions return `Result<T, ScoltaError>` (typed errors with function attribution).
-
-#### Browser WASM Exports (wasm-bindgen)
-1. `resolve_prompt(json) -> string`
-   - Input: `{prompt_name, site_name, site_description}`
-   - Returns: Resolved template with placeholders replaced
-
-2. `get_prompt(string) -> string`
-   - Input: Plain string prompt name (NOT JSON)
-   - Returns: Raw template string with placeholders
-
-3. `clean_html(json) -> string`
-   - Input: `{html, title}`
-   - Returns: Cleaned plain text
-
-4. `build_pagefind_html(json) -> string`
-   - Input: `{id, title, body, url, date, site_name}`
-   - Returns: Complete HTML with data-pagefind-* attributes
-
-5. `to_js_scoring_config(json) -> json`
-   - Input: `{scoring config fields + AI toggle flags}`
-   - Returns: JavaScript-friendly config object with SCREAMING_SNAKE_CASE keys
-
-6. `score_results(json) -> json`
-   - Input: `{query, results[], config}`
-   - Returns: Scored and sorted results
-
-7. `merge_results(json) -> json`
-   - Input: `{original[], expanded[], config}`
-   - Returns: Merged, deduplicated results
-
-8. `parse_expansion(string) -> json`
-   - Input: LLM response text
-   - Returns: `[term1, term2, ...]` array
-
-9. `version() -> string`
-   - Returns: Crate version `"0.1.0"`
-
-10. `describe() -> json`
-    - Returns: Machine-readable catalog of all exported functions
-
-Not exported to browser WASM:
-- `debug_call(json) -> json` — server-side profiling wrapper (timing/size metrics)
+`inner` module with plain Rust implementations, callable from browser exports and unit tests. All inner functions return `Result<T, ScoltaError>` (typed errors with function attribution). Also contains the `describe()` function catalog and `WASM_INTERFACE_VERSION`.
 
 ### src/common.rs
-Shared constants and utilities — single source of truth for stop words and term validation. Both `scoring` and `expansion` import from here.
+Language-aware stop word filtering, term validation, and term extraction. Both `scoring` and `expansion` import from here.
 
-#### Public API
-```rust
-pub const STOP_WORDS: &[&str]                     // ~60 common English stop words
-pub fn is_stop_word(term: &str) -> bool            // Case-insensitive check
-pub fn is_valid_term(term: &str) -> bool           // Filters empty, short, numeric, stop words
-pub fn extract_terms(query: &str) -> Vec<String>   // Split + lowercase + filter
-```
+Key types and functions:
+- `is_stop_word(term, language)` — case-insensitive check against language-specific list
+- `is_stop_word_with_custom(term, language, custom)` — also checks custom stop words
+- `is_valid_term(term, language)` — filters empty, short, numeric, and stop words
+- `extract_terms(query, language)` — split, lowercase, filter
+- `extract_query(query, language)` — returns `QueryInfo { terms, is_phrase, forced_phrase }`
+
+### src/config.rs
+Configuration parsing and validation.
+
+- `from_json(json)` — parse JSON into `ScoringConfig`, missing fields use defaults
+- `from_json_validated(json)` — same as `from_json` but clamps out-of-range values and returns warnings
+
+### src/context.rs
+LLM context extraction. Combines a fixed-length intro with keyword-anchored snippets, merges overlapping ranges, and truncates at sentence boundaries.
+
+- `ContextConfig` — `max_length` (6000), `intro_length` (2000), `snippet_radius` (500), `separator`
+- `extract_context(content, query, config)` — single document extraction
+- `batch_extract_context(items, query, config)` — multi-document extraction
+
+### src/conversation.rs
+Conversation history trimming for multi-turn AI interactions. Removes the oldest message pairs when total length exceeds a limit. Always preserves the first N messages (system prompt, initial context).
+
+- `ConversationConfig` — `max_length` (12000), `preserve_first_n` (2), `removal_unit` (2)
+- `truncate_conversation(messages, config)` — returns trimmed message array
 
 ### src/error.rs
-Typed error enum replacing `Result<T, String>`. Every variant includes the originating function name for log-friendly diagnostics.
+Typed error enum. Every variant includes the originating function name for developer-friendly diagnostics.
 
-#### ScoltaError Variants
-- `InvalidJson { function, detail }` — Input not valid JSON
-- `MissingField { function, field }` — Required field absent
-- `InvalidFieldType { function, field, expected }` — Wrong type
-- `UnknownPrompt { name }` — Bad prompt template name
-- `UnknownFunction { name }` — Bad debug_call function name
-- `ParseError { function, detail }` — Processing failure
-- `ConfigWarning { field, message }` — Out-of-range config value
+Variants:
+- `InvalidJson { function, detail }` — input not valid JSON
+- `MissingField { function, field }` — required field absent
+- `InvalidFieldType { function, field, expected }` — wrong type
+- `UnknownPrompt { name }` — bad prompt template name
+- `ParseError { function, detail }` — processing failure
 
-Implements `Display` (human-readable), `Error`, and convenience constructors (`invalid_json()`, `missing_field()`, `parse_error()`).
+Implements `Display`, `Error`, and convenience constructors.
+
+### src/expansion.rs
+Parse and process LLM expansion responses. Handles three input formats with a fallback chain, filters results through language-aware stop word lists, applies generic-term filtering, and merges with existing term sets.
+
+- `ExpansionConfig` — language, generic_terms, filter_single_word_generic, keep_acronyms, keep_proper_nouns, min_term_length, existing_terms
+- `parse_expansion(input)` — bare string parser
+- `parse_expansion_with_language(input, language)` — language-aware parsing
+- `parse_expansion_with_config(text, config)` — full configuration
 
 ### src/prompts.rs
-Manages three canonical prompt templates:
+Three canonical prompt templates with variable substitution:
 
-#### Constants
-- `EXPAND_QUERY` (558 words) - Expands user queries into 2-4 alternative terms
-- `SUMMARIZE` (485 words) - Generates concise, scannable summaries
-- `FOLLOW_UP` (380 words) - Handles follow-up questions in conversations
+- `EXPAND_QUERY` — expands user queries into 2-4 alternative terms
+- `SUMMARIZE` — generates summaries from search result excerpts
+- `FOLLOW_UP` — handles follow-up questions in conversations
 
-#### Key Rules Enforced
-- Extract core topic, ignore question words
-- Keep multi-word terms together
-- Filter common stop words (the, is, of, etc.)
-- Never return overly generic terms (services, information, resources)
-- For person queries: only name variations, no job titles
-- Return pure JSON with no markdown wrapping
+Templates use `{SITE_NAME}`, `{SITE_DESCRIPTION}`, and optionally `{DYNAMIC_ANCHORS}` placeholders.
 
-#### Public API
-```rust
-pub fn get_template(name: &str) -> Option<&'static str>
-pub fn resolve_template(name: &str, site_name: &str, site_description: &str) -> Option<String>
-```
+### src/sanitize.rs
+PII redaction for query analytics. Removes email, phone, SSN, credit card, and IP patterns using compiled regexes (cached via `OnceLock`). Supports custom patterns.
 
-Unit tests verify:
-- All three templates load correctly
-- Template resolution replaces placeholders
-- Invalid names return None
-
-### src/html.rs
-HTML processing with two main functions:
-
-#### clean_html(html: &str, title: &str) -> String
-Pipeline:
-1. **Extract main content** - Look for `id="main-content"`, fall back to body
-2. **Remove footer** - Strip footer tags, footer IDs/classes, region-footer
-3. **Remove chrome** - Delete script, style, nav elements and contents
-4. **Strip tags** - Remove all HTML tags via regex
-5. **Normalize whitespace** - Collapse multiple spaces/newlines to single space
-6. **Remove leading title** - Prevent duplication in index
-
-#### build_pagefind_html(...) -> String
-Generates minimal HTML document:
-- Includes `data-pagefind-body` attribute
-- Adds `data-pagefind-meta="url:..."` for URL
-- Adds `data-pagefind-meta="date:..."` for date
-- Adds `data-pagefind-filter="site:..."` for filtering
-- Escapes all HTML entities in fields
-
-#### Implementation Notes
-- Uses regex for tag matching (with Result-based error handling)
-- Case-insensitive matching for footer detection
-- HTML entity escaping for special characters (&, <, >, ", ')
-- All regex patterns wrapped in Result::Ok handling for robustness
-
-Unit tests cover:
-- Script/style/nav removal
-- Whitespace normalization
-- Tag stripping
-- HTML escaping in output
-- Pagefind metadata inclusion
+- `SanitizationConfig` — boolean toggles per pattern type, plus custom patterns
+- `sanitize_query(query, config)` — returns redacted string
 
 ### src/scoring.rs
-Search result scoring with four main components:
+Search result scoring and ranking — the canonical Scolta ranking algorithm.
+
+#### Scoring Formula
+```
+final_score = (base_score * source_weight) + title_boost + content_boost + recency_boost + priority_boost
+```
+
+Where:
+- `base_score` — upstream search engine score (from Pagefind), default 1.0
+- `source_weight` — dampening factor for secondary sources, default 1.0
+- `title_boost` — `title_match_boost` when any query term matches title; multiplied by `title_all_terms_multiplier` when ALL terms match
+- `content_boost` — `content_match_boost` when any term matches excerpt; multiplied by `content_all_terms_multiplier` when ALL terms match; further multiplied by phrase proximity (adjacent: `phrase_adjacent_multiplier`, near: `phrase_near_multiplier`)
+- `recency_boost` — decay function based on `recency_strategy` (exponential, linear, step, none, custom)
+- `priority_boost` — added when result URL matches a priority page and query contains keywords
 
 #### ScoringConfig Struct
 ```rust
 pub struct ScoringConfig {
-    recency_boost_max: f64,              // 0.5
-    recency_half_life_days: u32,         // 365
-    recency_penalty_after_days: u32,     // 1825
-    recency_max_penalty: f64,            // 0.3
-    title_match_boost: f64,              // 1.0
-    title_all_terms_multiplier: f64,     // 1.5
-    content_match_boost: f64,            // 0.4
-    content_all_terms_multiplier: f64,   // 0.48
-    expand_primary_weight: f64,          // 0.7
-    excerpt_length: u32,                 // 300
-    results_per_page: u32,               // 10
-    max_pagefind_results: u32,           // 50
+    pub recency_boost_max: f64,              // 0.5
+    pub recency_half_life_days: u32,         // 365
+    pub recency_penalty_after_days: u32,     // 1825
+    pub recency_max_penalty: f64,            // 0.3
+    pub recency_strategy: String,            // "exponential"
+    pub recency_curve: Vec<[f64; 2]>,        // []
+    pub title_match_boost: f64,              // 1.0
+    pub title_all_terms_multiplier: f64,     // 1.5
+    pub content_match_boost: f64,            // 0.4
+    pub content_all_terms_multiplier: f64,   // 1.2
+    pub phrase_adjacent_multiplier: f64,     // 2.5
+    pub phrase_near_multiplier: f64,         // 1.5
+    pub phrase_near_window: u32,             // 5
+    pub phrase_window: u32,                  // 15
+    pub excerpt_length: u32,                 // 300
+    pub results_per_page: u32,              // 10
+    pub max_pagefind_results: u32,          // 50
+    pub language: String,                    // "en"
+    pub custom_stop_words: Vec<String>,      // []
+    pub priority_pages: Vec<PriorityPage>,   // []
 }
 ```
 
-Includes `validate()` method that returns `Vec<ConfigWarning>` for out-of-range values.
+Also provides: `merge_results` (N-set weighted merge with deduplication), `match_priority_pages` (keyword-URL matching), `apply_sort_override` (metadata field sorting), and `ConfigWarning` for out-of-range value reporting.
 
-#### SearchResult Struct
-Includes:
-- url, title, excerpt, date (required)
-- score (computed), content_type, site_name
-- extra: Flat serde_json::Map for pass-through fields
+### src/stop_words.rs
+Static stop word arrays for 30 languages (ISO 639-1 codes). All entries are lowercase. CJK languages (zh, ja, ko) and unknown codes return an empty slice.
 
-#### Scoring Algorithms
-
-**Recency Factor** `days_since_date() -> f64`
-- Exponential decay with half-life
-- Recent (< half_life_days): Positive boost up to `recency_boost_max`
-- Old (> penalty_after_days): Negative penalty down to `-recency_max_penalty`
-- Middle range: Linear interpolation between boost and penalty zones
-
-**Title Match** `title_match_score() -> f64`
-- Query terms extracted (stop words filtered)
-- All terms in title: `title_all_terms_multiplier` (1.5)
-- Any term in title: `title_match_boost` (1.0)
-- No terms: 0.0
-
-**Content Match** `content_match_score() -> f64`
-- Same logic as title match but with content-specific multipliers
-- All terms: `content_all_terms_multiplier` (0.48)
-- Any term: `content_match_boost` (0.4)
-- No terms: 0.0
-
-**Composite Score** `score_result() -> f64`
-```
-base_score * (1.0 + title_score) * recency_multiplier * (1.0 + content_score)
-```
-
-**Result Merging** `merge_results() -> Vec<SearchResult>`
-- Deduplicates by URL using HashMap
-- Original results weighted by `expand_primary_weight` (0.7)
-- Expanded results weighted by `1.0 - expand_primary_weight` (0.3)
-- Combines scores for duplicates
-- Final results sorted by combined score (descending)
-
-#### Extract Terms Helper
-Filters:
-- Stop words (common English words, question words)
-- Terms shorter than 2 characters
-- Returns lowercase versions
-
-Unit tests verify:
-- Recency calculation for recent/old/future dates
-- Title match scoring with full/partial/no matches
-- Content match scoring
-- Composite score calculation
-- Result sorting by score
-- Deduplication in merge
-
-### src/config.rs
-Configuration management for JavaScript integration:
-
-#### to_js_scoring_config(config: &ScoringConfig) -> serde_json::Value
-Exports config as JSON with uppercase keys:
-```json
-{
-  "RECENCY_BOOST_MAX": 0.5,
-  "RECENCY_HALF_LIFE_DAYS": 365,
-  "RECENCY_PENALTY_AFTER_DAYS": 1825,
-  "RECENCY_MAX_PENALTY": 0.3,
-  "TITLE_MATCH_BOOST": 1.0,
-  "TITLE_ALL_TERMS_MULTIPLIER": 1.5,
-  "CONTENT_MATCH_BOOST": 0.4,
-  "EXCERPT_LENGTH": 300,
-  "RESULTS_PER_PAGE": 10,
-  "MAX_PAGEFIND_RESULTS": 50,
-  "AI_EXPAND_QUERY": true,
-  "AI_SUMMARIZE": true,
-  "AI_SUMMARY_TOP_N": 5,
-  "AI_SUMMARY_MAX_CHARS": 2000,
-  "EXPAND_PRIMARY_WEIGHT": 0.7,
-  "AI_MAX_FOLLOWUPS": 3
-}
-```
-
-#### from_json(json: &serde_json::Value) -> ScoringConfig
-- Parses JSON object
-- Falls back to defaults for missing fields
-- Handles non-object input gracefully
-
-#### from_json_validated(json: &serde_json::Value) -> (ScoringConfig, Vec<ConfigWarning>)
-- Same as `from_json` but also runs `validate()` on the result
-- Returns warnings for any out-of-range values
-
-Unit tests verify:
-- Correct field names in JS export
-- Custom values preserved
-- Defaults applied for missing values
-
-### src/expansion.rs
-Parse LLM expansion responses in multiple formats:
-
-#### parse_expansion(response: &str) -> Vec<String>
-Handles three input formats in priority order:
-
-1. **JSON Array** (primary)
-   - `["term1", "term2"]`
-   - Direct serde_json parse
-
-2. **Markdown-Wrapped JSON** (secondary)
-   - ` ```json ["terms"] ``` `
-   - ` ``` ["terms"] ``` `
-   - Extracts JSON, then parses
-
-3. **Fallback Parsing** (tertiary)
-   - Split by newlines and commas
-   - Strip quotes and whitespace
-   - No JSON parsing required
-
-#### Filtering
-Removes:
-- Empty strings
-- Strings < 2 characters
-- Pure numbers
-- Common stop words (the, a, an, etc.)
-
-Unit tests cover:
-- JSON parsing
-- Markdown extraction (json variant and generic)
-- Fallback parsing (newlines, commas, mixed)
-- Stop word filtering
-- Number filtering
-- Quote stripping
-
-### src/debug.rs
-Performance measurement and logging:
-
-#### DebugResult Struct
-```rust
-pub struct DebugResult {
-    pub output: Option<String>,   // None on error
-    pub error: Option<String>,    // None on success
-    pub time_us: u128,
-    pub input_size: usize,
-    pub output_size: usize,       // 0 on error
-}
-```
-
-#### measure_call<F>() -> DebugResult
-- Closure signature: `FnOnce() -> Result<String, String>`
-- Records function execution time (microseconds)
-- Tracks input/output sizes in bytes
-- Non-blocking timing using std::time::Instant
-- Prints to stderr in non-WASM environments (gated by `#[cfg(not(target_arch = "wasm32"))]`)
-
-#### debug_result_to_json() -> serde_json::Value
-Formats results as JSON with separate `output` and `error` fields
-
-Unit tests verify:
-- Timing accuracy
-- Size calculation
-- JSON formatting
+- `get_stop_words(language)` — single entry point for stop word lookup
 
 ### tests/integration.rs
-Comprehensive integration tests covering:
-
-#### Prompt Templates
-- All three templates load correctly
-- Resolution replaces placeholders
-- Invalid names return None
-
-#### HTML Processing
-- Script/style/nav removal
-- Whitespace normalization
-- Tag stripping
-- HTML escaping in output
-- Pagefind metadata inclusion (url, date, filter)
-
-#### Scoring
-- Recency factor (recent/old content)
-- Title match scoring (all/partial/no matches)
-- Content match scoring
-- Composite score calculation
-- Result sorting by score descending
-- Deduplication in merge (same URL combined)
-
-#### Config Export
-- Correct field names (uppercase)
-- Correct default values
-- Custom config preservation
-
-#### Expansion Parsing
-- JSON array parsing
-- Markdown-wrapped JSON
-- Fallback newline/comma parsing
-- Stop word filtering
-- Number filtering
-
-#### Full Pipeline
-- Template resolution → HTML cleaning → Pagefind HTML → Config export → Result scoring
-
-### Test Fixtures
-
-#### drupal-page.html
-- Typical Drupal page structure
-- Main content in `id="main-content"`
-- Navigation navbar
-- Footer with class="footer"
-- Inline script and style tags
-
-#### wordpress-post.html
-- Typical WordPress post structure
-- Main content in `id="main-content"`
-- Post metadata
-- Footer with `id="footer"`
-- Multiple script tags
-
-#### expected-clean.txt
-Documentation of expected cleaned output for both fixtures
+Integration tests covering all 13 exported functions through the `inner::` API surface. Tests verify: describe manifest completeness, score ranking correctness, priority page boost, sort overrides, merge deduplication, old format rejection, priority page matching, expansion filtering/merging, context extraction, sanitization, conversation truncation, batch scoring, prompt resolution, and version output.
 
 ## Building and Testing
 
 ### Native Build
 ```bash
-cd packages/scolta-core
 cargo build --release
-cargo test --release
+cargo test
 ```
 
 ### WebAssembly Build
@@ -438,44 +189,34 @@ Output: `pkg/scolta_core_bg.wasm`, `pkg/scolta_core.js`, `pkg/scolta_core.d.ts`
 cargo fmt
 ```
 
-Uses default Rust formatting (4 spaces, 100 char line limit where possible)
+Uses default Rust formatting (edition 2021).
 
 ## Key Design Decisions
 
-1. **No unwrap() outside tests** - All error handling uses Result/Option
-2. **Regex error handling** - Wrapped in Ok() handling for robustness
-3. **HTML entity escaping** - Comprehensive escaping of &, <, >, ", '
-4. **Stop word filtering** - Consistent across title, content, and expansion parsing
-5. **Serde pass-through** - SearchResult uses flatten for extensibility
-6. **Default config** - ScoringConfig implements Default for convenience
-7. **Module structure** - Clear separation of concerns with dedicated modules
-8. **Doc comments** - Every public function and struct documented
-9. **Test coverage** - All major functions have unit and integration tests
-10. **WASM compatibility** - No system time assumptions, Instant-based timing only
+1. **No unwrap() outside tests** — all error handling uses Result/Option
+2. **Stop word filtering** — consistent across title, content, and expansion parsing; language-aware
+3. **Serde pass-through** — SearchResult uses `#[serde(flatten)]` for extensibility
+4. **Default config** — ScoringConfig implements Default for convenience
+5. **Module structure** — clear separation of concerns with dedicated modules
+6. **Doc comments** — every public function and struct documented
+7. **Test coverage** — all major functions have unit and integration tests
+8. **WASM compatibility** — no system time assumptions
+9. **OnceLock regex caching** — compiled regex patterns cached for PII redaction
+10. **Content all-terms multiplier is multiplicative** — `content_match_boost * content_all_terms_multiplier` (not assignment)
 
 ## Dependencies
 
-- **wasm-bindgen 0.2** - WASM/JavaScript interop
-- **js-sys 0.3** - JavaScript type bindings
-- **serde 1.0** - ~100KB (serialization)
-- **serde_json 1.0** - ~50KB (JSON)
+- **wasm-bindgen 0.2** — WASM/JavaScript interop
+- **js-sys 0.3** — JavaScript type bindings
+- **serde 1** — serialization
+- **serde_json 1** — JSON
+- **regex 1** — PII pattern matching
 
-Typical WASM binary size: under 500KB (after strip and LTO)
-
-## Future Enhancements
-
-1. Custom regex patterns for domain-specific cleaning
-2. Caching layer for template resolution
-3. Batch scoring API
-4. Custom stop word lists per language
-5. Pluggable recency functions
-6. Support for weighted query terms
-7. Result caching in WASM memory
-8. Streaming large result sets
+Typical WASM binary size: under 500 KB (after strip and LTO)
 
 ## Compatibility
 
-- **Rust**: 1.70+ (2021 edition)
+- **Rust**: Edition 2021
 - **Target**: `wasm32-unknown-unknown` (via wasm-pack)
 - **JavaScript**: ES2020+ (for ES module imports)
 

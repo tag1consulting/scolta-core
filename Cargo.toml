@@ -4,7 +4,11 @@ version = "1.0.0-rc4"
 edition = "2021"
 description = "Scolta search engine core - browser WASM module for client-side search scoring, prompt management, and query expansion"
 license = "MIT"
-repository = "https://github.com/tag1consulting/scolta"
+repository = "https://github.com/tag1consulting/scolta-core"
+readme = "README.md"
+keywords = ["wasm", "search", "scoring", "pagefind"]
+categories = ["wasm", "web-programming"]
+exclude = ["tests/", ".github/", "CLAUDE.md", ".editorconfig"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]

@@ -212,9 +212,7 @@ scoring.rs      Scoring algorithms and recency strategies
 stop_words.rs   Language-specific stop word lists (30 languages)
 ```
 
-**Browser WASM exports (9 functions):** `resolve_prompt`, `get_prompt`, `score_results`, `batch_score_results`, `merge_results`, `to_js_scoring_config`, `parse_expansion`, `version`, `describe`.
-
-**Server-only functions (not in browser bundle):** `clean_html`, `build_pagefind_html` (produces HTML for Pagefind to index — does not index anything itself), `debug_call`.
+**Browser WASM exports (13 functions):** `score_results`, `merge_results`, `match_priority_pages`, `parse_expansion`, `batch_score_results`, `resolve_prompt`, `get_prompt`, `extract_context`, `batch_extract_context`, `sanitize_query`, `truncate_conversation`, `version`, `describe`.
 
 `describe()` is the runtime function catalog. Platform adapters call it at startup to verify interface compatibility.
 
@@ -239,8 +237,6 @@ Run integration tests with `--nocapture` to see per-case output:
 ```bash
 cargo test --test integration -- --nocapture
 ```
-
-The server-only `debug_call()` wraps any function with timing and size logging.
 
 ### "Tests fail after changing stop words"
 

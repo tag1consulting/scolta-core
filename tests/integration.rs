@@ -349,3 +349,74 @@ fn truncate_conversation_removes_oldest_pair() {
     );
     assert!(contents.contains(&"q2"));
 }
+
+// ── batch_score_results ──────────────────────────────────────────────────────
+
+#[test]
+fn batch_score_results_returns_per_query_results() {
+    let input = json!({
+        "queries": [
+            {
+                "query": "drupal",
+                "results": [
+                    {"url": "/a", "title": "Drupal Guide", "excerpt": "drupal info", "date": "2026-01-01"}
+                ]
+            },
+            {
+                "query": "wordpress",
+                "results": [
+                    {"url": "/b", "title": "WordPress Tips", "excerpt": "wp tips", "date": "2026-01-01"}
+                ]
+            }
+        ]
+    });
+    let result = inner::batch_score_results(&input).unwrap();
+    let arr = result.as_array().unwrap();
+    assert_eq!(arr.len(), 2);
+    assert_eq!(arr[0].as_array().unwrap().len(), 1);
+    assert_eq!(arr[1].as_array().unwrap().len(), 1);
+}
+
+// ── resolve_prompt ───────────────────────────────────────────────────────────
+
+#[test]
+fn resolve_prompt_substitutes_variables() {
+    let input = json!({
+        "prompt_name": "expand_query",
+        "site_name": "Acme Corp",
+        "site_description": "a widget store"
+    });
+    let result = inner::resolve_prompt(&input).unwrap();
+    assert!(result.contains("Acme Corp"));
+    assert!(result.contains("a widget store"));
+}
+
+#[test]
+fn resolve_prompt_unknown_name_is_err() {
+    let input = json!({"prompt_name": "nonexistent_xyz"});
+    assert!(inner::resolve_prompt(&input).is_err());
+}
+
+// ── get_prompt ───────────────────────────────────────────────────────────────
+
+#[test]
+fn get_prompt_returns_raw_template() {
+    let result = inner::get_prompt("expand_query").unwrap();
+    assert!(result.contains("{SITE_NAME}"));
+    assert!(result.contains("{SITE_DESCRIPTION}"));
+}
+
+#[test]
+fn get_prompt_unknown_name_is_err() {
+    assert!(inner::get_prompt("nonexistent_xyz").is_err());
+}
+
+// ── version ──────────────────────────────────────────────────────────────────
+
+#[test]
+fn version_returns_cargo_version() {
+    let v = inner::version();
+    assert!(!v.is_empty());
+    // Must match Cargo.toml version
+    assert_eq!(v, env!("CARGO_PKG_VERSION"));
+}
