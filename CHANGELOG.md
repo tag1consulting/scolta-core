@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+_No changes yet._
+
+## [1.0.0] - 2026-05-27
+
 ### Changed
 - **Pre-1.0 cleanup.** Promoted all experimental functions to stable for 1.0 GA: `match_priority_pages`, `extract_context`, `batch_extract_context`, `sanitize_query`, `truncate_conversation`, `batch_score_results`. Removed stale references to deleted functions (`to_js_scoring_config`, `clean_html`, `build_pagefind_html`, `debug_call`) from documentation, tests, and doc comments. Rewrote API.md and IMPLEMENTATION.md from scratch. Fixed CHANGELOG section headers to use keepachangelog standard names. Added keepachangelog link references. CI now runs integration tests (`cargo test` instead of `cargo test --lib`). Added missing integration tests for `batch_score_results`, `resolve_prompt`, `get_prompt`, and `version`. Added `.gitattributes` and Cargo.toml packaging metadata. Fixed `repository` URL in Cargo.toml.
 - **Prompt templates synced with PHP canonical.** `expand_query`: JSON object response format (was JSON array), 12 rules (was 11) — added site-topic disambiguation (rule 9) and constraint queries (rule 12), plus 2 new examples. `summarize`: added CURATION RULES (filter, dig, scan, focus, variety, category, breadth), LANGUAGE RULES, METADATA RULES, CORPUS AWARENESS in grounding check; updated tone to "Direct, expert, helpful." `follow_up`: added NUMBERED RESULT REFERENCES, CURATION RULES, CORPUS AWARENESS in grounding check; updated tone to match summarize.
