@@ -76,28 +76,30 @@ For patch-only work on a released version: `1.0.1-dev` → `1.0.1`.
 
 | Package | File | Field |
 |---|---|---|
-| scolta-core | `Cargo.toml` | `version = "1.0.0-rc4"` |
-| scolta-php | `composer.json` | `"version": "1.0.0-rc4"` |
-| scolta-drupal | `composer.json` | `"version": "1.0.0-rc4"` |
-| scolta-wp | `composer.json` + `scolta.php` | `"version"` + `SCOLTA_VERSION` constant + plugin header |
-| scolta-laravel | `composer.json` | `"version": "1.0.0-rc4"` |
+| scolta-core | `Cargo.toml` | `version = "1.0.1-dev"` |
+| scolta-php | `composer.json` | `"version": "1.0.1-dev"` |
+| scolta-drupal | `composer.json` + `scolta.info.yml` | `"version"` in both; must match |
+| scolta-wp | `composer.json` + `scolta.php` + `readme.txt` | `"version"` + `SCOLTA_VERSION` constant + plugin header + `Stable Tag` |
+| scolta-laravel | `composer.json` | `"version": "1.0.1-dev"` |
 
-For WordPress, the version appears in three places (composer.json, the plugin header comment, and the `SCOLTA_VERSION` constant). All three must match.
+For WordPress, the version appears in four places (composer.json, the plugin header comment, the `SCOLTA_VERSION` constant, and `readme.txt` `Stable Tag`). All four must match. For Drupal, the version appears in both `composer.json` and `scolta.info.yml`; both must match.
 
 ## Dependency Constraints
 
-Each package declares what it needs from the tier above using caret constraints:
+Each adapter declares what it needs from scolta-php using a caret constraint:
 
 ```json
 // scolta-drupal composer.json
 {
   "require": {
-    "tag1/scolta-php": "^1.2"
+    "tag1/scolta-php": "^1.0"
   }
 }
 ```
 
-This means "any 1.x version of scolta-php that's at least 1.2.0." If you have scolta-php 1.7 installed, it satisfies the constraint. If scolta-drupal later uses a feature added in scolta-php 1.5, its constraint tightens to `^1.5`. Composer, Cargo, pip, and npm all handle this automatically.
+This means "any 1.x version of scolta-php that's at least 1.0.0." If you have scolta-php 1.7 installed, it satisfies the constraint. If scolta-drupal later uses a feature added in scolta-php 1.5, its constraint tightens to `^1.5`. Composer handles this automatically.
+
+Adapters bundle the exact scolta-php version recorded in their committed `composer.lock`, resolved from Packagist. Tagging an adapter release does NOT require a matching scolta-php tag — the lock pins the version. To adopt a newer scolta-php, run `composer update tag1/scolta-php` in a PR, test, and commit the updated lock.
 
 scolta-core ships as a compiled WASM binary inside the scolta-php package. You don't install scolta-core separately — it comes bundled. The scolta-core version used by scolta-php is documented in scolta-php's changelog.
 
