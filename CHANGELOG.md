@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+- **Added release tarball member-list assertion to CI.** New `tarball-allowlist` job builds the WASM tarball and asserts it contains exactly the 4 expected files (`scolta_core_bg.wasm`, `scolta_core.js`, `scolta_core.d.ts`, `scolta_core_bg.wasm.d.ts`). Catches accidental inclusions on every PR.
+
+### Removed
+- **Deleted `.gitattributes`** — inert for this repo (cargo ignores it; nothing runs `git archive`). `Cargo.toml` `exclude` already handles crates.io packaging.
+
 ### Documentation
 - **Clarified independent versioning model.** VERSIONING.md and CLAUDE.md now state that minor and patch versions are released independently per package, with adapters pinning scolta-php via `composer.lock` within their `^1.x` constraint. Refreshed stale `1.0.0-rc4` example version strings. Added Drupal's `scolta.info.yml` and WordPress's `readme.txt Stable Tag` to the version-location table. Removed stale `scolta-python` reference from CLAUDE.md.
 
