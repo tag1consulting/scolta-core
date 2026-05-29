@@ -2,11 +2,12 @@
 
 All notable changes to scolta-core will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses [Semantic Versioning](https://semver.org/). Major versions are synchronized across all Scolta packages.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses [Semantic Versioning](https://semver.org/). Major versions are synchronized across all Scolta packages; minor and patch versions are released independently per package.
 
 ## [Unreleased]
 
-_No changes yet._
+### Documentation
+- **Clarified independent versioning model.** VERSIONING.md and CLAUDE.md now state that minor and patch versions are released independently per package, with adapters pinning scolta-php via `composer.lock` within their `^1.x` constraint. Refreshed stale `1.0.0-rc4` example version strings. Added Drupal's `scolta.info.yml` and WordPress's `readme.txt Stable Tag` to the version-location table. Removed stale `scolta-python` reference from CLAUDE.md.
 
 ## [1.0.0] - 2026-05-27
 

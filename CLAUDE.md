@@ -2,7 +2,7 @@
 
 ## Versioning (CRITICAL — read VERSIONING.md)
 
-This project follows strict semantic versioning with synchronized major versions across all Scolta packages. **Violations of these rules are blocking errors.**
+This project follows strict semantic versioning with synchronized major versions across all Scolta packages. Minor and patch versions are released independently per package; adapters pin scolta-php via `composer.lock` within their `^1.x` constraint. **Violations of the major-version rule are blocking errors.**
 
 ### Adding a new public function
 
@@ -33,7 +33,7 @@ This project follows strict semantic versioning with synchronized major versions
 ### WASM interface version
 
 - `WASM_INTERFACE_VERSION` in `lib.rs` MUST be incremented when function signatures or calling conventions change in a way that breaks binary compatibility with host wrappers.
-- Incrementing WASM interface version is a coordinated change — scolta-php, scolta-python, and scolta.js must all be updated.
+- Incrementing WASM interface version is a coordinated change — scolta-php and scolta.js must all be updated.
 
 ### Version management and -dev workflow
 
