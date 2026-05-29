@@ -68,6 +68,53 @@ jobs:
             echo "::warning::WASM binary exceeds 500KB ($SIZE bytes)"
           fi
 
+  tarball-allowlist:
+    name: Release tarball member-list assertion
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/
+            ~/.cargo/git/
+            target/
+          key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Build WASM
+        run: wasm-pack build --target web --release
+      - name: Assert tarball contains exactly the expected members
+        run: |
+          tar -czf test-release.tar.gz \
+            -C pkg \
+            scolta_core_bg.wasm \
+            scolta_core.js \
+            scolta_core.d.ts \
+            scolta_core_bg.wasm.d.ts
+
+          ACTUAL=$(tar -tzf test-release.tar.gz | sort)
+          EXPECTED=$(printf '%s\n' \
+            scolta_core.d.ts \
+            scolta_core.js \
+            scolta_core_bg.wasm \
+            scolta_core_bg.wasm.d.ts \
+            | sort)
+
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "ERROR: Tarball members do not match the allowlist."
+            echo "Expected:"
+            echo "$EXPECTED"
+            echo "Actual:"
+            echo "$ACTUAL"
+            exit 1
+          fi
+          echo "PASS: Tarball contains exactly 4 expected members."
+
   changelog:
     name: CHANGELOG enforcement
     runs-on: ubuntu-latest
