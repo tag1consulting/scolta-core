@@ -92,6 +92,34 @@ pub mod inner {
     // Scoring
     // -----------------------------------------------------------------------
 
+    /// Build the per-query-word match-weight map from a `query_word_importance`
+    /// JSON object (`{ "word": "content"|"incidental", ... }`).
+    ///
+    /// Only `incidental` words are recorded (mapped to
+    /// `config.incidental_match_weight`); `content` words and any word absent
+    /// from the input default to weight `1.0` at lookup time. Returns `None`
+    /// when the field is absent, malformed, or contains no incidental words —
+    /// which routes scoring through the unweighted (byte-identical) path.
+    fn parse_query_word_importance(
+        value: Option<&serde_json::Value>,
+        config: &scoring::ScoringConfig,
+    ) -> Option<std::collections::HashMap<String, f64>> {
+        let obj = value?.as_object()?;
+        let mut map = std::collections::HashMap::new();
+        for (word, label) in obj {
+            if let Some(label) = label.as_str() {
+                if label.eq_ignore_ascii_case("incidental") {
+                    map.insert(word.to_lowercase(), config.incidental_match_weight);
+                }
+            }
+        }
+        if map.is_empty() {
+            None
+        } else {
+            Some(map)
+        }
+    }
+
     /// Score and re-rank search results by relevance.
     ///
     /// Input: `{ "query": "...", "results": [...], "config": {...} }`
@@ -99,6 +127,12 @@ pub mod inner {
     /// Each result may include `"source_weight"` (f64, default 1.0) to dampen
     /// secondary-source results. The config may include `"priority_pages"` to
     /// boost specific results when query keywords match.
+    ///
+    /// Optional `"primary_query"` (string) awards the original user query's
+    /// title boost during expanded-term scoring passes. Optional
+    /// `"query_word_importance"` (`{ "word": "content"|"incidental" }`)
+    /// down-weights matches on `incidental` query words by
+    /// `config.incidental_match_weight`; absent/empty leaves scoring unchanged.
     pub fn score_results(input: &serde_json::Value) -> Result<serde_json::Value, ScoltaError> {
         let obj = input.as_object().ok_or(ScoltaError::invalid_json(
             "score_results",
@@ -128,11 +162,19 @@ pub mod inner {
             .and_then(|v| v.as_str())
             .map(|pq| common::extract_query(pq, &cfg.language).terms);
 
+        let term_weights = parse_query_word_importance(obj.get("query_word_importance"), &cfg);
+
         let sort_override: Option<scoring::SortOverride> = obj
             .get("sort_override")
             .and_then(|v| serde_json::from_value(v.clone()).ok());
 
-        scoring::score_results_with_primary(&mut results, query, primary_terms.as_deref(), &cfg);
+        scoring::score_results_with_primary_and_importance(
+            &mut results,
+            query,
+            primary_terms.as_deref(),
+            term_weights.as_ref(),
+            &cfg,
+        );
 
         if let Some(ref sort) = sort_override {
             scoring::apply_sort_override(&mut results, sort);
@@ -301,7 +343,20 @@ pub mod inner {
             let config_json = qobj.get("config").unwrap_or(default_config_json);
             let cfg = config::from_json(config_json);
 
-            scoring::score_results(&mut results, query, &cfg);
+            let primary_terms: Option<Vec<String>> = qobj
+                .get("primary_query")
+                .and_then(|v| v.as_str())
+                .map(|pq| common::extract_query(pq, &cfg.language).terms);
+
+            let term_weights = parse_query_word_importance(qobj.get("query_word_importance"), &cfg);
+
+            scoring::score_results_with_primary_and_importance(
+                &mut results,
+                query,
+                primary_terms.as_deref(),
+                term_weights.as_ref(),
+                &cfg,
+            );
 
             let scored = serde_json::to_value(&results)
                 .map_err(|e| ScoltaError::parse_error("batch_score_results", e))?;
