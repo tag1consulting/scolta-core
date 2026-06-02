@@ -6,8 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-### Added
-- **`incidental_match_weight` scoring config + optional `query_word_importance` input on `score_results`/`batch_score_results`.** Weights each query word's title/content match contribution by its semantic importance so a result matching only an *incidental* query word (generic framing/modifiers like `grilled` in `grilled vegetables`) ranks below one matching the *content* word (`vegetables`). The optional input map (`{ "word": "content"|"incidental" }`, keyed on the primary query's words — produced by scolta-php's #163 expansion classification) drives the down-weighting; `content` words and every word absent from the map keep weight `1.0`. The new `incidental_match_weight` config (default `0.3`, clamped `0.0–1.0`) sets the incidental weight. The "all terms match" multiplier keys on content words only, so a title matching every content word still earns it without the incidental word. Fully backward compatible: an absent/empty importance map **or** `incidental_match_weight == 1.0` reproduces the previous scores byte-for-byte. This is a re-ranking change — result counts are unchanged; only the order moves.
+### Removed
+- **Reverted query-word-importance scoring weight (#31).** Removed the `incidental_match_weight` config and the per-query-word importance weighting from `score_results`/`batch_score_results`. Validation showed the weighting was inert — it changed result ordering on zero real queries — so the scorer returns to counting every matched query term equally, as it did before #31.
 
 ### Changed
 - **Added release tarball member-list assertion to CI.** New `tarball-allowlist` job builds the WASM tarball and asserts it contains exactly the 4 expected files (`scolta_core_bg.wasm`, `scolta_core.js`, `scolta_core.d.ts`, `scolta_core_bg.wasm.d.ts`). Catches accidental inclusions on every PR.

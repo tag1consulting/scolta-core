@@ -18,7 +18,7 @@
 
 use crate::common;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 /// A priority page entry that receives a score boost when query keywords match.
 ///
@@ -58,7 +58,6 @@ pub struct PriorityPage {
 /// | `title_all_terms_multiplier` | 0.0–5.0 | 1.5 |
 /// | `content_match_boost` | 0.0–5.0 | 0.4 |
 /// | `content_all_terms_multiplier` | 0.0–5.0 | 1.2 |
-/// | `incidental_match_weight` | 0.0–1.0 | 0.3 |
 /// | `phrase_adjacent_multiplier` | 1.0–10.0 | 2.5 |
 /// | `phrase_near_multiplier` | 1.0–5.0 | 1.5 |
 /// | `phrase_near_window` | 1–50 | 5 |
@@ -83,15 +82,6 @@ pub struct ScoringConfig {
     /// Multiplier applied to `content_match_boost` when all query terms appear
     /// in the content (parallel to `title_all_terms_multiplier` for title scoring).
     pub content_all_terms_multiplier: f64,
-    /// Weight applied to a query word's title/content match contribution when
-    /// the word is classified `incidental` (generic framing/modifiers) by the
-    /// optional per-query-word importance map. `content` words and every word
-    /// absent from the map use weight `1.0`. Default `0.3` down-weights matches
-    /// on incidental words so a result matching only an incidental query word
-    /// ranks below one matching the content word. `1.0` reproduces equal
-    /// weighting (no effect); the importance map being absent/empty also
-    /// reproduces pre-importance scoring exactly.
-    pub incidental_match_weight: f64,
     /// Multiplier applied to `content_boost` when all query terms appear
     /// adjacent to each other (span ≤ terms−1 word positions apart).
     pub phrase_adjacent_multiplier: f64,
@@ -127,7 +117,6 @@ impl Default for ScoringConfig {
             title_all_terms_multiplier: 1.5,
             content_match_boost: 0.4,
             content_all_terms_multiplier: 1.2,
-            incidental_match_weight: 0.3,
             phrase_adjacent_multiplier: 2.5,
             phrase_near_multiplier: 1.5,
             phrase_near_window: 5,
@@ -181,16 +170,6 @@ impl ScoringConfig {
                 message: format!(
                     "value {} outside reasonable range (0.0–1.0)",
                     self.recency_max_penalty
-                ),
-            });
-        }
-
-        if self.incidental_match_weight < 0.0 || self.incidental_match_weight > 1.0 {
-            warnings.push(ConfigWarning {
-                field: "incidental_match_weight",
-                message: format!(
-                    "value {} outside reasonable range (0.0–1.0)",
-                    self.incidental_match_weight
                 ),
             });
         }
@@ -295,18 +274,6 @@ impl ScoringConfig {
                 ),
             });
             self.recency_max_penalty = clamped;
-        }
-
-        if self.incidental_match_weight < 0.0 || self.incidental_match_weight > 1.0 {
-            let clamped = self.incidental_match_weight.clamp(0.0, 1.0);
-            warnings.push(ConfigWarning {
-                field: "incidental_match_weight",
-                message: format!(
-                    "value {} outside range (0.0–1.0), clamped to {clamped}",
-                    self.incidental_match_weight
-                ),
-            });
-            self.incidental_match_weight = clamped;
         }
 
         if self.results_per_page == 0 || self.results_per_page > 100 {
@@ -596,92 +563,26 @@ pub fn title_match_score(query: &str, title: &str, config: &ScoringConfig) -> f6
 }
 
 pub fn title_match_score_with_terms(terms: &[String], title: &str, config: &ScoringConfig) -> f64 {
-    title_match_score_with_terms_weighted(terms, title, config, None)
-}
-
-/// Per-query-word weighting of a query word's title-match contribution.
-///
-/// `term_weights` maps a (lowercase) query word to the weight applied to its
-/// match contribution: `content` words → `1.0`, `incidental` words →
-/// `config.incidental_match_weight`, and any word absent from the map → `1.0`.
-/// The weight scales the per-word numerator while the denominator stays the
-/// raw term count, so a result matching only an incidental word earns a
-/// fraction of the boost a content-word match earns. The "all terms match"
-/// multiplier keys on *content* words only, so a title matching every content
-/// word still gets the multiplier even when it lacks an incidental word.
-///
-/// `term_weights == None` (or an empty map) reproduces the unweighted formula
-/// byte-for-byte — the no-regression fallback path.
-pub fn title_match_score_with_terms_weighted(
-    terms: &[String],
-    title: &str,
-    config: &ScoringConfig,
-    term_weights: Option<&HashMap<String, f64>>,
-) -> f64 {
     if terms.is_empty() {
         return 0.0;
     }
 
     let title_lower = title.to_lowercase();
-    let weights = match term_weights {
-        Some(w) if !w.is_empty() => w,
-        _ => {
-            // Unweighted path — byte-identical to the historical formula.
-            let matching_count = terms
-                .iter()
-                .filter(|t| title_lower.contains(t.as_str()))
-                .count();
-            if matching_count == 0 {
-                return 0.0;
-            }
-            let mut boost = config.title_match_boost;
-            if matching_count == terms.len() && terms.len() > 1 {
-                boost *= config.title_all_terms_multiplier;
-            }
-            return boost * (matching_count as f64 / terms.len() as f64);
-        }
-    };
+    let matching_count = terms
+        .iter()
+        .filter(|t| title_lower.contains(t.as_str()))
+        .count();
 
-    let (matched_weight, content_total, content_matched) =
-        weighted_match_counts(terms, &title_lower, weights);
-    if matched_weight == 0.0 {
+    if matching_count == 0 {
         return 0.0;
     }
 
     let mut boost = config.title_match_boost;
-    if content_total > 0 && content_matched == content_total && terms.len() > 1 {
+    if matching_count == terms.len() && terms.len() > 1 {
         boost *= config.title_all_terms_multiplier;
     }
 
-    boost * (matched_weight / terms.len() as f64)
-}
-
-/// Look up the importance weight for a query word. Content words and words
-/// absent from the map weigh `1.0`; incidental words carry their configured
-/// (sub-unity) weight. Returns `(matched_weight, content_total, content_matched)`
-/// where the content counts drive the all-terms multiplier.
-fn weighted_match_counts(
-    terms: &[String],
-    haystack_lower: &str,
-    weights: &HashMap<String, f64>,
-) -> (f64, usize, usize) {
-    let mut matched_weight = 0.0;
-    let mut content_total = 0usize;
-    let mut content_matched = 0usize;
-    for t in terms {
-        let w = *weights.get(t.as_str()).unwrap_or(&1.0);
-        let is_content = w >= 1.0;
-        if is_content {
-            content_total += 1;
-        }
-        if haystack_lower.contains(t.as_str()) {
-            matched_weight += w;
-            if is_content {
-                content_matched += 1;
-            }
-        }
-    }
-    (matched_weight, content_total, content_matched)
+    boost * (matching_count as f64 / terms.len() as f64)
 }
 
 pub fn content_match_score(query: &str, content: &str, config: &ScoringConfig) -> f64 {
@@ -694,55 +595,26 @@ pub fn content_match_score_with_terms(
     content: &str,
     config: &ScoringConfig,
 ) -> f64 {
-    content_match_score_with_terms_weighted(terms, content, config, None)
-}
-
-/// Per-query-word weighting of a query word's content-match contribution.
-/// See [`title_match_score_with_terms_weighted`] for the weighting semantics;
-/// this is the content/excerpt analogue using `content_match_boost` and
-/// `content_all_terms_multiplier`.
-pub fn content_match_score_with_terms_weighted(
-    terms: &[String],
-    content: &str,
-    config: &ScoringConfig,
-    term_weights: Option<&HashMap<String, f64>>,
-) -> f64 {
     if terms.is_empty() {
         return 0.0;
     }
 
     let content_lower = content.to_lowercase();
-    let weights = match term_weights {
-        Some(w) if !w.is_empty() => w,
-        _ => {
-            // Unweighted path — byte-identical to the historical formula.
-            let matching_count = terms
-                .iter()
-                .filter(|t| content_lower.contains(t.as_str()))
-                .count();
-            if matching_count == 0 {
-                return 0.0;
-            }
-            let mut boost = config.content_match_boost;
-            if matching_count == terms.len() && terms.len() > 1 {
-                boost *= config.content_all_terms_multiplier;
-            }
-            return boost * (matching_count as f64 / terms.len() as f64);
-        }
-    };
+    let matching_count = terms
+        .iter()
+        .filter(|t| content_lower.contains(t.as_str()))
+        .count();
 
-    let (matched_weight, content_total, content_matched) =
-        weighted_match_counts(terms, &content_lower, weights);
-    if matched_weight == 0.0 {
+    if matching_count == 0 {
         return 0.0;
     }
 
     let mut boost = config.content_match_boost;
-    if content_total > 0 && content_matched == content_total && terms.len() > 1 {
+    if matching_count == terms.len() && terms.len() > 1 {
         boost *= config.content_all_terms_multiplier;
     }
 
-    boost * (matched_weight / terms.len() as f64)
+    boost * (matching_count as f64 / terms.len() as f64)
 }
 
 /// Compute a phrase-proximity multiplier from Pagefind word positions.
@@ -799,58 +671,21 @@ pub fn score_result_with_query_info_and_primary(
     config: &ScoringConfig,
     priority_boost: f64,
 ) -> f64 {
-    score_result_with_query_info_and_primary_weighted(
-        result,
-        query_info,
-        primary_terms,
-        config,
-        priority_boost,
-        None,
-    )
-}
-
-/// Importance-weighted variant of [`score_result_with_query_info_and_primary`].
-///
-/// `term_weights` (keyed on the primary query's words) down-weights matches on
-/// `incidental` query words across both the current-query and primary-query
-/// title boosts and the content boost. `None` / empty map reproduces the
-/// unweighted scoring exactly. Because the map only contains primary-query
-/// words, expansion-term scoring passes whose words are absent from the map are
-/// unaffected.
-pub fn score_result_with_query_info_and_primary_weighted(
-    result: &SearchResult,
-    query_info: &common::QueryInfo,
-    primary_terms: Option<&[String]>,
-    config: &ScoringConfig,
-    priority_boost: f64,
-    term_weights: Option<&HashMap<String, f64>>,
-) -> f64 {
     let base_score = if result.score > 0.0 {
         result.score
     } else {
         1.0
     };
     let source_weight = result.source_weight.unwrap_or(1.0);
-    let query_title_boost = title_match_score_with_terms_weighted(
-        &query_info.terms,
-        &result.title,
-        config,
-        term_weights,
-    );
+    let query_title_boost = title_match_score_with_terms(&query_info.terms, &result.title, config);
     let title_boost = match primary_terms {
         Some(pt) => {
-            let primary_title_boost =
-                title_match_score_with_terms_weighted(pt, &result.title, config, term_weights);
+            let primary_title_boost = title_match_score_with_terms(pt, &result.title, config);
             query_title_boost.max(primary_title_boost)
         }
         None => query_title_boost,
     };
-    let content_boost = content_match_score_with_terms_weighted(
-        &query_info.terms,
-        &result.excerpt,
-        config,
-        term_weights,
-    );
+    let content_boost = content_match_score_with_terms(&query_info.terms, &result.excerpt, config);
     let recency = recency_boost(&result.date, config);
     let phrase_mult = if query_info.is_phrase {
         result
@@ -948,23 +783,6 @@ pub fn score_results_with_primary(
     primary_terms: Option<&[String]>,
     config: &ScoringConfig,
 ) {
-    score_results_with_primary_and_importance(results, query, primary_terms, None, config);
-}
-
-/// Importance-weighted variant of [`score_results_with_primary`].
-///
-/// `term_weights` is the per-query-word importance map (word → weight) keyed on
-/// the primary query's words. It down-weights incidental-word matches in the
-/// title/content boosts so results matching only an incidental query word rank
-/// below results matching a content word. `None` / empty map reproduces
-/// [`score_results_with_primary`] exactly.
-pub fn score_results_with_primary_and_importance(
-    results: &mut [SearchResult],
-    query: &str,
-    primary_terms: Option<&[String]>,
-    term_weights: Option<&HashMap<String, f64>>,
-    config: &ScoringConfig,
-) {
     let query_info = if config.custom_stop_words.is_empty() {
         common::extract_query(query, &config.language)
     } else {
@@ -1001,13 +819,12 @@ pub fn score_results_with_primary_and_importance(
             }
         }
 
-        result.score = score_result_with_query_info_and_primary_weighted(
+        result.score = score_result_with_query_info_and_primary(
             result,
             &query_info,
             primary_terms,
             config,
             priority_boost,
-            term_weights,
         );
     }
 
@@ -2925,216 +2742,5 @@ mod tests {
                 < 1e-10,
             "content score mismatch"
         );
-    }
-
-    mod query_word_importance_weighting {
-        use super::*;
-        use crate::inner;
-        use serde_json::json;
-
-        fn weights(pairs: &[(&str, f64)]) -> HashMap<String, f64> {
-            pairs.iter().map(|(w, v)| (w.to_string(), *v)).collect()
-        }
-
-        // (a) A doc matching only an incidental word must rank BELOW a doc
-        //     matching the content word.
-        #[test]
-        fn incidental_only_match_ranks_below_content_match() {
-            let config = ScoringConfig::default();
-            // "grilled vegetables": grilled incidental, vegetables content.
-            let terms = vec!["grilled".to_string(), "vegetables".to_string()];
-            let w = weights(&[("grilled", config.incidental_match_weight)]);
-
-            let incidental_only = title_match_score_with_terms_weighted(
-                &terms,
-                "Grilled Pork Tenderloin",
-                &config,
-                Some(&w),
-            );
-            let content_only = title_match_score_with_terms_weighted(
-                &terms,
-                "Roasted Vegetables Medley",
-                &config,
-                Some(&w),
-            );
-            assert!(
-                content_only > incidental_only,
-                "content-word match ({content_only}) must outrank incidental-word match ({incidental_only})"
-            );
-        }
-
-        // (a) end-to-end via the JSON scorer: the vegetable dish outranks the
-        //     grilled-meat dish once importance is supplied.
-        #[test]
-        fn json_scorer_reranks_incidental_below_content() {
-            let base = json!({
-                "query": "grilled vegetables",
-                "primary_query": "grilled vegetables",
-                "results": [
-                    {"url": "/meat", "title": "Grilled Pork Tenderloin", "excerpt": "grilled meat", "date": "2026-01-01", "score": 1.0},
-                    {"url": "/veg", "title": "Roasted Vegetables Medley", "excerpt": "vegetables", "date": "2026-01-01", "score": 1.0}
-                ]
-            });
-
-            // Without importance: both match exactly one of two terms — the meat
-            // dish is not pushed below the vegetable dish by query-word weighting.
-            let plain = inner::score_results(&base).unwrap();
-            let plain_arr = plain.as_array().unwrap();
-            let plain_top = plain_arr[0].get("url").unwrap().as_str().unwrap();
-
-            // With importance: "grilled" is incidental, so the vegetable dish wins.
-            let mut weighted_input = base.clone();
-            weighted_input.as_object_mut().unwrap().insert(
-                "query_word_importance".to_string(),
-                json!({"grilled": "incidental", "vegetables": "content"}),
-            );
-            let weighted = inner::score_results(&weighted_input).unwrap();
-            let weighted_arr = weighted.as_array().unwrap();
-            let weighted_top = weighted_arr[0].get("url").unwrap().as_str().unwrap();
-
-            assert_eq!(
-                weighted_top, "/veg",
-                "with importance the vegetable dish must rank first (plain top was {plain_top})"
-            );
-        }
-
-        // (b) A both-content query has no incidental words, so ordering is
-        //     unchanged versus the no-importance scorer.
-        #[test]
-        fn all_content_query_ordering_unchanged() {
-            let config = ScoringConfig::default();
-            let terms = vec!["crispy".to_string(), "soft".to_string()];
-            // No incidental words → empty map → byte-identical to unweighted.
-            let empty: HashMap<String, f64> = HashMap::new();
-
-            for title in [
-                "Crispy Soft Bread",
-                "Crispy Wafer",
-                "Soft Pillow",
-                "Unrelated",
-            ] {
-                let plain = title_match_score_with_terms(&terms, title, &config);
-                let weighted =
-                    title_match_score_with_terms_weighted(&terms, title, &config, Some(&empty));
-                assert_eq!(
-                    plain.to_bits(),
-                    weighted.to_bits(),
-                    "empty importance map must be byte-identical for {title}"
-                );
-            }
-        }
-
-        // (c) Absent map (None) and incidental_match_weight == 1.0 both reproduce
-        //     the unweighted scores byte-for-byte.
-        #[test]
-        fn fallback_paths_are_byte_identical() {
-            let mut config = ScoringConfig::default();
-            let terms = vec!["grilled".to_string(), "vegetables".to_string()];
-
-            for title in [
-                "Grilled Pork Tenderloin",
-                "Roasted Vegetables Medley",
-                "Grilled Vegetable Skewers",
-                "Plain Toast",
-            ] {
-                // None path.
-                let plain = title_match_score_with_terms(&terms, title, &config);
-                let none_path = title_match_score_with_terms_weighted(&terms, title, &config, None);
-                assert_eq!(plain.to_bits(), none_path.to_bits(), "None path: {title}");
-
-                // weight == 1.0 path (map present but every weight 1.0).
-                config.incidental_match_weight = 1.0;
-                let w = weights(&[("grilled", 1.0)]);
-                let unity = title_match_score_with_terms_weighted(&terms, title, &config, Some(&w));
-                assert_eq!(
-                    plain.to_bits(),
-                    unity.to_bits(),
-                    "unity weight path: {title}"
-                );
-                config.incidental_match_weight = 0.3;
-            }
-        }
-
-        // (c) JSON scorer: weight 1.0 produces identical scores to omitting the map.
-        #[test]
-        fn json_scorer_unity_weight_matches_no_map() {
-            let no_map = json!({
-                "query": "grilled vegetables",
-                "primary_query": "grilled vegetables",
-                "results": [
-                    {"url": "/meat", "title": "Grilled Pork Tenderloin", "excerpt": "grilled meat", "date": "2026-01-01", "score": 1.0},
-                    {"url": "/veg", "title": "Roasted Vegetables Medley", "excerpt": "vegetables", "date": "2026-01-01", "score": 1.0}
-                ]
-            });
-            let with_unity = json!({
-                "query": "grilled vegetables",
-                "primary_query": "grilled vegetables",
-                "config": {"incidental_match_weight": 1.0},
-                "query_word_importance": {"grilled": "incidental", "vegetables": "content"},
-                "results": [
-                    {"url": "/meat", "title": "Grilled Pork Tenderloin", "excerpt": "grilled meat", "date": "2026-01-01", "score": 1.0},
-                    {"url": "/veg", "title": "Roasted Vegetables Medley", "excerpt": "vegetables", "date": "2026-01-01", "score": 1.0}
-                ]
-            });
-
-            let a = inner::score_results(&no_map).unwrap();
-            let b = inner::score_results(&with_unity).unwrap();
-            let scores = |v: &serde_json::Value| -> Vec<u64> {
-                v.as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|r| r.get("score").unwrap().as_f64().unwrap().to_bits())
-                    .collect()
-            };
-            assert_eq!(
-                scores(&a),
-                scores(&b),
-                "unity weight must equal no-map scores"
-            );
-        }
-
-        // The all-terms multiplier keys on content words: a title matching every
-        // content word earns the multiplier even without the incidental word.
-        #[test]
-        fn all_terms_multiplier_counts_content_words_only() {
-            let config = ScoringConfig::default();
-            let terms = vec!["grilled".to_string(), "vegetables".to_string()];
-            let w = weights(&[("grilled", config.incidental_match_weight)]);
-
-            // Matches only the lone content word "vegetables".
-            let score = title_match_score_with_terms_weighted(
-                &terms,
-                "Steamed Vegetables",
-                &config,
-                Some(&w),
-            );
-            // matched_weight = 1.0 (vegetables), denom = 2 terms, all CONTENT
-            // words matched → multiplier applies.
-            let expected =
-                config.title_match_boost * config.title_all_terms_multiplier * (1.0 / 2.0);
-            assert!(
-                (score - expected).abs() < 1e-10,
-                "content-only all-match must earn the multiplier: got {score}, expected {expected}"
-            );
-        }
-
-        // Malformed / absent importance must not error and must leave scores
-        // unchanged (defensive parsing).
-        #[test]
-        fn malformed_importance_is_ignored() {
-            for bad in [json!("nope"), json!([1, 2, 3]), json!({"grilled": 7})] {
-                let input = json!({
-                    "query": "grilled vegetables",
-                    "query_word_importance": bad,
-                    "results": [
-                        {"url": "/a", "title": "Grilled Vegetables", "excerpt": "x", "date": "2026-01-01", "score": 1.0}
-                    ]
-                });
-                assert!(
-                    inner::score_results(&input).is_ok(),
-                    "malformed query_word_importance must not error"
-                );
-            }
-        }
     }
 }

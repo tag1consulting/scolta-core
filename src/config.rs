@@ -58,10 +58,6 @@ pub fn from_json(json: &serde_json::Value) -> ScoringConfig {
             .get("content_all_terms_multiplier")
             .and_then(|v| v.as_f64())
             .unwrap_or(1.2),
-        incidental_match_weight: obj
-            .get("incidental_match_weight")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.3),
         phrase_adjacent_multiplier: obj
             .get("phrase_adjacent_multiplier")
             .and_then(|v| v.as_f64())
