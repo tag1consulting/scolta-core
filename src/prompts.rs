@@ -61,7 +61,7 @@ METADATA RULES:
 GROUNDING CHECK:
 - Use ONLY information from the provided excerpts. Do not draw on training knowledge to describe, infer, or fill gaps for anything not explicitly in the excerpts.
 - If a detail is not in the excerpts, omit it — never estimate or invent it.
-- CORPUS AWARENESS: You are searching a specific collection described above, not the entire internet or a complete knowledge base. When few or no results match the query, explain this honestly by referencing the collection scope from the site description — e.g., "This collection of ~6,900 Featured Articles doesn't include a dedicated article on [topic]" or "The [site name] covers [scope] — [topic] may fall outside that focus." Do NOT pretend the collection should have the answer. Do NOT redirect to external sources. Suggest related terms the user could try within THIS collection.
+- CORPUS AWARENESS: You are searching a specific collection described above, not the entire internet or a complete knowledge base. When few or no results match the query, explain this honestly by referencing the collection's scope from the site description — e.g., "[site name] focuses on [scope], so it doesn't include a dedicated article on [topic]" or "[topic] may fall outside what this collection covers." Do NOT invent statistics about the collection (article counts, totals, sizes); describe its scope qualitatively from the site description, never with a number you cannot verify. Do NOT pretend the collection should have the answer. Do NOT redirect to external sources. Suggest related terms the user could try within THIS collection.
 - When results are only tangentially related to the query, still try to help — present what the collection DOES have and extract whatever is genuinely useful. But be upfront that the results are indirect: "This collection doesn't have a dedicated article on [topic], but here's what I found in related articles:" is better than presenting tangential results as if they directly answer the question. The attempt to help is valuable; the honesty about the gap is what prevents confusion.
 
 Tone: Direct, expert, helpful. Like a knowledgeable friend who has reviewed the options for you."#;
@@ -255,6 +255,38 @@ mod tests {
         assert!(!resolved.contains("{DYNAMIC_ANCHORS}"));
         assert!(resolved.contains("Only discuss our return policy."));
         assert!(resolved.contains("Do not mention competitors."));
+    }
+
+    #[test]
+    fn test_summarize_corpus_awareness_has_no_fabricated_stat() {
+        // Regression: the CORPUS AWARENESS example must not ship a corpus-specific
+        // article count. The old "~6,900 Featured Articles" example was Wikipedia-only
+        // and taught the model to fabricate corpus statistics on unrelated sites.
+        assert!(
+            !SUMMARIZE.contains("6,900"),
+            "summarize template must not contain the Wikipedia-specific '6,900' count"
+        );
+        assert!(
+            !SUMMARIZE.contains("6900"),
+            "summarize template must not contain a hard-coded corpus count"
+        );
+        assert!(
+            !SUMMARIZE.contains("Featured Articles"),
+            "summarize template must not reference 'Featured Articles' (Wikipedia-specific)"
+        );
+    }
+
+    #[test]
+    fn test_summarize_corpus_awareness_forbids_inventing_statistics() {
+        // The rule must explicitly forbid fabricating corpus counts/totals/sizes.
+        assert!(
+            SUMMARIZE.contains("CORPUS AWARENESS"),
+            "summarize template must retain the CORPUS AWARENESS rule"
+        );
+        assert!(
+            SUMMARIZE.contains("Do NOT invent statistics about the collection"),
+            "CORPUS AWARENESS must explicitly forbid inventing corpus statistics"
+        );
     }
 
     #[test]
