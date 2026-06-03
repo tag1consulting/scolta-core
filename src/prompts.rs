@@ -46,6 +46,7 @@ FORMAT RULES:
 - Follow with a bulleted list. Each bullet: **Name** — one concise sentence. Include [link text](URL) only when the URL appears in the provided excerpts.
 - Use ONLY URLs from the provided excerpts. Never invent or guess a URL.
 - Use standard markdown: **bold**, bullets, [links](URL).
+- Keep the entire summary under ~150 words. Do not add section headers or sub-category headings — a single flat bulleted list only.
 
 LANGUAGE RULES:
 - Be direct and confident: "Here are 5 options:" not "There appear to be a few things you might want to consider."
@@ -286,6 +287,22 @@ mod tests {
         assert!(
             SUMMARIZE.contains("Do NOT invent statistics about the collection"),
             "CORPUS AWARENESS must explicitly forbid inventing corpus statistics"
+        );
+    }
+
+    #[test]
+    fn test_summarize_states_output_length_budget() {
+        // Issue #168: max_tokens is a hard ceiling, so the prompt must also state
+        // an explicit output-length budget to keep natural output short and avoid
+        // mid-sentence truncation. Budget is expressed in words + structure
+        // (models approximate length and are unreliable at literal char counts).
+        assert!(
+            SUMMARIZE.contains("under ~150 words"),
+            "summarize template must state an explicit output-length budget"
+        );
+        assert!(
+            SUMMARIZE.contains("a single flat bulleted list only"),
+            "summarize template must forbid ad-hoc sub-category headers and require a flat list"
         );
     }
 
