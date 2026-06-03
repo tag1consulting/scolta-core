@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+- **Removed the Wikipedia-specific corpus statistic from the default `summarize` prompt.** The `CORPUS AWARENESS` rule shipped a hard-coded "~6,900 Featured Articles" example that described only the Wikipedia demo, reached every site using the default prompt, and taught the model to fabricate corpus counts (observed confabulating stats on unrelated demos). The example is now count-free and frames gaps via the site description's scope, and the rule explicitly forbids inventing statistics (counts, totals, sizes). The compiled WASM must be rebuilt so the client-side AI path picks up the new text. ([tag1consulting/scolta-core#33](https://github.com/tag1consulting/scolta-core/issues/33))
+
 ### Removed
 - **Reverted query-word-importance scoring weight (#31).** Removed the `incidental_match_weight` config and the per-query-word importance weighting from `score_results`/`batch_score_results`. Validation showed the weighting was inert — it changed result ordering on zero real queries — so the scorer returns to counting every matched query term equally, as it did before #31.
 
