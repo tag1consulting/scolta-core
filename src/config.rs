@@ -29,7 +29,7 @@ pub fn from_json(json: &serde_json::Value) -> ScoringConfig {
         recency_boost_max: obj
             .get("recency_boost_max")
             .and_then(|v| v.as_f64())
-            .unwrap_or(0.5),
+            .unwrap_or(0.25),
         recency_half_life_days: obj
             .get("recency_half_life_days")
             .and_then(|v| v.as_u64())
@@ -45,7 +45,7 @@ pub fn from_json(json: &serde_json::Value) -> ScoringConfig {
         title_match_boost: obj
             .get("title_match_boost")
             .and_then(|v| v.as_f64())
-            .unwrap_or(1.0),
+            .unwrap_or(2.0),
         title_all_terms_multiplier: obj
             .get("title_all_terms_multiplier")
             .and_then(|v| v.as_f64())
@@ -120,7 +120,8 @@ mod tests {
     fn test_from_json_defaults() {
         let json = json!({});
         let config = from_json(&json);
-        assert_eq!(config.recency_boost_max, 0.5);
+        assert_eq!(config.recency_boost_max, 0.25);
+        assert_eq!(config.title_match_boost, 2.0);
         assert_eq!(config.recency_half_life_days, 365);
         assert_eq!(config.content_all_terms_multiplier, 1.2);
         assert_eq!(config.language, "en");
@@ -176,7 +177,7 @@ mod tests {
     fn test_from_json_non_object() {
         let json = json!("not an object");
         let config = from_json(&json);
-        assert_eq!(config.recency_boost_max, 0.5);
+        assert_eq!(config.recency_boost_max, 0.25);
     }
 
     #[test]

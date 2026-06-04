@@ -136,13 +136,13 @@ Where:
 #### ScoringConfig Struct
 ```rust
 pub struct ScoringConfig {
-    pub recency_boost_max: f64,              // 0.5
+    pub recency_boost_max: f64,              // 0.25
     pub recency_half_life_days: u32,         // 365
     pub recency_penalty_after_days: u32,     // 1825
     pub recency_max_penalty: f64,            // 0.3
     pub recency_strategy: String,            // "exponential"
     pub recency_curve: Vec<[f64; 2]>,        // []
-    pub title_match_boost: f64,              // 1.0
+    pub title_match_boost: f64,              // 2.0
     pub title_all_terms_multiplier: f64,     // 1.5
     pub content_match_boost: f64,            // 0.4
     pub content_all_terms_multiplier: f64,   // 1.2
