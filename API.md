@@ -370,13 +370,13 @@ All fields are optional in JSON input; missing fields use the listed defaults.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `recency_boost_max` | f64 | 0.5 | Maximum additive recency boost for recent content |
+| `recency_boost_max` | f64 | 0.25 | Maximum additive recency boost for recent content |
 | `recency_half_life_days` | u32 | 365 | Decay half-life in days; also step boundary for `"step"` strategy |
 | `recency_penalty_after_days` | u32 | 1825 | Days (~5 years) after which an old-content penalty begins |
 | `recency_max_penalty` | f64 | 0.3 | Maximum additive penalty for very old content |
 | `recency_strategy` | string | `"exponential"` | Decay strategy: `"exponential"`, `"linear"`, `"step"`, `"none"`, `"custom"` |
 | `recency_curve` | `[[f64,f64]]` | `[]` | Control points `[days_old, boost]` for `"custom"` strategy; must be sorted ascending |
-| `title_match_boost` | f64 | 1.0 | Boost when any query term appears in the title |
+| `title_match_boost` | f64 | 2.0 | Boost when any query term appears in the title |
 | `title_all_terms_multiplier` | f64 | 1.5 | Multiplier applied when ALL terms appear in title |
 | `content_match_boost` | f64 | 0.4 | Boost when any query term appears in content |
 | `content_all_terms_multiplier` | f64 | 1.2 | Multiplier applied when ALL terms appear in content |

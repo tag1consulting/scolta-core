@@ -420,3 +420,111 @@ fn version_returns_cargo_version() {
     // Must match Cargo.toml version
     assert_eq!(v, env!("CARGO_PKG_VERSION"));
 }
+
+// ── docs ──────────────────────────────────────────────────────────────────────
+
+/// Doc-sync guard: every `ScoringConfig` default documented in `API.md` must
+/// equal the corresponding field of `ScoringConfig::default()`. This is what
+/// keeps the docs from silently drifting from the code (as they did before the
+/// scoring-default alignment).
+///
+/// The test parses the `| Field | Type | Default | Description |` table and
+/// checks every row against the serialized default config, dispatching on the
+/// field's actual JSON type so strings and arrays are verified too, not just
+/// numbers. A row that cannot be parsed is a hard failure, so a future reformat
+/// of the table surfaces here instead of silently skipping the check.
+#[test]
+fn api_md_documents_actual_scoring_defaults() {
+    use scolta_core::scoring::ScoringConfig;
+
+    let api_md = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/API.md"))
+        .expect("API.md must be readable");
+
+    let defaults =
+        serde_json::to_value(ScoringConfig::default()).expect("ScoringConfig must serialize");
+    let defaults = defaults
+        .as_object()
+        .expect("ScoringConfig must serialize to a JSON object");
+
+    // Locate the ScoringConfig defaults table by its exact header, then walk the
+    // contiguous block of rows after the markdown separator.
+    let header = "| Field | Type | Default | Description |";
+    let table_start = api_md
+        .find(header)
+        .expect("API.md must contain the ScoringConfig defaults table header");
+    let mut lines = api_md[table_start..].lines();
+    lines.next(); // header row
+    let separator = lines.next().expect("table must have a separator row");
+    assert!(
+        separator.trim_start().starts_with("|---"),
+        "expected a markdown separator row after the header, got: {separator:?}"
+    );
+
+    let mut checked = 0;
+    for line in lines {
+        let line = line.trim();
+        if !line.starts_with('|') {
+            break; // end of the table
+        }
+        // Split "| a | b | c | d |" into ["a", "b", "c", "d"].
+        let cells: Vec<&str> = line.trim_matches('|').split('|').map(str::trim).collect();
+        assert!(
+            cells.len() >= 3,
+            "doc-sync guard: cannot parse defaults-table row: {line:?}"
+        );
+        let field = cells[0].trim_matches('`').trim();
+        let documented = cells[2].trim_matches('`').trim();
+        assert!(
+            !field.is_empty() && !documented.is_empty(),
+            "doc-sync guard: row has empty field or default: {line:?}"
+        );
+
+        let actual = defaults.get(field).unwrap_or_else(|| {
+            panic!("doc-sync guard: API.md documents unknown ScoringConfig field `{field}`")
+        });
+
+        match actual {
+            serde_json::Value::Number(n) => {
+                let want = n.as_f64().unwrap();
+                let got: f64 = documented.parse().unwrap_or_else(|_| {
+                    panic!("doc-sync guard: `{field}` default `{documented}` is not numeric, but the field is")
+                });
+                assert!(
+                    (want - got).abs() < 1e-9,
+                    "doc-sync guard: `{field}` default mismatch — API.md says {got}, code default is {want}"
+                );
+            }
+            serde_json::Value::String(s) => {
+                let doc = documented.trim_matches('"');
+                assert_eq!(
+                    doc, s,
+                    "doc-sync guard: `{field}` default mismatch — API.md says {doc:?}, code default is {s:?}"
+                );
+            }
+            serde_json::Value::Array(a) => {
+                assert_eq!(
+                    documented, "[]",
+                    "doc-sync guard: `{field}` documented default {documented:?} but code default is an array"
+                );
+                assert!(
+                    a.is_empty(),
+                    "doc-sync guard: `{field}` documented as [] but code default is non-empty"
+                );
+            }
+            serde_json::Value::Bool(b) => {
+                let got: bool = documented.parse().unwrap_or_else(|_| {
+                    panic!("doc-sync guard: `{field}` default `{documented}` is not a bool, but the field is")
+                });
+                assert_eq!(got, *b, "doc-sync guard: `{field}` bool default mismatch");
+            }
+            other => panic!("doc-sync guard: unhandled default type for `{field}`: {other:?}"),
+        }
+        checked += 1;
+    }
+
+    // Sanity check that we actually parsed the whole table, not an empty/truncated one.
+    assert!(
+        checked >= 15,
+        "doc-sync guard parsed only {checked} rows — the ScoringConfig table looks truncated"
+    );
+}

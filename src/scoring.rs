@@ -48,13 +48,13 @@ pub struct PriorityPage {
 ///
 /// | Field | Reasonable range | Default |
 /// |---|---|---|
-/// | `recency_boost_max` | 0.0–2.0 | 0.5 |
+/// | `recency_boost_max` | 0.0–2.0 | 0.25 |
 /// | `recency_half_life_days` | 1–3650 | 365 |
 /// | `recency_penalty_after_days` | 1–7300 | 1825 |
 /// | `recency_max_penalty` | 0.0–1.0 | 0.3 |
 /// | `recency_strategy` | "exponential"\|"linear"\|"step"\|"none"\|"custom" | "exponential" |
 /// | `recency_curve` | sorted `[[days,boost],…]` | [] |
-/// | `title_match_boost` | 0.0–5.0 | 1.0 |
+/// | `title_match_boost` | 0.0–5.0 | 2.0 |
 /// | `title_all_terms_multiplier` | 0.0–5.0 | 1.5 |
 /// | `content_match_boost` | 0.0–5.0 | 0.4 |
 /// | `content_all_terms_multiplier` | 0.0–5.0 | 1.2 |
@@ -107,13 +107,13 @@ pub struct ScoringConfig {
 impl Default for ScoringConfig {
     fn default() -> Self {
         ScoringConfig {
-            recency_boost_max: 0.5,
+            recency_boost_max: 0.25,
             recency_half_life_days: 365,
             recency_penalty_after_days: 1825,
             recency_max_penalty: 0.3,
             recency_strategy: "exponential".to_string(),
             recency_curve: Vec::new(),
-            title_match_boost: 1.0,
+            title_match_boost: 2.0,
             title_all_terms_multiplier: 1.5,
             content_match_boost: 0.4,
             content_all_terms_multiplier: 1.2,
@@ -1141,7 +1141,8 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = ScoringConfig::default();
-        assert_eq!(config.recency_boost_max, 0.5);
+        assert_eq!(config.recency_boost_max, 0.25);
+        assert_eq!(config.title_match_boost, 2.0);
         assert_eq!(config.recency_half_life_days, 365);
         assert_eq!(config.content_all_terms_multiplier, 1.2);
         assert!(config.priority_pages.is_empty());
@@ -1724,6 +1725,7 @@ mod tests {
         fn recency_boost_max_changes_ranking() {
             // A: title match, 730 days old. B: content match, 1 day old.
             // Low boost_max → A's relevance wins; high → B's recency wins.
+            // title_match_boost is pinned so recency is the only varied dimension.
             let mut a = make_result_with_excerpt_and_locations(
                 "/a",
                 "Apple Product",
@@ -1744,6 +1746,7 @@ mod tests {
             let mut low = vec![a.clone(), b.clone()];
             let low_cfg = ScoringConfig {
                 recency_boost_max: 0.1,
+                title_match_boost: 1.0,
                 ..Default::default()
             };
             score_results(&mut low, "apple", &low_cfg);
@@ -1755,6 +1758,7 @@ mod tests {
             let mut high = vec![a.clone(), b.clone()];
             let high_cfg = ScoringConfig {
                 recency_boost_max: 2.0,
+                title_match_boost: 1.0,
                 ..Default::default()
             };
             score_results(&mut high, "apple", &high_cfg);
@@ -1863,6 +1867,7 @@ mod tests {
             let mut low = vec![a.clone(), b.clone()];
             let low_cfg = ScoringConfig {
                 content_all_terms_multiplier: 0.1,
+                title_match_boost: 1.0,
                 ..Default::default()
             };
             score_results(&mut low, "apple orange", &low_cfg);
@@ -1874,6 +1879,7 @@ mod tests {
             let mut high = vec![a.clone(), b.clone()];
             let high_cfg = ScoringConfig {
                 content_all_terms_multiplier: 5.0,
+                title_match_boost: 1.0,
                 ..Default::default()
             };
             score_results(&mut high, "apple orange", &high_cfg);
@@ -1905,6 +1911,7 @@ mod tests {
             let mut low = vec![a.clone(), b.clone()];
             let low_cfg = ScoringConfig {
                 phrase_adjacent_multiplier: 1.0,
+                title_match_boost: 1.0,
                 ..Default::default()
             };
             score_results(&mut low, "apple orange", &low_cfg);
@@ -1916,6 +1923,7 @@ mod tests {
             let mut high = vec![a.clone(), b.clone()];
             let high_cfg = ScoringConfig {
                 phrase_adjacent_multiplier: 5.0,
+                title_match_boost: 1.0,
                 ..Default::default()
             };
             score_results(&mut high, "apple orange", &high_cfg);
@@ -2016,7 +2024,11 @@ mod tests {
 
         #[test]
         fn exponential_day_0_is_boost_max() {
-            let config = ScoringConfig::default();
+            // Pin boost_max so this exercises the curve shape, not the default value.
+            let config = ScoringConfig {
+                recency_boost_max: 0.5,
+                ..Default::default()
+            };
             let boost = recency_boost(&days_ago(0), &config);
             assert!(
                 (boost - 0.5).abs() < 0.005,
@@ -2027,7 +2039,10 @@ mod tests {
         #[test]
         fn exponential_at_half_life_is_half_boost_max() {
             // At half_life_days (365): boost = boost_max × exp(-ln2) = 0.5 × 0.5 = 0.25
-            let config = ScoringConfig::default();
+            let config = ScoringConfig {
+                recency_boost_max: 0.5,
+                ..Default::default()
+            };
             let boost = recency_boost(&days_ago(365), &config);
             assert!(
                 (boost - 0.25).abs() < 0.01,
@@ -2038,7 +2053,10 @@ mod tests {
         #[test]
         fn exponential_at_two_half_lives_is_quarter_boost_max() {
             // At 2×half_life_days (730): boost = boost_max × exp(-2×ln2) = 0.5 × 0.25 = 0.125
-            let config = ScoringConfig::default();
+            let config = ScoringConfig {
+                recency_boost_max: 0.5,
+                ..Default::default()
+            };
             let boost = recency_boost(&days_ago(730), &config);
             assert!(
                 (boost - 0.125).abs() < 0.01,
@@ -2128,6 +2146,7 @@ mod tests {
         fn linear_day_0_is_boost_max() {
             let config = ScoringConfig {
                 recency_strategy: "linear".to_string(),
+                recency_boost_max: 0.5,
                 ..Default::default()
             };
             let boost = recency_boost(&days_ago(0), &config);
@@ -2142,6 +2161,7 @@ mod tests {
             // At threshold/2 (~912 days): fraction = 1 - 912/1825 ≈ 0.5, boost ≈ 0.25
             let config = ScoringConfig {
                 recency_strategy: "linear".to_string(),
+                recency_boost_max: 0.5,
                 ..Default::default()
             };
             let boost = recency_boost(&days_ago(913), &config);
@@ -2185,6 +2205,7 @@ mod tests {
             // Below half_life_days (365): full boost
             let config = ScoringConfig {
                 recency_strategy: "step".to_string(),
+                recency_boost_max: 0.5,
                 ..Default::default()
             };
             assert_eq!(

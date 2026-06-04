@@ -115,7 +115,7 @@ const config = {
 
 ```javascript
 const config = {
-  title_match_boost: 1.0,
+  title_match_boost: 2.0,
   content_match_boost: 0.4,
   recency_strategy: 'exponential',
   recency_boost_max: 0.8,
