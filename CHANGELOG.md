@@ -4,6 +4,8 @@ All notable changes to scolta-core will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses [Semantic Versioning](https://semver.org/). Major versions are synchronized across all Scolta packages; minor and patch versions are released independently per package.
 
+## [Unreleased]
+
 ## [1.0.1] - 2026-06-05
 
 ### Added
