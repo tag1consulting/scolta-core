@@ -105,7 +105,7 @@ Parse and process LLM expansion responses. Handles three input formats with a fa
 ### src/prompts.rs
 Three canonical prompt templates with variable substitution:
 
-- `EXPAND_QUERY` — expands user queries into 2-4 alternative terms
+- `EXPAND_QUERY` — expands user queries into 2-4 alternative terms (up to 6 concrete members when decomposing a category or context)
 - `SUMMARIZE` — generates summaries from search result excerpts
 - `FOLLOW_UP` — handles follow-up questions in conversations
 

@@ -436,7 +436,7 @@ Three templates are available via `get_prompt` / `resolve_prompt`:
 
 | Name | Purpose | Placeholders |
 |---|---|---|
-| `expand_query` | Asks the LLM for 2-4 alternative search terms | `{SITE_NAME}`, `{SITE_DESCRIPTION}` |
+| `expand_query` | Asks the LLM for 2-4 alternative search terms (up to 6 when decomposing a category/context) | `{SITE_NAME}`, `{SITE_DESCRIPTION}` |
 | `summarize` | Asks the LLM to summarize search result excerpts | `{SITE_NAME}`, `{SITE_DESCRIPTION}`, `{DYNAMIC_ANCHORS}` |
 | `follow_up` | Handles follow-up questions in a search conversation | `{SITE_NAME}`, `{SITE_DESCRIPTION}`, `{DYNAMIC_ANCHORS}` |
 

@@ -3,7 +3,7 @@
 /// Template for expanding user search queries into alternative terms.
 pub const EXPAND_QUERY: &str = r#"You expand search queries for {SITE_NAME} {SITE_DESCRIPTION}.
 
-Return a JSON object with a "terms" key containing 2-4 alternative search terms. Do NOT include the original query — only return different phrasings that would find additional relevant content.
+Return a JSON object with a "terms" key containing 2-4 alternative search terms — or up to 6 concrete members when decomposing a category, family, region, or context under rules 13-14 below. Do NOT include the original query — only return different phrasings that would find additional relevant content.
 
 IMPORTANT RULES:
 1. Extract the KEY TOPIC from the query — ignore question words (what, who, how, why, where, when, is, are, etc.)
@@ -12,19 +12,23 @@ IMPORTANT RULES:
 4. NEVER return overly generic terms as standalone words. This includes: "services", "information", "resources", "help", "support", "children", "family", "professional", "beginner", "advanced". These match too many unrelated pages. If these concepts are relevant, combine them with the specific topic: "family recipes" not "family".
 5. For PERSON QUERIES: only return name variations — NOT job titles, roles, or descriptions. Keep terms SHORT.
 6. Include alternate terminology (technical + lay terms) where applicable.
-7. Include relevant category or department names when applicable.
+7. Include a category or department name only when it matches an actual taxonomy term or filter label on the site and is itself a useful search term — not as a broader synonym for the query. When a query names a category with concrete members, decompose it under rule 13 rather than restating the category.
 8. Return ONLY the JSON object. No explanation, no markdown, no wrapping.
 9. For AMBIGUOUS queries, use the site topic described above to disambiguate first. A query that is a common word in another language (e.g. "Zweig" means "branch" in German) should be interpreted in the domain of this site (e.g. a git documentation site → expand as git branch terms), not as the most famous person who shares that word as a surname.
 10. NEVER escalate the tone beyond what the user expressed.
 11. For queries with AUDIENCE QUALIFIERS (kid-friendly, beginner, professional, etc.): focus expanded terms on the TOPIC, not the audience. "Kid friendly desserts" → expand "desserts" into ["easy baking recipes", "simple sweets", "no-bake treats"], NOT "children" or "family". The audience qualifier should stay implicit in the phrasing, not become a standalone search term.
 12. For CONSTRAINT QUERIES ("without X," "X-free," "no X," "can't have X," "vegetarian," "gluten-free," "dairy-free," etc.): preserve the constraint in your expansions. "Without eggs" → ["egg-free baking", "vegan baking recipes", "eggless recipes"]. Do NOT drop the constraint and expand only the general topic.
+13. CATEGORY → MEMBERS. When the query names a category, family, or region that has well-known concrete members, expand into the members, not synonyms of the category: "version control systems" → ["Git", "Mercurial", "Subversion"]; "European cars" → ["German cars", "Italian cars", "French cars"]; "Nordic countries" → ["Sweden", "Norway", "Denmark"]; "Southeast Asian food" → ["Thai", "Vietnamese", "Indonesian"]. Only decompose when you can name the members confidently. If you cannot, fall back to normal alternate phrasings — never invent members to fill the list.
+14. CONTEXT / USE-CASE → CONCRETE ITEMS. When the query names a context, occasion, or use-case rather than a thing, expand into the concrete item types that serve it, not restatements of the context: "home office setup" → ["standing desk", "ergonomic chair", "monitor arm"]; "first aid supplies" → ["bandages", "antiseptic", "gauze"]; "summer lunch" → ["cold salads", "chilled soups", "sandwiches"]. Keep the context implicit in the phrasing; do not restate it as a synonym ("light summer meals").
 
 Examples:
 - "customer support" → {"terms": ["help desk", "customer service", "support center", "contact us"]}
 - "product pricing" → {"terms": ["cost", "pricing plans", "rates", "subscription tiers"]}
 - "who is Jane Smith" → {"terms": ["Jane Smith", "Smith"]}
 - "recipes without eggs" → {"terms": ["egg-free baking", "vegan baking", "eggless recipes"]}
-- "gluten-free desserts" → {"terms": ["gluten-free baking", "celiac safe sweets", "wheat-free pastry"]}"#;
+- "gluten-free desserts" → {"terms": ["gluten-free baking", "celiac safe sweets", "wheat-free pastry"]}
+- "version control systems" → {"terms": ["Git", "Mercurial", "Subversion", "Perforce"]}
+- "home office setup" → {"terms": ["standing desk", "ergonomic chair", "monitor arm"]}"#;
 
 /// Template for summarizing search results in response to a user query.
 pub const SUMMARIZE: &str = r#"You are a search assistant for the {SITE_NAME} {SITE_DESCRIPTION}. You behave like a knowledgeable expert who has reviewed the search results and curates the best answers — not a narrator reading results back to the user.
@@ -323,5 +327,63 @@ mod tests {
         assert!(resolved.contains("Cite page URLs for every claim."));
         assert!(resolved.contains("Limit response to three sentences."));
         assert!(resolved.contains("Do not discuss pricing."));
+    }
+
+    // Issue #36 — category/context decomposition rules.
+
+    #[test]
+    fn test_expand_query_has_category_member_rule() {
+        // Rule 13 must instruct decomposing a category into its concrete members.
+        assert!(
+            EXPAND_QUERY.contains("CATEGORY → MEMBERS"),
+            "expand_query must contain rule 13 (CATEGORY → MEMBERS)"
+        );
+        assert!(
+            EXPAND_QUERY.contains("Git")
+                && EXPAND_QUERY.contains("Mercurial")
+                && EXPAND_QUERY.contains("Subversion"),
+            "rule 13 must lead with the non-food version-control example"
+        );
+    }
+
+    #[test]
+    fn test_expand_query_has_context_decomposition_rule() {
+        // Rule 14 must instruct decomposing a context/use-case into concrete items.
+        assert!(
+            EXPAND_QUERY.contains("CONTEXT / USE-CASE → CONCRETE ITEMS"),
+            "expand_query must contain rule 14 (CONTEXT / USE-CASE → CONCRETE ITEMS)"
+        );
+        assert!(
+            EXPAND_QUERY.contains("standing desk"),
+            "rule 14 must lead with the non-food home-office example"
+        );
+    }
+
+    #[test]
+    fn test_expand_query_forbids_fabricating_members() {
+        // Rule 13's guard: never invent members for an unknown category.
+        assert!(
+            EXPAND_QUERY.contains("never invent members"),
+            "rule 13 must forbid fabricating members when they are not known"
+        );
+    }
+
+    #[test]
+    fn test_expand_query_reconciles_term_cap_for_decomposition() {
+        // The 2-4 cap must explicitly allow a larger fan-out when decomposing.
+        assert!(
+            EXPAND_QUERY.contains("up to 6 concrete members"),
+            "expand_query must reconcile the 2-4 term cap with decomposition"
+        );
+    }
+
+    #[test]
+    fn test_expand_query_rule_seven_narrowed_to_filter_labels() {
+        // Rule 7 must no longer contradict rule 13: it is narrowed to taxonomy/
+        // filter-label matching and defers decomposition to rule 13.
+        assert!(
+            EXPAND_QUERY.contains("taxonomy term or filter label"),
+            "rule 7 must be narrowed to taxonomy/filter-label matching"
+        );
     }
 }
