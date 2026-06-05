@@ -295,6 +295,25 @@ mod tests {
     }
 
     #[test]
+    fn test_summarize_corpus_awareness_matches_canonical_snapshot() {
+        // Snapshot guard: pin the exact CORPUS AWARENESS bullet so any future edit
+        // fails loudly and surfaces as an explicit diff in review. The fixture is
+        // seeded byte-for-byte from this constant and is kept hand-identical to the
+        // matching bullet in scolta-php's DefaultPrompts `'summarize'` template
+        // (PHP escapes `'` as `\'`; that escaping is the only legitimate difference).
+        // This does NOT mechanically prevent the two repos from drifting apart — a
+        // cross-repo CI diff would be needed for that — but it makes any change here
+        // deliberate and visible. Follow-up to the #33 corpus-statistic fix.
+        let canonical = include_str!("../tests/fixtures/corpus_awareness_bullet.txt");
+        assert!(
+            SUMMARIZE.contains(canonical),
+            "summarize CORPUS AWARENESS bullet drifted from the pinned snapshot \
+             (tests/fixtures/corpus_awareness_bullet.txt); review the diff and, if \
+             intentional, update the fixture and the matching scolta-php bullet"
+        );
+    }
+
+    #[test]
     fn test_summarize_states_output_length_budget() {
         // Issue #168: max_tokens is a hard ceiling, so the prompt must also state
         // an explicit output-length budget to keep natural output short and avoid
