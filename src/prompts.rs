@@ -20,6 +20,7 @@ IMPORTANT RULES:
 12. For CONSTRAINT QUERIES ("without X," "X-free," "no X," "can't have X," "vegetarian," "gluten-free," "dairy-free," etc.): preserve the constraint in your expansions. "Without eggs" → ["egg-free baking", "vegan baking recipes", "eggless recipes"]. Do NOT drop the constraint and expand only the general topic.
 13. CATEGORY → MEMBERS. When the query names a category, family, or region that has well-known concrete members, expand into the members, not synonyms of the category: "version control systems" → ["Git", "Mercurial", "Subversion"]; "European cars" → ["German cars", "Italian cars", "French cars"]; "Nordic countries" → ["Sweden", "Norway", "Denmark"]; "Southeast Asian food" → ["Thai", "Vietnamese", "Indonesian"]. Only decompose when you can name the members confidently. If you cannot, fall back to normal alternate phrasings — never invent members to fill the list.
 14. CONTEXT / USE-CASE → CONCRETE ITEMS. When the query names a context, occasion, or use-case rather than a thing, expand into the concrete item types that serve it, not restatements of the context: "home office setup" → ["standing desk", "ergonomic chair", "monitor arm"]; "first aid supplies" → ["bandages", "antiseptic", "gauze"]; "summer lunch" → ["cold salads", "chilled soups", "sandwiches"]. Keep the context implicit in the phrasing; do not restate it as a synonym ("light summer meals").
+15. UNRECOGNIZED OR UNVERIFIABLE NAMED ENTITIES. When the query names a specific entity you do not recognize as real and well-known — a product, place, organization, mission, regulation, medical condition, or similar — do NOT manufacture members, terminology, treatments, or attributes for it. Expand only with generic, neutral phrasings of the surrounding topic, and never produce authoritative-sounding domain-specific detail that presupposes the entity is real. This matters most for medical, legal, and safety queries, where inventing plausible clinical, legal, or technical detail is actively harmful: "treatment for Glorptosis" → ["medical treatment", "therapy options", "symptom management"], not invented drugs or pathology.
 
 Examples:
 - "customer support" → {"terms": ["help desk", "customer service", "support center", "contact us"]}
@@ -384,6 +385,18 @@ mod tests {
         assert!(
             EXPAND_QUERY.contains("never invent members"),
             "rule 13 must forbid fabricating members when they are not known"
+        );
+    }
+
+    #[test]
+    fn test_expand_query_forbids_fabricating_unverified_entities() {
+        assert!(
+            EXPAND_QUERY.contains("UNRECOGNIZED OR UNVERIFIABLE NAMED ENTITIES"),
+            "expand_query must contain rule 15 (no-fabrication guard for unrecognized entities)"
+        );
+        assert!(
+            EXPAND_QUERY.contains("do NOT manufacture"),
+            "rule 15 must forbid manufacturing detail for unrecognized entities"
         );
     }
 

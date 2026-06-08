@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- **No-fabrication guard for unrecognized named entities in the default `expand_query` prompt (rule 15).** A behavioral regression run of the merged decomposition rules (13/14) found the existing no-fabrication clause too narrow: rule 13 forbids inventing *members* to fill a category list, but nothing stopped the model from manufacturing authoritative-sounding domain detail for a *named entity it does not recognize*. Observed across demos, a fictional medical condition expanded to confident clinical terminology and a made-up product to confident attributes, while a fictional planet was handled correctly — inconsistent, and in a medical/legal/safety context actively harmful. New rule 15 (UNRECOGNIZED OR UNVERIFIABLE NAMED ENTITIES) generalizes the guard: when a query names a specific entity the model does not recognize as real and well-known, it must not manufacture members, terminology, treatments, or attributes for it, and must expand only with generic, neutral phrasings of the surrounding topic ("treatment for Glorptosis" → "medical treatment" / "therapy options" / "symptom management", not invented pathology). The rule is a guard, not a decomposition rule, so the existing 2-4/up-to-6 cap line is unchanged, and it does not affect cases where rule 13 already works (those name *known* categories). This text is byte-identical to the line added to scolta-php's `DefaultPrompts` `'expand_query'` template and scolta-python's `prompts.py` copy; the compiled WASM must be rebuilt downstream so the client-side AI path picks up the new text. Covered by `test_expand_query_forbids_fabricating_unverified_entities`. Additive: queries that name a recognized entity expand exactly as before.
+
 ## [1.0.1] - 2026-06-05
 
 ### Added
