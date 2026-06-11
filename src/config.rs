@@ -6,6 +6,13 @@
 
 use crate::scoring::{ConfigWarning, ScoringConfig};
 
+/// Narrow a JSON-supplied u64 to u32, saturating at `u32::MAX` instead of
+/// silently wrapping (a wrapped `recency_half_life_days` would corrupt
+/// scoring; a saturated one is caught by `clamp_and_validate`).
+pub(crate) fn saturate_u32(v: u64) -> u32 {
+    u32::try_from(v).unwrap_or(u32::MAX)
+}
+
 /// Parse a JSON object into a ScoringConfig, clamping out-of-range values
 /// to their documented boundaries and returning a warning for each.
 ///
@@ -33,11 +40,11 @@ pub fn from_json(json: &serde_json::Value) -> ScoringConfig {
         recency_half_life_days: obj
             .get("recency_half_life_days")
             .and_then(|v| v.as_u64())
-            .unwrap_or(365) as u32,
+            .map_or(365, saturate_u32),
         recency_penalty_after_days: obj
             .get("recency_penalty_after_days")
             .and_then(|v| v.as_u64())
-            .unwrap_or(1825) as u32,
+            .map_or(1825, saturate_u32),
         recency_max_penalty: obj
             .get("recency_max_penalty")
             .and_then(|v| v.as_f64())
@@ -69,23 +76,23 @@ pub fn from_json(json: &serde_json::Value) -> ScoringConfig {
         phrase_near_window: obj
             .get("phrase_near_window")
             .and_then(|v| v.as_u64())
-            .unwrap_or(5) as u32,
+            .map_or(5, saturate_u32),
         phrase_window: obj
             .get("phrase_window")
             .and_then(|v| v.as_u64())
-            .unwrap_or(15) as u32,
+            .map_or(15, saturate_u32),
         excerpt_length: obj
             .get("excerpt_length")
             .and_then(|v| v.as_u64())
-            .unwrap_or(300) as u32,
+            .map_or(300, saturate_u32),
         results_per_page: obj
             .get("results_per_page")
             .and_then(|v| v.as_u64())
-            .unwrap_or(10) as u32,
+            .map_or(10, saturate_u32),
         max_pagefind_results: obj
             .get("max_pagefind_results")
             .and_then(|v| v.as_u64())
-            .unwrap_or(50) as u32,
+            .map_or(50, saturate_u32),
         language: obj
             .get("language")
             .and_then(|v| v.as_str())

@@ -48,16 +48,28 @@ fn json_call<T: serde::Serialize>(
 
 /// Score search results against a query.
 ///
+/// # Stability
+/// Status: stable
+/// Since: 0.1.0
+///
 /// Input: JSON string with shape:
 ///   `{ "query": "search terms", "results": [...], "config": {...} }`
 ///
 /// Output: JSON string — array of scored results, sorted descending.
+///
+/// # Errors
+/// `JsError` if the input is not valid JSON, `query`/`results` are missing or
+/// wrong-typed, or the results array cannot be parsed.
 #[wasm_bindgen]
 pub fn score_results(input: &str) -> Result<String, JsError> {
     json_call(input, inner::score_results)
 }
 
 /// Merge N scored result sets with per-set weights and deduplication.
+///
+/// # Stability
+/// Status: stable
+/// Since: 0.1.0
 ///
 /// Input: JSON string with shape:
 /// ```json
@@ -74,6 +86,9 @@ pub fn score_results(input: &str) -> Result<String, JsError> {
 /// ```
 ///
 /// Output: JSON string — merged, weighted, and deduplicated results array.
+///
+/// # Errors
+/// `JsError` if the input is not valid JSON or `sets` is missing or unparseable.
 #[wasm_bindgen]
 pub fn merge_results(input: &str) -> Result<String, JsError> {
     json_call(input, inner::merge_results)
@@ -91,12 +106,20 @@ pub fn merge_results(input: &str) -> Result<String, JsError> {
 /// ```
 ///
 /// Output: JSON string — array of matching priority page objects.
+///
+/// # Errors
+/// `JsError` if the input is not valid JSON, `query` is missing or
+/// wrong-typed, or `priority_pages` is missing or unparseable.
 #[wasm_bindgen]
 pub fn match_priority_pages(input: &str) -> Result<String, JsError> {
     json_call(input, inner::match_priority_pages)
 }
 
 /// Parse an LLM expansion response into individual search terms.
+///
+/// # Stability
+/// Status: stable
+/// Since: 0.1.0
 ///
 /// Accepts two input forms:
 ///
@@ -117,6 +140,11 @@ pub fn match_priority_pages(input: &str) -> Result<String, JsError> {
 ///    ```
 ///
 /// Output: JSON string — array of extracted, filtered terms.
+///
+/// # Errors
+/// `JsError` only if the term array cannot be serialized back to JSON;
+/// unparseable LLM responses fall back to plain-text splitting instead of
+/// erroring.
 #[wasm_bindgen]
 pub fn parse_expansion(input: &str) -> Result<String, JsError> {
     let terms = inner::parse_expansion(input);
@@ -125,6 +153,10 @@ pub fn parse_expansion(input: &str) -> Result<String, JsError> {
 }
 
 /// Score multiple queries against their respective result sets in a single call.
+///
+/// # Stability
+/// Status: stable
+/// Since: 0.2.2
 ///
 /// Input: JSON string with shape:
 /// ```json
@@ -141,6 +173,10 @@ pub fn parse_expansion(input: &str) -> Result<String, JsError> {
 ///
 /// Output: JSON string — array of arrays of scored results, one inner array
 /// per input query, in the same order.
+///
+/// # Errors
+/// `JsError` if the input is not valid JSON, `queries` is missing or not an
+/// array, or any entry lacks `query`/`results`.
 #[wasm_bindgen]
 pub fn batch_score_results(input: &str) -> Result<String, JsError> {
     json_call(input, inner::batch_score_results)
@@ -148,10 +184,18 @@ pub fn batch_score_results(input: &str) -> Result<String, JsError> {
 
 /// Resolve a prompt template with variable substitution.
 ///
+/// # Stability
+/// Status: stable
+/// Since: 0.1.0
+///
 /// Input: JSON string with shape:
 ///   `{ "prompt_name": "expand_query", "site_name": "...", "site_description": "..." }`
 ///
 /// Output: The resolved prompt string.
+///
+/// # Errors
+/// `JsError` if the input is not valid JSON, `prompt_name` is missing or
+/// wrong-typed, or the template name is not recognized.
 #[wasm_bindgen]
 pub fn resolve_prompt(input: &str) -> Result<String, JsError> {
     let value: serde_json::Value =
@@ -161,8 +205,15 @@ pub fn resolve_prompt(input: &str) -> Result<String, JsError> {
 
 /// Get a raw prompt template by name.
 ///
+/// # Stability
+/// Status: stable
+/// Since: 0.1.0
+///
 /// Input: Prompt name string ("expand_query", "summarize", "follow_up").
 /// Output: Raw template string with {SITE_NAME} and {SITE_DESCRIPTION} placeholders.
+///
+/// # Errors
+/// `JsError` if the template name is not recognized.
 #[wasm_bindgen]
 pub fn get_prompt(name: &str) -> Result<String, JsError> {
     inner::get_prompt(name).map_err(|e| JsError::new(&e.to_string()))
@@ -184,6 +235,10 @@ pub fn get_prompt(name: &str) -> Result<String, JsError> {
 /// ```
 ///
 /// Output: JSON string — extracted context string.
+///
+/// # Errors
+/// `JsError` if the input is not valid JSON or `content`/`query` are missing
+/// or wrong-typed.
 #[wasm_bindgen]
 pub fn extract_context(input: &str) -> Result<String, JsError> {
     json_call(input, inner::extract_context)
@@ -205,6 +260,10 @@ pub fn extract_context(input: &str) -> Result<String, JsError> {
 /// ```
 ///
 /// Output: JSON string — array of `{ url, title, context }` objects.
+///
+/// # Errors
+/// `JsError` if the input is not valid JSON, `query` is missing or
+/// wrong-typed, or `items` is missing or unparseable.
 #[wasm_bindgen]
 pub fn batch_extract_context(input: &str) -> Result<String, JsError> {
     json_call(input, inner::batch_extract_context)
@@ -225,6 +284,10 @@ pub fn batch_extract_context(input: &str) -> Result<String, JsError> {
 /// ```
 ///
 /// Output: JSON string — sanitized query string.
+///
+/// # Errors
+/// `JsError` if the input is not valid JSON, `query` is missing or
+/// wrong-typed, or any custom pattern is malformed or has an invalid regex.
 #[wasm_bindgen]
 pub fn sanitize_query(input: &str) -> Result<String, JsError> {
     json_call(input, inner::sanitize_query)
@@ -245,12 +308,20 @@ pub fn sanitize_query(input: &str) -> Result<String, JsError> {
 /// ```
 ///
 /// Output: JSON string — trimmed messages array.
+///
+/// # Errors
+/// `JsError` if the input is not valid JSON or `messages` is missing or
+/// unparseable.
 #[wasm_bindgen]
 pub fn truncate_conversation(input: &str) -> Result<String, JsError> {
     json_call(input, inner::truncate_conversation)
 }
 
 /// Return the scolta-core version string.
+///
+/// # Stability
+/// Status: stable
+/// Since: 0.1.0
 #[wasm_bindgen]
 pub fn version() -> String {
     inner::version()
@@ -258,8 +329,13 @@ pub fn version() -> String {
 
 /// Return a JSON description of all available functions.
 ///
-/// Serialization of the static manifest cannot fail in practice, but a
-/// failure now surfaces as a thrown error instead of a silent empty string.
+/// # Stability
+/// Status: stable
+/// Since: 0.1.0
+///
+/// # Errors
+/// `JsError` if the manifest fails to serialize — unreachable in practice,
+/// but surfaced as a thrown error instead of a silent empty string.
 #[wasm_bindgen]
 pub fn describe() -> Result<String, JsError> {
     serde_json::to_string(&inner::describe())

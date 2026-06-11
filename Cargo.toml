@@ -2,9 +2,13 @@
 name = "scolta-core"
 version = "1.0.2-dev"
 edition = "2021"
+# Floor set by wasm-bindgen/js-sys (1.77); our own code needs only 1.70 (OnceLock).
+rust-version = "1.77"
 description = "Scolta search engine core - browser WASM module for client-side search scoring, prompt management, and query expansion"
 license = "MIT"
+homepage = "https://github.com/tag1consulting/scolta-core"
 repository = "https://github.com/tag1consulting/scolta-core"
+documentation = "https://docs.rs/scolta-core"
 readme = "README.md"
 keywords = ["wasm", "search", "scoring", "pagefind"]
 categories = ["wasm", "web-programming"]
@@ -12,6 +16,16 @@ exclude = ["tests/", ".github/", "CLAUDE.md", ".editorconfig"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+# Cherry-picked pedantic lints (allow-by-default upstream). CI runs clippy with
+# `-D warnings`, so a "warn" here is enforced there.
+[lints.clippy]
+# Unchecked `as` narrowing (e.g. u64 -> u32 in config parsing) silently wraps.
+cast_possible_truncation = "warn"
+# Every pub fn returning Result documents its error conditions.
+missing_errors_doc = "warn"
+# `ok_or(expr)`/`unwrap_or(expr)` eagerly evaluate their argument.
+or_fun_call = "warn"
 
 [dependencies]
 wasm-bindgen = "0.2"

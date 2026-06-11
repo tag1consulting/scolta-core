@@ -37,6 +37,68 @@ fn describe_lists_all_functions() {
     );
 }
 
+/// Doc-sync guard: every `#[wasm_bindgen]` export in `browser.rs` must carry a
+/// `# Stability` doc block whose `Status`/`Since` match its `describe()` entry,
+/// mirroring the API.md guard for scoring defaults.
+#[test]
+fn stability_doc_blocks_match_describe() {
+    let browser_rs =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/browser.rs"))
+            .expect("src/browser.rs must be readable");
+
+    // Parse `/// Status: X` and `/// Since: Y` doc lines preceding `pub fn NAME`.
+    let mut documented: std::collections::HashMap<String, (String, String)> =
+        std::collections::HashMap::new();
+    let (mut status, mut since): (Option<String>, Option<String>) = (None, None);
+    for line in browser_rs.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("///") {
+            let rest = rest.trim();
+            if let Some(v) = rest.strip_prefix("Status:") {
+                status = Some(v.trim().to_string());
+            } else if let Some(v) = rest.strip_prefix("Since:") {
+                since = Some(v.trim().to_string());
+            }
+        } else if let Some(rest) = trimmed.strip_prefix("pub fn ") {
+            let name = rest
+                .split(['(', '<'])
+                .next()
+                .expect("fn line must have a name")
+                .trim()
+                .to_string();
+            if let (Some(st), Some(si)) = (status.take(), since.take()) {
+                documented.insert(name, (st, si));
+            } else {
+                panic!("export `{name}` is missing a `# Stability` doc block (Status/Since)");
+            }
+        }
+    }
+
+    let manifest = inner::describe();
+    let functions = manifest["functions"].as_object().unwrap();
+    for (name, info) in functions {
+        let (doc_status, doc_since) = documented.get(name).unwrap_or_else(|| {
+            panic!("describe() lists `{name}` but browser.rs has no documented export for it")
+        });
+        assert_eq!(
+            doc_status,
+            info["stability"].as_str().unwrap(),
+            "`{name}`: doc-block Status disagrees with describe() stability"
+        );
+        assert_eq!(
+            doc_since,
+            info["since"].as_str().unwrap(),
+            "`{name}`: doc-block Since disagrees with describe() since"
+        );
+    }
+    for name in documented.keys() {
+        assert!(
+            functions.contains_key(name),
+            "browser.rs exports `{name}` but describe() does not list it"
+        );
+    }
+}
+
 // ── score_results ─────────────────────────────────────────────────────────────
 
 #[test]
