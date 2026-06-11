@@ -12,7 +12,7 @@ Version: 1.0.0 · Target: wasm32-unknown-unknown · Framework: wasm-bindgen
 
 ## 2. Browser WASM Exports
 
-All 13 exports take and return JSON strings (or plain strings for `version`, `get_prompt`, and `describe`). On error they return a `JsError` that becomes a JavaScript exception.
+All 13 exports take and return JSON strings (or plain strings for `version`, `get_prompt`, and `resolve_prompt`). On error they return a `JsError` that becomes a JavaScript exception.
 
 ---
 
