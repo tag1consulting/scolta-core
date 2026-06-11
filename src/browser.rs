@@ -21,7 +21,30 @@
 
 use wasm_bindgen::prelude::*;
 
+use crate::error::ScoltaError;
 use crate::inner;
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+extern "C" {
+    /// `console.warn` — used to surface config-clamp warnings to the browser console.
+    #[wasm_bindgen(js_namespace = console, js_name = warn)]
+    pub(crate) fn console_warn(s: &str);
+}
+
+/// Shared boundary wrapper: parse the JSON input string, run an `inner::`
+/// function, and serialize its output back to a JSON string, mapping every
+/// failure to a `JsError`.
+fn json_call<T: serde::Serialize>(
+    input: &str,
+    f: impl FnOnce(&serde_json::Value) -> Result<T, ScoltaError>,
+) -> Result<String, JsError> {
+    let value: serde_json::Value =
+        serde_json::from_str(input).map_err(|e| JsError::new(&format!("Invalid JSON: {}", e)))?;
+    let result = f(&value).map_err(|e| JsError::new(&e.to_string()))?;
+    serde_json::to_string(&result)
+        .map_err(|e| JsError::new(&format!("JSON serialization failed: {}", e)))
+}
 
 /// Score search results against a query.
 ///
@@ -31,11 +54,7 @@ use crate::inner;
 /// Output: JSON string — array of scored results, sorted descending.
 #[wasm_bindgen]
 pub fn score_results(input: &str) -> Result<String, JsError> {
-    let value: serde_json::Value =
-        serde_json::from_str(input).map_err(|e| JsError::new(&format!("Invalid JSON: {}", e)))?;
-    let result = inner::score_results(&value).map_err(|e| JsError::new(&e.to_string()))?;
-    serde_json::to_string(&result)
-        .map_err(|e| JsError::new(&format!("JSON serialization failed: {}", e)))
+    json_call(input, inner::score_results)
 }
 
 /// Merge N scored result sets with per-set weights and deduplication.
@@ -57,11 +76,7 @@ pub fn score_results(input: &str) -> Result<String, JsError> {
 /// Output: JSON string — merged, weighted, and deduplicated results array.
 #[wasm_bindgen]
 pub fn merge_results(input: &str) -> Result<String, JsError> {
-    let value: serde_json::Value =
-        serde_json::from_str(input).map_err(|e| JsError::new(&format!("Invalid JSON: {}", e)))?;
-    let result = inner::merge_results(&value).map_err(|e| JsError::new(&e.to_string()))?;
-    serde_json::to_string(&result)
-        .map_err(|e| JsError::new(&format!("JSON serialization failed: {}", e)))
+    json_call(input, inner::merge_results)
 }
 
 /// Find priority pages matching a query.
@@ -78,11 +93,7 @@ pub fn merge_results(input: &str) -> Result<String, JsError> {
 /// Output: JSON string — array of matching priority page objects.
 #[wasm_bindgen]
 pub fn match_priority_pages(input: &str) -> Result<String, JsError> {
-    let value: serde_json::Value =
-        serde_json::from_str(input).map_err(|e| JsError::new(&format!("Invalid JSON: {}", e)))?;
-    let result = inner::match_priority_pages(&value).map_err(|e| JsError::new(&e.to_string()))?;
-    serde_json::to_string(&result)
-        .map_err(|e| JsError::new(&format!("JSON serialization failed: {}", e)))
+    json_call(input, inner::match_priority_pages)
 }
 
 /// Parse an LLM expansion response into individual search terms.
@@ -132,11 +143,7 @@ pub fn parse_expansion(input: &str) -> Result<String, JsError> {
 /// per input query, in the same order.
 #[wasm_bindgen]
 pub fn batch_score_results(input: &str) -> Result<String, JsError> {
-    let value: serde_json::Value =
-        serde_json::from_str(input).map_err(|e| JsError::new(&format!("Invalid JSON: {}", e)))?;
-    let result = inner::batch_score_results(&value).map_err(|e| JsError::new(&e.to_string()))?;
-    serde_json::to_string(&result)
-        .map_err(|e| JsError::new(&format!("JSON serialization failed: {}", e)))
+    json_call(input, inner::batch_score_results)
 }
 
 /// Resolve a prompt template with variable substitution.
@@ -179,11 +186,7 @@ pub fn get_prompt(name: &str) -> Result<String, JsError> {
 /// Output: JSON string — extracted context string.
 #[wasm_bindgen]
 pub fn extract_context(input: &str) -> Result<String, JsError> {
-    let value: serde_json::Value =
-        serde_json::from_str(input).map_err(|e| JsError::new(&format!("Invalid JSON: {}", e)))?;
-    let result = inner::extract_context(&value).map_err(|e| JsError::new(&e.to_string()))?;
-    serde_json::to_string(&result)
-        .map_err(|e| JsError::new(&format!("JSON serialization failed: {}", e)))
+    json_call(input, inner::extract_context)
 }
 
 /// Extract context from multiple content items in one call.
@@ -204,11 +207,7 @@ pub fn extract_context(input: &str) -> Result<String, JsError> {
 /// Output: JSON string — array of `{ url, title, context }` objects.
 #[wasm_bindgen]
 pub fn batch_extract_context(input: &str) -> Result<String, JsError> {
-    let value: serde_json::Value =
-        serde_json::from_str(input).map_err(|e| JsError::new(&format!("Invalid JSON: {}", e)))?;
-    let result = inner::batch_extract_context(&value).map_err(|e| JsError::new(&e.to_string()))?;
-    serde_json::to_string(&result)
-        .map_err(|e| JsError::new(&format!("JSON serialization failed: {}", e)))
+    json_call(input, inner::batch_extract_context)
 }
 
 /// Redact PII from a query string before analytics logging.
@@ -228,11 +227,7 @@ pub fn batch_extract_context(input: &str) -> Result<String, JsError> {
 /// Output: JSON string — sanitized query string.
 #[wasm_bindgen]
 pub fn sanitize_query(input: &str) -> Result<String, JsError> {
-    let value: serde_json::Value =
-        serde_json::from_str(input).map_err(|e| JsError::new(&format!("Invalid JSON: {}", e)))?;
-    let result = inner::sanitize_query(&value).map_err(|e| JsError::new(&e.to_string()))?;
-    serde_json::to_string(&result)
-        .map_err(|e| JsError::new(&format!("JSON serialization failed: {}", e)))
+    json_call(input, inner::sanitize_query)
 }
 
 /// Trim conversation history to fit within a character limit.
@@ -252,11 +247,7 @@ pub fn sanitize_query(input: &str) -> Result<String, JsError> {
 /// Output: JSON string — trimmed messages array.
 #[wasm_bindgen]
 pub fn truncate_conversation(input: &str) -> Result<String, JsError> {
-    let value: serde_json::Value =
-        serde_json::from_str(input).map_err(|e| JsError::new(&format!("Invalid JSON: {}", e)))?;
-    let result = inner::truncate_conversation(&value).map_err(|e| JsError::new(&e.to_string()))?;
-    serde_json::to_string(&result)
-        .map_err(|e| JsError::new(&format!("JSON serialization failed: {}", e)))
+    json_call(input, inner::truncate_conversation)
 }
 
 /// Return the scolta-core version string.
@@ -266,9 +257,13 @@ pub fn version() -> String {
 }
 
 /// Return a JSON description of all available functions.
+///
+/// Serialization of the static manifest cannot fail in practice, but a
+/// failure now surfaces as a thrown error instead of a silent empty string.
 #[wasm_bindgen]
-pub fn describe() -> String {
-    serde_json::to_string(&inner::describe()).unwrap_or_default()
+pub fn describe() -> Result<String, JsError> {
+    serde_json::to_string(&inner::describe())
+        .map_err(|e| JsError::new(&format!("JSON serialization failed: {}", e)))
 }
 
 #[cfg(test)]

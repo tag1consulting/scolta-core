@@ -41,6 +41,27 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// that breaks binary compatibility with host wrappers (scolta-php, scolta.js).
 pub const WASM_INTERFACE_VERSION: u32 = 4;
 
+/// Forward config-clamp warnings to the host: `console.warn` in the browser,
+/// stderr on native targets (tests, tooling).
+pub(crate) fn emit_config_warnings(function: &str, warnings: &[scoring::ConfigWarning]) {
+    for w in warnings {
+        warn_host(&format!(
+            "scolta-core {}: config field '{}': {}",
+            function, w.field, w.message
+        ));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn warn_host(msg: &str) {
+    browser::console_warn(msg);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn warn_host(msg: &str) {
+    eprintln!("{}", msg);
+}
+
 // ---------------------------------------------------------------------------
 // Inner functions: plain Rust, callable from tests and browser exports.
 // ---------------------------------------------------------------------------
@@ -48,20 +69,31 @@ pub const WASM_INTERFACE_VERSION: u32 = 4;
 pub mod inner {
     use super::*;
 
+    /// Fetch a required string field, distinguishing an absent field
+    /// (`MissingField`) from a present-but-wrong-typed one (`InvalidFieldType`).
+    fn require_str<'a>(
+        obj: &'a serde_json::Map<String, serde_json::Value>,
+        function: &'static str,
+        field: &'static str,
+    ) -> Result<&'a str, ScoltaError> {
+        match obj.get(field) {
+            None => Err(ScoltaError::missing_field(function, field)),
+            Some(v) => v
+                .as_str()
+                .ok_or_else(|| ScoltaError::invalid_field_type(function, field, "a string")),
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Prompt functions
     // -----------------------------------------------------------------------
 
     pub fn resolve_prompt(input: &serde_json::Value) -> Result<String, ScoltaError> {
-        let obj = input.as_object().ok_or(ScoltaError::invalid_json(
-            "resolve_prompt",
-            "expected JSON object",
-        ))?;
+        let obj = input
+            .as_object()
+            .ok_or_else(|| ScoltaError::invalid_json("resolve_prompt", "expected JSON object"))?;
 
-        let prompt_name = obj
-            .get("prompt_name")
-            .and_then(|v| v.as_str())
-            .ok_or(ScoltaError::missing_field("resolve_prompt", "prompt_name"))?;
+        let prompt_name = require_str(obj, "resolve_prompt", "prompt_name")?;
 
         let site_name = obj.get("site_name").and_then(|v| v.as_str()).unwrap_or("");
         let site_description = obj
@@ -100,19 +132,15 @@ pub mod inner {
     /// secondary-source results. The config may include `"priority_pages"` to
     /// boost specific results when query keywords match.
     pub fn score_results(input: &serde_json::Value) -> Result<serde_json::Value, ScoltaError> {
-        let obj = input.as_object().ok_or(ScoltaError::invalid_json(
-            "score_results",
-            "expected JSON object",
-        ))?;
+        let obj = input
+            .as_object()
+            .ok_or_else(|| ScoltaError::invalid_json("score_results", "expected JSON object"))?;
 
-        let query = obj
-            .get("query")
-            .and_then(|v| v.as_str())
-            .ok_or(ScoltaError::missing_field("score_results", "query"))?;
+        let query = require_str(obj, "score_results", "query")?;
 
         let results_json = obj
             .get("results")
-            .ok_or(ScoltaError::missing_field("score_results", "results"))?;
+            .ok_or_else(|| ScoltaError::missing_field("score_results", "results"))?;
 
         let mut results: Vec<scoring::SearchResult> = serde_json::from_value(results_json.clone())
             .map_err(|e| {
@@ -121,7 +149,8 @@ pub mod inner {
 
         let empty_config = json!({});
         let config_json = obj.get("config").unwrap_or(&empty_config);
-        let cfg = config::from_json(config_json);
+        let (cfg, warnings) = config::from_json_validated(config_json);
+        emit_config_warnings("score_results", &warnings);
 
         let primary_terms: Option<Vec<String>> = obj
             .get("primary_query")
@@ -157,14 +186,13 @@ pub mod inner {
     /// }
     /// ```
     pub fn merge_results(input: &serde_json::Value) -> Result<serde_json::Value, ScoltaError> {
-        let obj = input.as_object().ok_or(ScoltaError::invalid_json(
-            "merge_results",
-            "expected JSON object",
-        ))?;
+        let obj = input
+            .as_object()
+            .ok_or_else(|| ScoltaError::invalid_json("merge_results", "expected JSON object"))?;
 
         let sets_json = obj
             .get("sets")
-            .ok_or(ScoltaError::missing_field("merge_results", "sets"))?;
+            .ok_or_else(|| ScoltaError::missing_field("merge_results", "sets"))?;
 
         let sets: Vec<scoring::MergeSet> =
             serde_json::from_value(sets_json.clone()).map_err(|e| {
@@ -221,20 +249,15 @@ pub mod inner {
     pub fn match_priority_pages(
         input: &serde_json::Value,
     ) -> Result<serde_json::Value, ScoltaError> {
-        let obj = input.as_object().ok_or(ScoltaError::invalid_json(
-            "match_priority_pages",
-            "expected JSON object",
-        ))?;
+        let obj = input.as_object().ok_or_else(|| {
+            ScoltaError::invalid_json("match_priority_pages", "expected JSON object")
+        })?;
 
-        let query = obj
-            .get("query")
-            .and_then(|v| v.as_str())
-            .ok_or(ScoltaError::missing_field("match_priority_pages", "query"))?;
+        let query = require_str(obj, "match_priority_pages", "query")?;
 
-        let pages_json = obj.get("priority_pages").ok_or(ScoltaError::missing_field(
-            "match_priority_pages",
-            "priority_pages",
-        ))?;
+        let pages_json = obj
+            .get("priority_pages")
+            .ok_or_else(|| ScoltaError::missing_field("match_priority_pages", "priority_pages"))?;
 
         let pages: Vec<scoring::PriorityPage> = serde_json::from_value(pages_json.clone())
             .map_err(|e| {
@@ -253,15 +276,18 @@ pub mod inner {
     pub fn batch_score_results(
         input: &serde_json::Value,
     ) -> Result<serde_json::Value, ScoltaError> {
-        let obj = input.as_object().ok_or(ScoltaError::invalid_json(
-            "batch_score_results",
-            "expected JSON object",
-        ))?;
+        let obj = input.as_object().ok_or_else(|| {
+            ScoltaError::invalid_json("batch_score_results", "expected JSON object")
+        })?;
 
-        let queries = obj
-            .get("queries")
-            .and_then(|v| v.as_array())
-            .ok_or(ScoltaError::missing_field("batch_score_results", "queries"))?;
+        let queries = match obj.get("queries") {
+            None => {
+                return Err(ScoltaError::missing_field("batch_score_results", "queries"));
+            }
+            Some(v) => v.as_array().ok_or_else(|| {
+                ScoltaError::invalid_field_type("batch_score_results", "queries", "an array")
+            })?,
+        };
 
         let empty_obj = serde_json::json!({});
         let default_config_json = obj.get("default_config").unwrap_or(&empty_obj);
@@ -299,7 +325,8 @@ pub mod inner {
                 })?;
 
             let config_json = qobj.get("config").unwrap_or(default_config_json);
-            let cfg = config::from_json(config_json);
+            let (cfg, warnings) = config::from_json_validated(config_json);
+            emit_config_warnings("batch_score_results", &warnings);
 
             scoring::score_results(&mut results, query, &cfg);
 
@@ -388,20 +415,13 @@ pub mod inner {
     /// Input: `{ "content": "...", "query": "...", "config": { ... } }`
     /// Output: extracted context string.
     pub fn extract_context(input: &serde_json::Value) -> Result<String, ScoltaError> {
-        let obj = input.as_object().ok_or(ScoltaError::invalid_json(
-            "extract_context",
-            "expected JSON object",
-        ))?;
+        let obj = input
+            .as_object()
+            .ok_or_else(|| ScoltaError::invalid_json("extract_context", "expected JSON object"))?;
 
-        let content = obj
-            .get("content")
-            .and_then(|v| v.as_str())
-            .ok_or(ScoltaError::missing_field("extract_context", "content"))?;
+        let content = require_str(obj, "extract_context", "content")?;
 
-        let query = obj
-            .get("query")
-            .and_then(|v| v.as_str())
-            .ok_or(ScoltaError::missing_field("extract_context", "query"))?;
+        let query = require_str(obj, "extract_context", "query")?;
 
         let cfg = parse_context_config(obj.get("config"));
         Ok(context::extract_context(content, query, &cfg))
@@ -421,19 +441,15 @@ pub mod inner {
     pub fn batch_extract_context(
         input: &serde_json::Value,
     ) -> Result<serde_json::Value, ScoltaError> {
-        let obj = input.as_object().ok_or(ScoltaError::invalid_json(
-            "batch_extract_context",
-            "expected JSON object",
-        ))?;
+        let obj = input.as_object().ok_or_else(|| {
+            ScoltaError::invalid_json("batch_extract_context", "expected JSON object")
+        })?;
 
-        let query = obj
-            .get("query")
-            .and_then(|v| v.as_str())
-            .ok_or(ScoltaError::missing_field("batch_extract_context", "query"))?;
+        let query = require_str(obj, "batch_extract_context", "query")?;
 
         let items_json = obj
             .get("items")
-            .ok_or(ScoltaError::missing_field("batch_extract_context", "items"))?;
+            .ok_or_else(|| ScoltaError::missing_field("batch_extract_context", "items"))?;
 
         let items: Vec<serde_json::Value> =
             serde_json::from_value(items_json.clone()).map_err(|e| {
@@ -507,24 +523,23 @@ pub mod inner {
     ///
     /// Input: `{ "query": "...", "config": { ... } }`
     /// Output: sanitized query string.
+    ///
+    /// Custom patterns are validated up front: a malformed entry or an invalid
+    /// regex is an error, never a silently skipped redaction.
     pub fn sanitize_query(input: &serde_json::Value) -> Result<String, ScoltaError> {
-        let obj = input.as_object().ok_or(ScoltaError::invalid_json(
-            "sanitize_query",
-            "expected JSON object",
-        ))?;
+        let obj = input
+            .as_object()
+            .ok_or_else(|| ScoltaError::invalid_json("sanitize_query", "expected JSON object"))?;
 
-        let query = obj
-            .get("query")
-            .and_then(|v| v.as_str())
-            .ok_or(ScoltaError::missing_field("sanitize_query", "query"))?;
+        let query = require_str(obj, "sanitize_query", "query")?;
 
-        let cfg = parse_sanitization_config(obj.get("config"));
+        let cfg = parse_sanitization_config(obj.get("config"))?;
         Ok(sanitize::sanitize_query(query, &cfg))
     }
 
     fn parse_sanitization_config(
         cfg_json: Option<&serde_json::Value>,
-    ) -> sanitize::SanitizationConfig {
+    ) -> Result<sanitize::SanitizationConfig, ScoltaError> {
         let mut cfg = sanitize::SanitizationConfig::default();
         if let Some(obj) = cfg_json.and_then(|v| v.as_object()) {
             if let Some(v) = obj.get("redact_email").and_then(|v| v.as_bool()) {
@@ -542,21 +557,47 @@ pub mod inner {
             if let Some(v) = obj.get("redact_ip").and_then(|v| v.as_bool()) {
                 cfg.redact_ip = v;
             }
-            if let Some(arr) = obj.get("custom_patterns").and_then(|v| v.as_array()) {
-                cfg.custom_patterns = arr
-                    .iter()
-                    .filter_map(|p| {
-                        let regex = p.get("regex").and_then(|v| v.as_str())?;
-                        let replacement = p.get("replacement").and_then(|v| v.as_str())?;
-                        Some(sanitize::SanitizationPattern {
-                            regex: regex.to_string(),
-                            replacement: replacement.to_string(),
-                        })
-                    })
-                    .collect();
+            if let Some(patterns_json) = obj.get("custom_patterns") {
+                let arr = patterns_json.as_array().ok_or_else(|| {
+                    ScoltaError::invalid_field_type("sanitize_query", "custom_patterns", "an array")
+                })?;
+                let mut patterns = Vec::with_capacity(arr.len());
+                for (i, p) in arr.iter().enumerate() {
+                    let regex = p.get("regex").and_then(|v| v.as_str()).ok_or_else(|| {
+                        ScoltaError::parse_error(
+                            "sanitize_query",
+                            format!("custom_patterns[{}]: missing or non-string 'regex'", i),
+                        )
+                    })?;
+                    let replacement =
+                        p.get("replacement")
+                            .and_then(|v| v.as_str())
+                            .ok_or_else(|| {
+                                ScoltaError::parse_error(
+                                    "sanitize_query",
+                                    format!(
+                                        "custom_patterns[{}]: missing or non-string 'replacement'",
+                                        i
+                                    ),
+                                )
+                            })?;
+                    let compiled = sanitize::SanitizationPattern {
+                        regex: regex.to_string(),
+                        replacement: replacement.to_string(),
+                    }
+                    .compile()
+                    .map_err(|e| {
+                        ScoltaError::parse_error(
+                            "sanitize_query",
+                            format!("custom_patterns[{}]: invalid regex: {}", i, e),
+                        )
+                    })?;
+                    patterns.push(compiled);
+                }
+                cfg.custom_patterns = patterns;
             }
         }
-        cfg
+        Ok(cfg)
     }
 
     // -----------------------------------------------------------------------
@@ -576,15 +617,13 @@ pub mod inner {
     pub fn truncate_conversation(
         input: &serde_json::Value,
     ) -> Result<serde_json::Value, ScoltaError> {
-        let obj = input.as_object().ok_or(ScoltaError::invalid_json(
-            "truncate_conversation",
-            "expected JSON object",
-        ))?;
+        let obj = input.as_object().ok_or_else(|| {
+            ScoltaError::invalid_json("truncate_conversation", "expected JSON object")
+        })?;
 
-        let messages_json = obj.get("messages").ok_or(ScoltaError::missing_field(
-            "truncate_conversation",
-            "messages",
-        ))?;
+        let messages_json = obj
+            .get("messages")
+            .ok_or_else(|| ScoltaError::missing_field("truncate_conversation", "messages"))?;
 
         let messages: Vec<conversation::Message> = serde_json::from_value(messages_json.clone())
             .map_err(|e| {
@@ -1099,6 +1138,104 @@ mod tests {
     }
 
     #[test]
+    fn test_sanitize_query_custom_pattern_redacts() {
+        let input = json!({
+            "query": "patient MRN-12345 admitted",
+            "config": {
+                "custom_patterns": [
+                    {"regex": r"\bMRN-\d{5}\b", "replacement": "[PATIENT_ID]"}
+                ]
+            }
+        });
+        let result = inner::sanitize_query(&input).unwrap();
+        assert!(result.contains("[PATIENT_ID]"));
+        assert!(!result.contains("MRN-12345"));
+    }
+
+    #[test]
+    fn test_sanitize_query_invalid_custom_pattern_is_err() {
+        // A typo'd regex must be a hard error, not a silently skipped redaction.
+        let input = json!({
+            "query": "patient MRN-12345 admitted",
+            "config": {
+                "custom_patterns": [
+                    {"regex": r"\b(MRN-\d{5}\b", "replacement": "[PATIENT_ID]"}
+                ]
+            }
+        });
+        let err = inner::sanitize_query(&input).unwrap_err();
+        assert!(err.to_string().contains("invalid regex"));
+    }
+
+    #[test]
+    fn test_sanitize_query_malformed_pattern_entry_is_err() {
+        // Entry without a replacement must error instead of being dropped.
+        let input = json!({
+            "query": "patient MRN-12345 admitted",
+            "config": {"custom_patterns": [{"regex": r"\bMRN-\d{5}\b"}]}
+        });
+        let err = inner::sanitize_query(&input).unwrap_err();
+        assert!(err.to_string().contains("replacement"));
+    }
+
+    #[test]
+    fn test_sanitize_query_custom_patterns_wrong_type_is_err() {
+        let input = json!({
+            "query": "hello",
+            "config": {"custom_patterns": "not an array"}
+        });
+        let err = inner::sanitize_query(&input).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("'custom_patterns' must be an array"));
+    }
+
+    #[test]
+    fn test_sanitize_query_custom_pattern_not_recompiled_per_call() {
+        let input = json!({
+            "query": "id COMPILE-ONCE-9999 here",
+            "config": {
+                "custom_patterns": [
+                    {"regex": r"\bCOMPILE-ONCE-\d{4}\b", "replacement": "[ID]"}
+                ]
+            }
+        });
+        inner::sanitize_query(&input).unwrap();
+        let count_after_first = sanitize::custom_regex_compile_count();
+        inner::sanitize_query(&input).unwrap();
+        inner::sanitize_query(&input).unwrap();
+        assert_eq!(
+            sanitize::custom_regex_compile_count(),
+            count_after_first,
+            "same custom pattern must not recompile on every sanitize_query call"
+        );
+    }
+
+    #[test]
+    fn test_score_results_out_of_range_config_clamped() {
+        // recency_boost_max far above its 2.0 ceiling must behave exactly like 2.0.
+        let results = json!([
+            {"url": "https://a.com", "title": "Fresh", "excerpt": "x", "date": "2026-06-01", "score": 1.0}
+        ]);
+        let absurd = inner::score_results(&json!({
+            "query": "fresh",
+            "results": results,
+            "config": {"recency_boost_max": 100.0}
+        }))
+        .unwrap();
+        let clamped = inner::score_results(&json!({
+            "query": "fresh",
+            "results": results,
+            "config": {"recency_boost_max": 2.0}
+        }))
+        .unwrap();
+        assert_eq!(
+            absurd[0]["score"], clamped[0]["score"],
+            "out-of-range recency_boost_max must be clamped to 2.0 in the export path"
+        );
+    }
+
+    #[test]
     fn test_truncate_conversation_basic() {
         let input = json!({
             "messages": [
@@ -1222,8 +1359,37 @@ mod tests {
 
         #[test]
         fn score_results_query_is_number_is_err() {
-            // query field exists but is not a string — as_str() returns None → missing_field error
-            assert!(inner::score_results(&json!({"query": 42, "results": []})).is_err());
+            // query field exists but is not a string → InvalidFieldType, not MissingField
+            let err = inner::score_results(&json!({"query": 42, "results": []})).unwrap_err();
+            let msg = err.to_string();
+            assert!(
+                msg.contains("'query' must be a string"),
+                "wrong-typed field must report a type error, got: {}",
+                msg
+            );
+            assert!(
+                !msg.contains("missing required field"),
+                "wrong-typed field must not be reported as missing, got: {}",
+                msg
+            );
+        }
+
+        #[test]
+        fn missing_query_still_reported_as_missing() {
+            let err = inner::score_results(&json!({"results": []})).unwrap_err();
+            assert!(err.to_string().contains("missing required field 'query'"));
+        }
+
+        #[test]
+        fn batch_score_results_queries_is_string_is_type_err() {
+            let err = inner::batch_score_results(&json!({"queries": "not an array"})).unwrap_err();
+            assert!(err.to_string().contains("'queries' must be an array"));
+        }
+
+        #[test]
+        fn extract_context_content_is_number_is_type_err() {
+            let err = inner::extract_context(&json!({"content": 7, "query": "test"})).unwrap_err();
+            assert!(err.to_string().contains("'content' must be a string"));
         }
 
         #[test]

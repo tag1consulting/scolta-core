@@ -78,6 +78,18 @@ impl ScoltaError {
         Self::MissingField { function, field }
     }
 
+    pub fn invalid_field_type(
+        function: &'static str,
+        field: &'static str,
+        expected: &'static str,
+    ) -> Self {
+        Self::InvalidFieldType {
+            function,
+            field,
+            expected,
+        }
+    }
+
     pub fn parse_error(function: &'static str, detail: impl fmt::Display) -> Self {
         Self::ParseError {
             function,

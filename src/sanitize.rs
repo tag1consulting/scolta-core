@@ -5,15 +5,73 @@
 //! Custom patterns use the `regex` crate.
 
 use regex::Regex;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
-/// A custom PII redaction pattern.
+/// A custom PII redaction pattern as supplied in config JSON (uncompiled).
 #[derive(Debug, Clone)]
 pub struct SanitizationPattern {
     /// Regex pattern string.
     pub regex: String,
     /// Replacement text (e.g., `"[PATIENT_ID]"`).
     pub replacement: String,
+}
+
+/// A custom pattern whose regex has been validated and compiled.
+///
+/// Constructed via [`SanitizationPattern::compile`], which is the only path
+/// into [`SanitizationConfig::custom_patterns`] — an invalid pattern can never
+/// silently reach `sanitize_query`.
+#[derive(Debug, Clone)]
+pub struct CompiledPattern {
+    /// Compiled regex.
+    pub regex: Regex,
+    /// Replacement text (e.g., `"[PATIENT_ID]"`).
+    pub replacement: String,
+}
+
+impl SanitizationPattern {
+    /// Validate and compile this pattern.
+    ///
+    /// Compiled regexes are cached per pattern string for the lifetime of the
+    /// module instance, so repeated `sanitize_query` calls with the same
+    /// config never recompile (built-in patterns get the same treatment via
+    /// `OnceLock` below).
+    ///
+    /// # Errors
+    /// Returns the `regex` crate's parse error when the pattern is invalid.
+    pub fn compile(&self) -> Result<CompiledPattern, regex::Error> {
+        Ok(CompiledPattern {
+            regex: cached_custom_regex(&self.regex)?,
+            replacement: self.replacement.clone(),
+        })
+    }
+}
+
+thread_local! {
+    // WASM is single-threaded, so a thread_local map is effectively a
+    // module-global cache there; on native (tests) each thread gets its own.
+    static CUSTOM_REGEX_CACHE: RefCell<HashMap<String, Regex>> = RefCell::new(HashMap::new());
+    static CUSTOM_REGEX_COMPILE_COUNT: Cell<usize> = const { Cell::new(0) };
+}
+
+fn cached_custom_regex(pattern: &str) -> Result<Regex, regex::Error> {
+    CUSTOM_REGEX_CACHE.with(|cache| {
+        if let Some(re) = cache.borrow().get(pattern) {
+            return Ok(re.clone());
+        }
+        let re = Regex::new(pattern)?;
+        CUSTOM_REGEX_COMPILE_COUNT.with(|c| c.set(c.get() + 1));
+        cache.borrow_mut().insert(pattern.to_string(), re.clone());
+        Ok(re)
+    })
+}
+
+/// Number of custom-pattern compilations (cache misses) on this thread.
+/// Exposed so tests can assert that repeated calls do not recompile.
+pub fn custom_regex_compile_count() -> usize {
+    CUSTOM_REGEX_COMPILE_COUNT.with(Cell::get)
 }
 
 /// Configuration for `sanitize_query`.
@@ -29,8 +87,9 @@ pub struct SanitizationConfig {
     pub redact_credit_card: bool,
     /// Redact IPv4 addresses. Default: true.
     pub redact_ip: bool,
-    /// Additional site-specific redaction patterns.
-    pub custom_patterns: Vec<SanitizationPattern>,
+    /// Additional site-specific redaction patterns, validated and compiled
+    /// up front via [`SanitizationPattern::compile`].
+    pub custom_patterns: Vec<CompiledPattern>,
 }
 
 impl Default for SanitizationConfig {
@@ -75,11 +134,10 @@ pub fn sanitize_query(query: &str, config: &SanitizationConfig) -> String {
     }
 
     for pat in &config.custom_patterns {
-        if let Ok(re) = Regex::new(&pat.regex) {
-            result = re
-                .replace_all(&result, pat.replacement.as_str())
-                .into_owned();
-        }
+        result = pat
+            .regex
+            .replace_all(&result, pat.replacement.as_str())
+            .into_owned();
     }
 
     result
@@ -191,11 +249,39 @@ mod tests {
             custom_patterns: vec![SanitizationPattern {
                 regex: r"\bMRN-\d{5}\b".to_string(),
                 replacement: "[PATIENT_ID]".to_string(),
-            }],
+            }
+            .compile()
+            .unwrap()],
         };
         let result = sanitize_query("patient MRN-12345 admitted", &config);
         assert!(result.contains("[PATIENT_ID]"));
         assert!(!result.contains("MRN-12345"));
+    }
+
+    #[test]
+    fn test_invalid_custom_pattern_is_compile_error() {
+        let pattern = SanitizationPattern {
+            regex: r"\b(MRN-\d{5}\b".to_string(), // unbalanced paren
+            replacement: "[PATIENT_ID]".to_string(),
+        };
+        assert!(pattern.compile().is_err());
+    }
+
+    #[test]
+    fn test_custom_pattern_compiled_once() {
+        let pattern = SanitizationPattern {
+            regex: r"\bCACHE-ONCE-\d{4}\b".to_string(),
+            replacement: "[X]".to_string(),
+        };
+        pattern.compile().unwrap();
+        let count_after_first = custom_regex_compile_count();
+        pattern.compile().unwrap();
+        pattern.compile().unwrap();
+        assert_eq!(
+            custom_regex_compile_count(),
+            count_after_first,
+            "repeated compiles of the same pattern must hit the cache"
+        );
     }
 
     #[test]

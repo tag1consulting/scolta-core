@@ -341,6 +341,9 @@ pub struct SearchResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MergeSet {
     pub results: Vec<SearchResult>,
+    /// Multiplier applied to every result score in this set. Negative values
+    /// (and NaN) are clamped to 0.0 at merge time — a negative weight would
+    /// silently invert the set's ranking.
     pub weight: f64,
 }
 
@@ -854,55 +857,7 @@ pub fn score_results(results: &mut [SearchResult], query: &str, config: &Scoring
 ///    for each distinct key.
 /// 4. Drop results whose URLs appear in `exclude_urls`.
 pub fn merge_results(options: MergeOptions) -> Vec<SearchResult> {
-    // Step 1: Apply weights and flatten into a single vec.
-    let mut all: Vec<SearchResult> = options
-        .sets
-        .into_iter()
-        .flat_map(|set| {
-            let w = set.weight;
-            set.results.into_iter().map(move |mut r| {
-                r.score *= w;
-                r
-            })
-        })
-        .collect();
-
-    // Step 2: Sort by score descending.
-    all.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    // Step 3: Deduplicate (keep first = highest-scored occurrence).
-    if let Some(ref field) = options.deduplicate_by {
-        let mut seen: HashSet<String> = HashSet::new();
-        all.retain(|r| {
-            let key = match field.as_str() {
-                "title" => {
-                    if options.case_sensitive {
-                        r.title.clone()
-                    } else {
-                        r.title.to_lowercase()
-                    }
-                }
-                _ => normalize_url_key(&r.url, options.normalize_urls),
-            };
-            seen.insert(key)
-        });
-    }
-
-    // Step 4: Drop excluded URLs.
-    if !options.exclude_urls.is_empty() {
-        let excluded: HashSet<String> = options
-            .exclude_urls
-            .iter()
-            .map(|u| normalize_url_key(u, options.normalize_urls))
-            .collect();
-        all.retain(|r| !excluded.contains(&normalize_url_key(&r.url, options.normalize_urls)));
-    }
-
-    all
+    merge_results_with_debug(options).0
 }
 
 /// Like `merge_results` but also returns `MergeDebugInfo` with per-set counts and
@@ -923,7 +878,8 @@ pub fn merge_results_with_debug(options: MergeOptions) -> (Vec<SearchResult>, Me
         .sets
         .into_iter()
         .flat_map(|set| {
-            let w = set.weight;
+            // Clamp: a negative weight would invert this set's ranking (NaN → 0.0 too).
+            let w = set.weight.max(0.0);
             set.results.into_iter().map(move |mut r| {
                 r.score *= w;
                 r
@@ -1020,12 +976,18 @@ fn parse_date(date_str: &str) -> Option<(i32, i32, i32)> {
     Some((year, month, day))
 }
 
+/// Fallback "today" when the host clock is unavailable or reports the epoch
+/// (a broken `Date.now()` shim, a clock stuck at 0). Pinned to the date the
+/// fallback was introduced so recency scoring degrades to mildly stale boosts
+/// instead of treating every document as 56 years old.
+const CLOCK_FALLBACK_TODAY: (i32, i32, i32) = (2026, 4, 2);
+
 #[cfg(target_arch = "wasm32")]
 fn today() -> (i32, i32, i32) {
     let millis = js_sys::Date::now();
     let secs = (millis / 1000.0) as u64;
     if secs == 0 {
-        return (2026, 4, 2);
+        return CLOCK_FALLBACK_TODAY;
     }
     civil_from_epoch_secs(secs)
 }
@@ -1040,7 +1002,7 @@ fn today() -> (i32, i32, i32) {
         .unwrap_or(0);
 
     if secs == 0 {
-        return (2026, 4, 2);
+        return CLOCK_FALLBACK_TODAY;
     }
 
     civil_from_epoch_secs(secs)
@@ -1396,6 +1358,67 @@ mod tests {
 
         let merged = merge_results(options);
         assert!(merged.is_empty()); // normalized URL matches exclude list
+    }
+
+    #[test]
+    fn test_merge_results_identical_to_debug_variant() {
+        // merge_results delegates to merge_results_with_debug; the two must
+        // produce identical result lists for the same options.
+        let options = MergeOptions {
+            sets: vec![
+                MergeSet {
+                    results: vec![
+                        make_result("https://a.com/", "A", 10.0),
+                        make_result("https://b.com", "B", 4.0),
+                        make_result("https://a.com", "A dup", 2.0),
+                    ],
+                    weight: 0.7,
+                },
+                MergeSet {
+                    results: vec![
+                        make_result("https://c.com", "C", 6.0),
+                        make_result("https://excluded.com", "X", 99.0),
+                    ],
+                    weight: 0.3,
+                },
+            ],
+            deduplicate_by: Some("url".to_string()),
+            case_sensitive: false,
+            exclude_urls: vec!["https://excluded.com".to_string()],
+            normalize_urls: true,
+        };
+
+        let plain = merge_results(options.clone());
+        let (debug, _) = merge_results_with_debug(options);
+        assert_eq!(
+            serde_json::to_value(&plain).unwrap(),
+            serde_json::to_value(&debug).unwrap(),
+            "plain and debug merge variants must produce identical results"
+        );
+    }
+
+    #[test]
+    fn test_merge_results_negative_weight_clamped_to_zero() {
+        let options = MergeOptions {
+            sets: vec![
+                MergeSet {
+                    results: vec![make_result("https://neg.com", "Neg", 10.0)],
+                    weight: -1.0,
+                },
+                MergeSet {
+                    results: vec![make_result("https://pos.com", "Pos", 1.0)],
+                    weight: 0.1,
+                },
+            ],
+            ..Default::default()
+        };
+
+        let merged = merge_results(options);
+        // Negative weight clamps to 0.0: the set must not invert the ranking
+        // by turning its high scores negative.
+        assert_eq!(merged[0].url, "https://pos.com");
+        let neg = merged.iter().find(|r| r.url == "https://neg.com").unwrap();
+        assert_eq!(neg.score, 0.0, "negative weight must zero the score");
     }
 
     #[test]
