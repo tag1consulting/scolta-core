@@ -648,7 +648,7 @@ fn phrase_proximity_multiplier(terms: &[String], locations: &[u32], config: &Sco
         .map(|w| w[n - 1] - w[0])
         .min()
         .unwrap_or(u32::MAX);
-    if min_span < n as u32 {
+    if min_span < u32::try_from(n).unwrap_or(u32::MAX) {
         config.phrase_adjacent_multiplier
     } else if min_span <= config.phrase_near_window {
         config.phrase_near_multiplier
@@ -983,6 +983,9 @@ fn parse_date(date_str: &str) -> Option<(i32, i32, i32)> {
 const CLOCK_FALLBACK_TODAY: (i32, i32, i32) = (2026, 4, 2);
 
 #[cfg(target_arch = "wasm32")]
+// Date.now() is finite, non-negative wall-clock millis; the f64 → u64 cast
+// cannot truncate a real timestamp.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn today() -> (i32, i32, i32) {
     let millis = js_sys::Date::now();
     let secs = (millis / 1000.0) as u64;
@@ -1008,6 +1011,10 @@ fn today() -> (i32, i32, i32) {
     civil_from_epoch_secs(secs)
 }
 
+// Howard Hinnant's civil-from-days algorithm: doe/yoe are bounded by the era
+// length (146097) and the year by realistic epoch seconds, so the narrowing
+// casts cannot truncate.
+#[allow(clippy::cast_possible_truncation)]
 pub fn civil_from_epoch_secs(secs: u64) -> (i32, i32, i32) {
     let days = (secs / 86400) as i64;
     let z = days + 719468;
@@ -1024,6 +1031,9 @@ pub fn civil_from_epoch_secs(secs: u64) -> (i32, i32, i32) {
     (y as i32, m as i32, d as i32)
 }
 
+// Inverse of civil_from_epoch_secs; parse_date bounds the year to 1..=9999,
+// so the day count fits comfortably in i32 and the casts cannot truncate.
+#[allow(clippy::cast_possible_truncation)]
 fn date_to_days(year: i32, month: i32, day: i32) -> i32 {
     let y = if month <= 2 {
         year as i64 - 1

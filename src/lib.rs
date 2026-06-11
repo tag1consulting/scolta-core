@@ -88,6 +88,14 @@ pub mod inner {
     // Prompt functions
     // -----------------------------------------------------------------------
 
+    /// Resolve a prompt template with site-specific variable substitution.
+    ///
+    /// Input: `{ "prompt_name": "...", "site_name": "...", "site_description": "...",
+    /// "dynamic_anchors": [...] }` (all but `prompt_name` optional).
+    ///
+    /// # Errors
+    /// `InvalidJson` for a non-object input, `MissingField`/`InvalidFieldType`
+    /// for a bad `prompt_name`, `UnknownPrompt` for an unrecognized template.
     pub fn resolve_prompt(input: &serde_json::Value) -> Result<String, ScoltaError> {
         let obj = input
             .as_object()
@@ -111,6 +119,10 @@ pub mod inner {
             })
     }
 
+    /// Get a raw prompt template by (trimmed) name, without substitution.
+    ///
+    /// # Errors
+    /// `UnknownPrompt` if the name does not match a template.
     pub fn get_prompt(name: &str) -> Result<String, ScoltaError> {
         let name = name.trim();
         prompts::get_template(name)
@@ -131,6 +143,10 @@ pub mod inner {
     /// Each result may include `"source_weight"` (f64, default 1.0) to dampen
     /// secondary-source results. The config may include `"priority_pages"` to
     /// boost specific results when query keywords match.
+    ///
+    /// # Errors
+    /// `InvalidJson` for non-object input, `MissingField`/`InvalidFieldType`
+    /// for a bad `query`, `MissingField`/`ParseError` for bad `results`.
     pub fn score_results(input: &serde_json::Value) -> Result<serde_json::Value, ScoltaError> {
         let obj = input
             .as_object()
@@ -185,6 +201,10 @@ pub mod inner {
     ///   "normalize_urls": true
     /// }
     /// ```
+    ///
+    /// # Errors
+    /// `InvalidJson` for non-object input, `MissingField`/`ParseError` for a
+    /// missing or unparseable `sets`.
     pub fn merge_results(input: &serde_json::Value) -> Result<serde_json::Value, ScoltaError> {
         let obj = input
             .as_object()
@@ -246,6 +266,10 @@ pub mod inner {
     ///
     /// Input: `{ "query": "...", "priority_pages": [...] }`
     /// Output: JSON array of matching PriorityPage entries.
+    ///
+    /// # Errors
+    /// `InvalidJson` for non-object input, `MissingField`/`InvalidFieldType`
+    /// for a bad `query`, `MissingField`/`ParseError` for bad `priority_pages`.
     pub fn match_priority_pages(
         input: &serde_json::Value,
     ) -> Result<serde_json::Value, ScoltaError> {
@@ -273,6 +297,10 @@ pub mod inner {
     }
 
     /// Score multiple queries against their respective result sets.
+    ///
+    /// # Errors
+    /// `InvalidJson` for non-object input, `MissingField`/`InvalidFieldType`
+    /// for a bad `queries`, `ParseError` for an entry lacking `query`/`results`.
     pub fn batch_score_results(
         input: &serde_json::Value,
     ) -> Result<serde_json::Value, ScoltaError> {
@@ -377,7 +405,7 @@ pub mod inner {
                     let min_term_length = map
                         .get("min_term_length")
                         .and_then(|v| v.as_u64())
-                        .unwrap_or(2) as u32;
+                        .map_or(2, config::saturate_u32);
 
                     let existing_terms: Vec<String> = map
                         .get("existing_terms")
@@ -414,6 +442,10 @@ pub mod inner {
     ///
     /// Input: `{ "content": "...", "query": "...", "config": { ... } }`
     /// Output: extracted context string.
+    ///
+    /// # Errors
+    /// `InvalidJson` for non-object input, `MissingField`/`InvalidFieldType`
+    /// for a bad `content` or `query`.
     pub fn extract_context(input: &serde_json::Value) -> Result<String, ScoltaError> {
         let obj = input
             .as_object()
@@ -438,6 +470,10 @@ pub mod inner {
     /// }
     /// ```
     /// Output: JSON array of `{ "url": "...", "title": "...", "context": "..." }`.
+    ///
+    /// # Errors
+    /// `InvalidJson` for non-object input, `MissingField`/`InvalidFieldType`
+    /// for a bad `query`, `MissingField`/`ParseError` for bad `items`.
     pub fn batch_extract_context(
         input: &serde_json::Value,
     ) -> Result<serde_json::Value, ScoltaError> {
@@ -500,13 +536,13 @@ pub mod inner {
         let mut cfg = context::ContextConfig::default();
         if let Some(obj) = cfg_json.and_then(|v| v.as_object()) {
             if let Some(v) = obj.get("max_length").and_then(|v| v.as_u64()) {
-                cfg.max_length = v as u32;
+                cfg.max_length = config::saturate_u32(v);
             }
             if let Some(v) = obj.get("intro_length").and_then(|v| v.as_u64()) {
-                cfg.intro_length = v as u32;
+                cfg.intro_length = config::saturate_u32(v);
             }
             if let Some(v) = obj.get("snippet_radius").and_then(|v| v.as_u64()) {
-                cfg.snippet_radius = v as u32;
+                cfg.snippet_radius = config::saturate_u32(v);
             }
             if let Some(v) = obj.get("separator").and_then(|v| v.as_str()) {
                 cfg.separator = v.to_string();
@@ -529,6 +565,11 @@ pub mod inner {
     ///
     /// Custom patterns are validated up front: a malformed entry or an invalid
     /// regex is an error, never a silently skipped redaction.
+    ///
+    /// # Errors
+    /// `InvalidJson` for non-object input, `MissingField`/`InvalidFieldType`
+    /// for a bad `query` or `custom_patterns`, `ParseError` for a malformed
+    /// pattern entry or invalid regex.
     pub fn sanitize_query(input: &serde_json::Value) -> Result<String, ScoltaError> {
         let obj = input
             .as_object()
@@ -617,6 +658,10 @@ pub mod inner {
     /// }
     /// ```
     /// Output: JSON array of trimmed messages.
+    ///
+    /// # Errors
+    /// `InvalidJson` for non-object input, `MissingField`/`ParseError` for a
+    /// missing or unparseable `messages`.
     pub fn truncate_conversation(
         input: &serde_json::Value,
     ) -> Result<serde_json::Value, ScoltaError> {
@@ -636,13 +681,13 @@ pub mod inner {
         let mut cfg = conversation::ConversationConfig::default();
         if let Some(cfg_obj) = obj.get("config").and_then(|v| v.as_object()) {
             if let Some(v) = cfg_obj.get("max_length").and_then(|v| v.as_u64()) {
-                cfg.max_length = v as u32;
+                cfg.max_length = config::saturate_u32(v);
             }
             if let Some(v) = cfg_obj.get("preserve_first_n").and_then(|v| v.as_u64()) {
-                cfg.preserve_first_n = v as u32;
+                cfg.preserve_first_n = config::saturate_u32(v);
             }
             if let Some(v) = cfg_obj.get("removal_unit").and_then(|v| v.as_u64()) {
-                cfg.removal_unit = v as u32;
+                cfg.removal_unit = config::saturate_u32(v);
             }
         }
 
@@ -655,10 +700,14 @@ pub mod inner {
     // Utility
     // -----------------------------------------------------------------------
 
+    /// Return the crate version string (`CARGO_PKG_VERSION`).
     pub fn version() -> String {
         VERSION.to_string()
     }
 
+    /// Build the runtime function manifest: name, version, WASM interface
+    /// version, and per-function `since`/`stability`/IO metadata. This is the
+    /// single source of truth host adapters read at startup.
     pub fn describe() -> serde_json::Value {
         json!({
             "name": "scolta-core",

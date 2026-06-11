@@ -106,7 +106,6 @@ mod tests {
             max_length: 60, // force removal
             preserve_first_n: 2,
             removal_unit: 2,
-            ..Default::default()
         };
         let result = truncate_conversation(msgs, &cfg);
         // System and initial context always kept
