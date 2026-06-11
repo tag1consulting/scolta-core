@@ -23,8 +23,13 @@ use crate::stop_words;
 /// # Returns
 /// `true` if the term is a stop word in the given language
 pub fn is_stop_word(term: &str, language: &str) -> bool {
-    let lower = term.to_lowercase();
-    stop_words::get_stop_words(language).contains(&lower.as_str())
+    is_stop_word_lower(&term.to_lowercase(), language)
+}
+
+/// [`is_stop_word`] for a term the caller has already lowercased, avoiding a
+/// second allocation on hot paths like [`extract_terms`].
+fn is_stop_word_lower(term_lower: &str, language: &str) -> bool {
+    stop_words::get_stop_words(language).contains(&term_lower)
 }
 
 /// Check whether a term is a stop word, also testing a custom list.
@@ -40,11 +45,14 @@ pub fn is_stop_word(term: &str, language: &str) -> bool {
 /// # Returns
 /// `true` if the term is in the language stop list or the custom list
 pub fn is_stop_word_with_custom(term: &str, language: &str, custom: &[String]) -> bool {
-    if is_stop_word(term, language) {
-        return true;
-    }
     let lower = term.to_lowercase();
-    custom.iter().any(|w| w.to_lowercase() == lower)
+    is_stop_word_with_custom_lower(&lower, language, custom)
+}
+
+/// [`is_stop_word_with_custom`] for an already-lowercased term.
+fn is_stop_word_with_custom_lower(term_lower: &str, language: &str, custom: &[String]) -> bool {
+    is_stop_word_lower(term_lower, language)
+        || custom.iter().any(|w| w.to_lowercase() == term_lower)
 }
 
 /// Check whether a term is valid for search use.
@@ -169,7 +177,8 @@ pub fn extract_terms(query: &str, language: &str) -> Vec<String> {
     query
         .to_lowercase()
         .split_whitespace()
-        .filter(|term| !is_stop_word(term, language) && term.len() > 1)
+        // The query is already lowercased — skip the per-term re-lowercasing.
+        .filter(|term| !is_stop_word_lower(term, language) && term.len() > 1)
         .map(|s| s.to_string())
         .collect()
 }
@@ -189,7 +198,8 @@ pub fn extract_terms_with_custom(query: &str, language: &str, custom: &[String])
     query
         .to_lowercase()
         .split_whitespace()
-        .filter(|term| !is_stop_word_with_custom(term, language, custom) && term.len() > 1)
+        // The query is already lowercased — skip the per-term re-lowercasing.
+        .filter(|term| !is_stop_word_with_custom_lower(term, language, custom) && term.len() > 1)
         .map(|s| s.to_string())
         .collect()
 }

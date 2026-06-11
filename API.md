@@ -300,7 +300,11 @@ Redact PII from a query string before analytics logging.
 - `query` — required string.
 - `config` — optional. All boolean fields default to `true`. Custom patterns use the `regex` crate syntax.
 
+Custom patterns are validated up front: an entry with a missing or non-string `regex`/`replacement`, or a regex that fails to compile, is a `JsError` — a misconfigured pattern can never silently skip redaction. Compiled patterns are cached per pattern string, so repeated calls with the same config do not recompile.
+
 **Output JSON:** Sanitized query string.
+
+**Error:** `JsError` if `query` is missing or any custom pattern is malformed or invalid.
 
 ---
 
@@ -391,7 +395,7 @@ All fields are optional in JSON input; missing fields use the listed defaults.
 | `custom_stop_words` | string[] | `[]` | Additional stop words layered on top of the language list |
 | `priority_pages` | PriorityPage[] | `[]` | Priority pages that receive a score boost when query keywords match |
 
-Valid ranges are checked by `ScoringConfig::clamp_and_validate()`. Values outside reasonable ranges are clamped and a warning is returned for each.
+Valid ranges are checked by `ScoringConfig::clamp_and_validate()`. In `score_results` and `batch_score_results`, values outside reasonable ranges are clamped to their boundaries before scoring, and a warning for each clamped field is written to the browser console (`console.warn`; stderr on native targets).
 
 **Recency strategy details:**
 

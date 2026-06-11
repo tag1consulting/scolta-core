@@ -11,7 +11,7 @@ use crate::stop_words;
 ///
 /// All fields are optional — callers that do not supply a field get the default
 /// behavior (same as calling `parse_expansion`).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ExpansionConfig {
     /// ISO 639-1 language code for stop word filtering. Default: `"en"`.
     pub language: String,
@@ -22,7 +22,7 @@ pub struct ExpansionConfig {
     /// Remove single-word results that match `generic_terms`. Default: true
     /// (only relevant when `generic_terms` is non-empty).
     pub filter_single_word_generic: bool,
-    /// Keep terms ≤4 characters regardless of generic status (acronyms like
+    /// Keep terms ≤3 characters regardless of generic status (acronyms like
     /// LLM, API, MoE). Default: true.
     pub keep_acronyms: bool,
     /// Keep terms containing an uppercase letter regardless of generic status
@@ -35,14 +35,26 @@ pub struct ExpansionConfig {
     pub existing_terms: Vec<String>,
 }
 
-impl ExpansionConfig {
-    pub fn new(language: &str) -> Self {
+impl Default for ExpansionConfig {
+    // Manual impl so the boolean defaults match the documented behavior
+    // (a derived Default would silently flip them all to false).
+    fn default() -> Self {
         ExpansionConfig {
-            language: language.to_string(),
+            language: String::new(),
+            generic_terms: Vec::new(),
             filter_single_word_generic: true,
             keep_acronyms: true,
             keep_proper_nouns: true,
             min_term_length: 2,
+            existing_terms: Vec::new(),
+        }
+    }
+}
+
+impl ExpansionConfig {
+    pub fn new(language: &str) -> Self {
+        ExpansionConfig {
+            language: language.to_string(),
             ..Default::default()
         }
     }
@@ -113,9 +125,14 @@ pub fn parse_expansion_with_config(text: &str, config: &ExpansionConfig) -> Vec<
     let filtered = if config.generic_terms.is_empty() {
         parsed
     } else {
+        let generic_lower: Vec<String> = config
+            .generic_terms
+            .iter()
+            .map(|g| g.to_lowercase())
+            .collect();
         parsed
             .into_iter()
-            .filter(|term| should_keep_term(term, config, language, min_len))
+            .filter(|term| should_keep_term(term, config, &generic_lower, language, min_len))
             .collect()
     };
 
@@ -128,7 +145,16 @@ pub fn parse_expansion_with_config(text: &str, config: &ExpansionConfig) -> Vec<
 }
 
 /// Decide whether to keep a term under generic-term filtering rules.
-fn should_keep_term(term: &str, config: &ExpansionConfig, language: &str, min_len: usize) -> bool {
+///
+/// `generic_lower` is `config.generic_terms` lowercased once by the caller so
+/// the list is not rebuilt for every term.
+fn should_keep_term(
+    term: &str,
+    config: &ExpansionConfig,
+    generic_lower: &[String],
+    language: &str,
+    min_len: usize,
+) -> bool {
     let char_count = term.chars().count();
 
     // Remove below-minimum-length terms.
@@ -146,18 +172,16 @@ fn should_keep_term(term: &str, config: &ExpansionConfig, language: &str, min_le
         return true;
     }
 
-    let generic_lower: Vec<String> = config
-        .generic_terms
-        .iter()
-        .map(|g| g.to_lowercase())
-        .collect();
-
     let stop_words = stop_words::get_stop_words(language);
 
     let words: Vec<&str> = term.split_whitespace().collect();
 
     if words.len() == 1 {
-        // Single word: remove if it matches a generic term.
+        // Single word: remove if it matches a generic term (when the
+        // filter_single_word_generic knob is on).
+        if !config.filter_single_word_generic {
+            return true;
+        }
         let lower = term.to_lowercase();
         !generic_lower.contains(&lower)
     } else {
@@ -276,6 +300,52 @@ mod tests {
         assert!(!terms.contains(&"team".to_string()));
         assert!(!terms.contains(&"platform".to_string()));
         assert!(terms.contains(&"drupal".to_string()));
+    }
+
+    #[test]
+    fn test_filter_single_word_generic_off_keeps_generic_terms() {
+        let config = ExpansionConfig {
+            language: "en".to_string(),
+            generic_terms: vec!["team".to_string(), "platform".to_string()],
+            filter_single_word_generic: false,
+            keep_acronyms: false,
+            keep_proper_nouns: true,
+            min_term_length: 2,
+            existing_terms: vec![],
+        };
+
+        // With the knob off, single-word generic terms survive.
+        let terms = parse_expansion_with_config(r#"["team", "drupal", "platform"]"#, &config);
+        assert!(terms.contains(&"team".to_string()));
+        assert!(terms.contains(&"platform".to_string()));
+        assert!(terms.contains(&"drupal".to_string()));
+    }
+
+    #[test]
+    fn test_filter_single_word_generic_on_removes_generic_terms() {
+        let config = ExpansionConfig {
+            language: "en".to_string(),
+            generic_terms: vec!["team".to_string(), "platform".to_string()],
+            filter_single_word_generic: true,
+            keep_acronyms: false,
+            keep_proper_nouns: true,
+            min_term_length: 2,
+            existing_terms: vec![],
+        };
+
+        let terms = parse_expansion_with_config(r#"["team", "drupal", "platform"]"#, &config);
+        assert!(!terms.contains(&"team".to_string()));
+        assert!(!terms.contains(&"platform".to_string()));
+        assert!(terms.contains(&"drupal".to_string()));
+    }
+
+    #[test]
+    fn test_default_matches_documented_defaults() {
+        let d = ExpansionConfig::default();
+        assert!(d.filter_single_word_generic);
+        assert!(d.keep_acronyms);
+        assert!(d.keep_proper_nouns);
+        assert_eq!(d.min_term_length, 2);
     }
 
     #[test]
