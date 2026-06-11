@@ -17,6 +17,8 @@ pub struct ContextConfig {
     pub snippet_radius: u32,
     /// Separator inserted between extracted sections. Default: `"\n\n[...]\n\n"`.
     pub separator: String,
+    /// ISO 639-1 language code for query stop-word filtering. Default: `"en"`.
+    pub language: String,
 }
 
 impl Default for ContextConfig {
@@ -26,6 +28,7 @@ impl Default for ContextConfig {
             intro_length: 2000,
             snippet_radius: 500,
             separator: "\n\n[...]\n\n".to_string(),
+            language: "en".to_string(),
         }
     }
 }
@@ -65,13 +68,16 @@ pub fn extract_context(content: &str, query: &str, config: &ContextConfig) -> St
         return content.to_string();
     }
 
-    let terms = common::extract_terms(query, "en");
+    let terms = common::extract_terms(query, &config.language);
     if terms.is_empty() {
         return truncate_at_sentence(content, max_len).to_string();
     }
 
-    // Extract intro at sentence boundary.
-    let intro_raw = char_slice(content, 0, intro_len.min(char_len(content)));
+    // Extract intro at sentence boundary. Slice one char past intro_len so
+    // truncate_at_sentence sees an over-long input and actually cuts back to
+    // the last sentence boundary within intro_len — slicing exactly intro_len
+    // chars made the call a no-op and every intro a mid-word hard cut.
+    let intro_raw = char_slice(content, 0, (intro_len + 1).min(char_len(content)));
     let intro = truncate_at_sentence(intro_raw, intro_len).to_string();
 
     // Work on the text after the intro.
@@ -79,8 +85,12 @@ pub fn extract_context(content: &str, query: &str, config: &ContextConfig) -> St
     let remaining = &content[intro_byte_end..];
 
     // Find all keyword match ranges (byte offsets in `remaining`).
+    //
+    // The search runs over a lowercased copy, but `to_lowercase` is not
+    // length-preserving ('İ' U+0130 grows 2 → 3 bytes), so positions found in
+    // the lowered text are mapped back to original byte offsets before slicing.
     let mut ranges: Vec<(usize, usize)> = Vec::new();
-    let remaining_lower = remaining.to_lowercase();
+    let (remaining_lower, lower_to_orig) = lowercase_with_offsets(remaining);
 
     for term in &terms {
         let term_lower = term.to_lowercase();
@@ -89,17 +99,16 @@ pub fn extract_context(content: &str, query: &str, config: &ContextConfig) -> St
             match remaining_lower[search_from..].find(&term_lower) {
                 None => break,
                 Some(rel_pos) => {
-                    let abs_pos = search_from + rel_pos;
+                    let lower_pos = search_from + rel_pos;
+                    let orig_pos = lower_to_orig[lower_pos];
+                    let orig_end = lower_to_orig[lower_pos + term_lower.len()];
                     // Expand by snippet_radius bytes, then adjust to word/char boundaries.
                     let start =
-                        word_boundary_start(remaining, byte_sub(remaining, abs_pos, radius));
-                    let end = word_boundary_end(
-                        remaining,
-                        byte_add(remaining, abs_pos + term_lower.len(), radius),
-                    );
+                        word_boundary_start(remaining, byte_sub(remaining, orig_pos, radius));
+                    let end = word_boundary_end(remaining, byte_add(remaining, orig_end, radius));
                     ranges.push((start, end));
                     // Advance by at least one character to prevent infinite loops.
-                    search_from = abs_pos + term_lower.len().max(1);
+                    search_from = lower_pos + term_lower.len().max(1);
                 }
             }
         }
@@ -151,6 +160,29 @@ pub fn batch_extract_context(
 
 fn char_len(s: &str) -> usize {
     s.chars().count()
+}
+
+/// Lowercase `s` for case-insensitive search, recording for every byte of the
+/// lowered string the byte offset of the originating character in `s` (plus a
+/// final sentinel entry equal to `s.len()`).
+///
+/// `to_lowercase` is not length-preserving, so a position found in the lowered
+/// text cannot be used to slice `s` directly; `offsets[lower_pos]` gives the
+/// corresponding original offset, always on a char boundary.
+fn lowercase_with_offsets(s: &str) -> (String, Vec<usize>) {
+    let mut lower = String::with_capacity(s.len());
+    let mut offsets: Vec<usize> = Vec::with_capacity(s.len() + 1);
+    for (orig_idx, ch) in s.char_indices() {
+        for lc in ch.to_lowercase() {
+            let start = lower.len();
+            lower.push(lc);
+            for _ in start..lower.len() {
+                offsets.push(orig_idx);
+            }
+        }
+    }
+    offsets.push(s.len());
+    (lower, offsets)
 }
 
 /// Return a slice of `s` from character `start` up to character `end`.
@@ -312,6 +344,7 @@ mod tests {
             intro_length: 100,
             snippet_radius: 50,
             separator: "\n...\n".to_string(),
+            ..Default::default()
         };
         let result = extract_context(&long, "drupal", &cfg);
         // Result should include the intro (first 100 chars of A's)
@@ -328,6 +361,7 @@ mod tests {
             intro_length: 50,
             snippet_radius: 30,
             separator: "|".to_string(),
+            ..Default::default()
         };
         let result = extract_context(&content, "drupal", &cfg);
         assert!(result.contains("drupal"));
@@ -383,6 +417,110 @@ mod tests {
         assert_eq!(results[1].url, "https://b.com");
     }
 
+    #[test]
+    fn test_language_plumbs_to_stop_word_filtering() {
+        // "der" is a German stop word: with language "de" it yields no terms,
+        // so nothing anchors a snippet deep in the content. With "en" it is a
+        // meaningful term and must anchor one.
+        let content = format!("{}xx der yy {}", "A ".repeat(2500), "B ".repeat(2000));
+        let de_cfg = ContextConfig {
+            max_length: 3000,
+            intro_length: 500,
+            snippet_radius: 30,
+            separator: "|".to_string(),
+            language: "de".to_string(),
+        };
+        let de_result = extract_context(&content, "der", &de_cfg);
+        assert!(
+            !de_result.contains("xx der"),
+            "German stop word query must not anchor a snippet"
+        );
+
+        let en_cfg = ContextConfig {
+            language: "en".to_string(),
+            ..de_cfg
+        };
+        let en_result = extract_context(&content, "der", &en_cfg);
+        assert!(
+            en_result.contains("xx der yy"),
+            "with language=en, 'der' is a meaningful term and must anchor a snippet"
+        );
+    }
+
+    #[test]
+    fn test_german_query_anchors_with_german_stop_words() {
+        // Query mixes a German stop word with a content word; the content word
+        // must still anchor its snippet under language "de".
+        let content = format!(
+            "{}vorher drupal nachher {}",
+            "A ".repeat(2500),
+            "B ".repeat(2000)
+        );
+        let cfg = ContextConfig {
+            max_length: 3000,
+            intro_length: 500,
+            snippet_radius: 30,
+            separator: "|".to_string(),
+            language: "de".to_string(),
+        };
+        let result = extract_context(&content, "und drupal", &cfg);
+        assert!(
+            result.contains("vorher drupal nachher"),
+            "content term in a German query must anchor a snippet"
+        );
+    }
+
+    #[test]
+    fn test_intro_truncates_at_sentence_boundary() {
+        // intro_length cuts mid-sentence, but a sentence boundary sits shortly
+        // before the cut — the intro must end there, not mid-word.
+        let content = format!(
+            "First sentence ends here. Second sentence is much longer and keeps going. {}",
+            "filler ".repeat(2000)
+        );
+        let cfg = ContextConfig {
+            max_length: 200,
+            intro_length: 40, // falls inside "Second sentence …"
+            snippet_radius: 20,
+            separator: "|".to_string(),
+            language: "en".to_string(),
+        };
+        // Query term does not occur → fallback path is intro + separator + remaining.
+        let result = extract_context(&content, "zzznotfound", &cfg);
+        assert!(
+            result.starts_with("First sentence ends here.|"),
+            "intro must be cut at the sentence boundary; got: {:?}",
+            &result[..60.min(result.len())]
+        );
+    }
+
+    #[test]
+    fn test_case_expanding_chars_do_not_misalign_snippets() {
+        // 'İ' (U+0130) is 2 bytes but lowercases to 3 ("i" + combining dot),
+        // so positions found in lowercased text drift +1 byte per İ against
+        // the original. 100 İ's before the keyword previously pushed the
+        // snippet window 100 bytes past the keyword.
+        let content = format!(
+            "{} {} drupal kernwort {}",
+            "A".repeat(2000),
+            "İ".repeat(100),
+            "B ".repeat(2000)
+        );
+        let cfg = ContextConfig {
+            max_length: 3000,
+            intro_length: 1000,
+            snippet_radius: 20,
+            separator: "|".to_string(),
+            language: "en".to_string(),
+        };
+        let result = extract_context(&content, "drupal", &cfg);
+        assert!(
+            result.contains("drupal"),
+            "snippet must contain the matched keyword despite case-expanding chars"
+        );
+        assert!(std::str::from_utf8(result.as_bytes()).is_ok());
+    }
+
     // -----------------------------------------------------------------------
     // UTF-8 safety — snippet boundaries must never split a multi-byte char
     // -----------------------------------------------------------------------
@@ -408,6 +546,7 @@ mod tests {
                 intro_length: 2000,
                 snippet_radius: 200,
                 separator: "\n...\n".to_string(),
+                ..Default::default()
             };
 
             let result = extract_context(&content, "drupal", &cfg);
@@ -434,6 +573,7 @@ mod tests {
                 intro_length: 2000,
                 snippet_radius: 299, // raw start = 600 - 299 = 301; not a char boundary
                 separator: "|".to_string(),
+                ..Default::default()
             };
 
             let result = extract_context(&content, "caffè", &cfg);
@@ -455,6 +595,7 @@ mod tests {
                 intro_length: 2000,
                 snippet_radius: 9, // 9 < 16 (two emojis); likely to hit inside an emoji
                 separator: "|".to_string(),
+                ..Default::default()
             };
 
             let result = extract_context(&content, "drupal", &cfg);
@@ -507,6 +648,7 @@ mod tests {
                 intro_length: 2000,
                 snippet_radius: 300, // large enough for alpha+beta ranges to overlap
                 separator: "|".to_string(),
+                ..Default::default()
             };
 
             let result = extract_context(&content, "alpha beta", &cfg);

@@ -251,7 +251,7 @@ Extract the most relevant portion of article content for LLM context.
 
 - `content` — required string. Full article text.
 - `query` — required string. Search query for keyword anchoring.
-- `config` — optional object. `max_length` (default 6000), `intro_length` (default 2000), `snippet_radius` (default 500), `separator` (default `"\n\n[...]\n\n"`).
+- `config` — optional object. `max_length` (default 6000), `intro_length` (default 2000), `snippet_radius` (default 500), `separator` (default `"\n\n[...]\n\n"`), `language` (ISO 639-1 code for query stop-word filtering, default `"en"`).
 
 **Output JSON:** Extracted context string.
 
@@ -321,7 +321,7 @@ Trim conversation history to fit within a character limit.
 ```
 
 - `messages` — required array of `{ "role": "...", "content": "..." }` objects.
-- `config` — optional. `max_length` (default 12000), `preserve_first_n` (default 2), `removal_unit` (default 2).
+- `config` — optional. `max_length` (default 12000, counted in **characters**, not bytes), `preserve_first_n` (default 2), `removal_unit` (default 2).
 
 **Output JSON:** Trimmed messages array.
 
