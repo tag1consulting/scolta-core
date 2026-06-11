@@ -511,6 +511,9 @@ pub mod inner {
             if let Some(v) = obj.get("separator").and_then(|v| v.as_str()) {
                 cfg.separator = v.to_string();
             }
+            if let Some(v) = obj.get("language").and_then(|v| v.as_str()) {
+                cfg.language = v.to_string();
+            }
         }
         cfg
     }
@@ -1095,6 +1098,28 @@ mod tests {
         });
         let result = inner::extract_context(&input).unwrap();
         assert_eq!(result, "Short content.");
+    }
+
+    #[test]
+    fn test_extract_context_language_config_plumbed() {
+        // "der" is a German stop word: under language "de" the query has no
+        // meaningful terms, so the deep occurrence must not be snippet-anchored.
+        let content = format!("{}xx der yy {}", "A ".repeat(2500), "B ".repeat(2000));
+        let de = inner::extract_context(&json!({
+            "content": content,
+            "query": "der",
+            "config": {"max_length": 3000, "intro_length": 500, "snippet_radius": 30, "language": "de"}
+        }))
+        .unwrap();
+        assert!(!de.contains("xx der"));
+
+        let en = inner::extract_context(&json!({
+            "content": content,
+            "query": "der",
+            "config": {"max_length": 3000, "intro_length": 500, "snippet_radius": 30, "language": "en"}
+        }))
+        .unwrap();
+        assert!(en.contains("xx der yy"));
     }
 
     #[test]

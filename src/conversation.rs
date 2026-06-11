@@ -48,7 +48,9 @@ pub fn truncate_conversation(
     let max_len = config.max_length as usize;
 
     loop {
-        let total: usize = messages.iter().map(|m| m.content.len()).sum();
+        // The limit is documented in characters; chars().count() keeps
+        // multibyte content from being over-counted (len() counts bytes).
+        let total: usize = messages.iter().map(|m| m.content.chars().count()).sum();
         if total <= max_len {
             break;
         }
@@ -150,6 +152,25 @@ mod tests {
         let result = truncate_conversation(msgs, &cfg);
         // System message preserved; oldest non-preserved messages removed one by one
         assert_eq!(result[0].role, "system");
+    }
+
+    #[test]
+    fn test_max_length_counts_chars_not_bytes() {
+        // "é" is 1 char but 2 bytes. 6 messages × 100 chars = 600 chars
+        // (1200 bytes). A 700-char limit must keep everything — the old
+        // byte-based count would have trimmed.
+        let msgs: Vec<Message> = (0..6).map(|_| msg("user", &"é".repeat(100))).collect();
+        let cfg = ConversationConfig {
+            max_length: 700,
+            preserve_first_n: 2,
+            removal_unit: 2,
+        };
+        let result = truncate_conversation(msgs, &cfg);
+        assert_eq!(
+            result.len(),
+            6,
+            "max_length is documented in characters; multibyte content must not be over-counted"
+        );
     }
 
     #[test]
