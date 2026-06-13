@@ -42,6 +42,15 @@ await pagefind.init();
 const raw = await pagefind.search('aubergine parmesan');
 const rawResults = await Promise.all(raw.results.slice(0, 50).map(r => r.data()));
 
+// Map Pagefind's shape to Scolta's SearchResult: Scolta needs a top-level
+// `title`, but Pagefind nests it under `meta.title`. Lift it, and carry the
+// fields you want to render back out.
+const results = rawResults.map(r => ({
+  url: r.url,
+  title: r.meta.title,
+  excerpt: r.excerpt,
+}));
+
 // Build a ScoringConfig — recipes don't have meaningful publish dates
 const config = {
   title_match_boost: 1.5,
@@ -51,20 +60,20 @@ const config = {
   language: 'en',
 };
 
-// Re-rank with Scolta
-const scored = score_results(
-  'aubergine parmesan',
-  JSON.stringify(rawResults),
-  JSON.stringify(config)
-);
-const results = JSON.parse(scored);
+// Re-rank with Scolta — one JSON string in ({ query, results, config }),
+// a JSON string out (the results array, sorted by score descending).
+const scored = JSON.parse(score_results(JSON.stringify({
+  query: 'aubergine parmesan',
+  results,
+  config,
+})));
 
-// results[0] is Eggplant Parmigiana
+// scored[0] is Eggplant Parmigiana
 // Pagefind's stemmer matched "eggplant" from the body text where both terms appear.
 // Scolta's title boost surfaced it above pages that mention aubergine only in passing.
-console.log(results[0].url);          // "/recipes/eggplant-parmigiana"
-console.log(results[0].meta.title);   // "Eggplant Parmigiana"
-console.log(results[0].scolta_score); // e.g. 1.82
+console.log(scored[0].url);   // "/recipes/eggplant-parmigiana"
+console.log(scored[0].title); // "Eggplant Parmigiana"
+console.log(scored[0].score); // e.g. 1.82
 ```
 
 In practice, the platform adapters (WordPress, Drupal, Laravel) call `score_results` via `scolta.js`, which handles WASM loading and config serialization automatically. You only need the raw WASM API if you are building a custom front end or a new adapter.
