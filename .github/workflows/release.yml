@@ -85,6 +85,14 @@ jobs:
             scolta_core.d.ts \
             scolta_core_bg.wasm.d.ts
 
+      # Fail-closed content sweep of the artifact we are about to publish:
+      # rejects any unexpected member (wasm-pack drift cruft) and enforces the
+      # WASM size cap. Single source of truth shared with ci.yml.
+      - name: Validate release tarball
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          ./scripts/validate-tarball.sh scolta-core-${VERSION}.tar.gz
+
       - name: Extract CHANGELOG entry
         run: |
           VERSION=${GITHUB_REF_NAME#v}

@@ -72,7 +72,7 @@ jobs:
           fi
 
   tarball-allowlist:
-    name: Release tarball member-list assertion
+    name: Release tarball content sweep
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -91,7 +91,37 @@ jobs:
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - name: Build WASM
         run: wasm-pack build --target web --release
-      - name: Assert tarball contains exactly the expected members
+
+      # Sweep the WHOLE wasm-pack output dir, not just the four files release.yml
+      # names. release.yml selects members by name, so wasm-pack drift cruft
+      # (package.json, README.md, LICENSE, .gitignore, snippets/ ...) would slip
+      # past a name-selected tar unnoticed. Catch any NEW unexpected file here,
+      # at PR time, before it can ride along after a wasm-pack upgrade.
+      - name: Detect unexpected files in pkg/
+        run: |
+          # Mirror the allowlist in scripts/validate-tarball.sh.
+          ALLOWED="scolta_core_bg.wasm scolta_core.js scolta_core.d.ts scolta_core_bg.wasm.d.ts"
+          UNEXPECTED=""
+          while IFS= read -r f; do
+            name="$(basename "$f")"
+            case " $ALLOWED " in
+              *" $name "*) ;;
+              *) UNEXPECTED="$UNEXPECTED $f" ;;
+            esac
+          done < <(find pkg -type f | sort)
+          if [ -n "$UNEXPECTED" ]; then
+            echo "NOTE: wasm-pack also emitted these files into pkg/ (expected:"
+            echo "package.json, README.md, LICENSE, .gitignore — NOT shipped):"
+            for f in $UNEXPECTED; do echo "  $f"; done
+            echo "This is informational; the artifact below is built from the"
+            echo "named allowlist only. If wasm-pack starts emitting something new"
+            echo "that SHOULD ship, update scripts/validate-tarball.sh."
+          fi
+
+      # Build the artifact exactly as release.yml does, then run the same
+      # fail-closed validator release.yml runs. PR-time parity: breakage is
+      # caught before the tag, not after.
+      - name: Build release tarball
         run: |
           tar -czf test-release.tar.gz \
             -C pkg \
@@ -99,24 +129,8 @@ jobs:
             scolta_core.js \
             scolta_core.d.ts \
             scolta_core_bg.wasm.d.ts
-
-          ACTUAL=$(tar -tzf test-release.tar.gz | sort)
-          EXPECTED=$(printf '%s\n' \
-            scolta_core.d.ts \
-            scolta_core.js \
-            scolta_core_bg.wasm \
-            scolta_core_bg.wasm.d.ts \
-            | sort)
-
-          if [ "$ACTUAL" != "$EXPECTED" ]; then
-            echo "ERROR: Tarball members do not match the allowlist."
-            echo "Expected:"
-            echo "$EXPECTED"
-            echo "Actual:"
-            echo "$ACTUAL"
-            exit 1
-          fi
-          echo "PASS: Tarball contains exactly 4 expected members."
+      - name: Validate release tarball
+        run: ./scripts/validate-tarball.sh test-release.tar.gz
 
   changelog:
     name: CHANGELOG enforcement
