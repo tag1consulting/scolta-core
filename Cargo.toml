@@ -8,7 +8,6 @@ description = "Scolta search engine core - browser WASM module for client-side s
 license = "MIT"
 homepage = "https://github.com/tag1consulting/scolta-core"
 repository = "https://github.com/tag1consulting/scolta-core"
-documentation = "https://docs.rs/scolta-core"
 readme = "README.md"
 keywords = ["wasm", "search", "scoring", "pagefind"]
 categories = ["wasm", "web-programming"]
