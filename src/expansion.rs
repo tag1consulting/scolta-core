@@ -80,9 +80,10 @@ pub fn parse_expansion_with_language(response: &str, language: &str) -> Vec<Stri
 ///
 /// Only active when `config.generic_terms` is non-empty. Rules applied in order:
 /// 1. Terms shorter than `min_term_length` are removed.
-/// 2. Terms ≤4 characters pass if `keep_acronyms` is true.
+/// 2. Terms ≤3 characters pass unconditionally if `keep_acronyms` is true.
 /// 3. Terms with any uppercase letter pass if `keep_proper_nouns` is true.
-/// 4. Single-word generic terms are removed.
+/// 4. Single-word generic terms are removed only when `filter_single_word_generic`
+///    is true; if it is false, single-word terms always pass.
 /// 5. Multi-word phrases pass if at least one word is not a stop word and not generic.
 ///
 /// # Term merging
