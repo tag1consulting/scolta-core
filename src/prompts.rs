@@ -3,7 +3,7 @@
 /// Template for expanding user search queries into alternative terms.
 pub const EXPAND_QUERY: &str = r#"You expand search queries for {SITE_NAME} {SITE_DESCRIPTION}.
 
-Return a JSON object with a "terms" key containing 2-4 alternative search terms — or up to 6 concrete members when decomposing a category, family, region, or context under rules 13-14 below. Do NOT include the original query — only return different phrasings that would find additional relevant content.
+Return a JSON object with a "terms" key containing 2-4 alternative search terms — or up to 6 concrete members when decomposing a category, family, region, or context under rules 13-14 below, or up to 6 defining details when decomposing a named entity or event under rule 16 below. Do NOT include the original query — only return different phrasings that would find additional relevant content.
 
 IMPORTANT RULES:
 1. Extract the KEY TOPIC from the query — ignore question words (what, who, how, why, where, when, is, are, etc.)
@@ -21,6 +21,7 @@ IMPORTANT RULES:
 13. CATEGORY → MEMBERS. When the query names a category, family, or region that has well-known concrete members, expand into the members, not synonyms of the category: "version control systems" → ["Git", "Mercurial", "Subversion"]; "European cars" → ["German cars", "Italian cars", "French cars"]; "Nordic countries" → ["Sweden", "Norway", "Denmark"]; "Southeast Asian food" → ["Thai", "Vietnamese", "Indonesian"]. Only decompose when you can name the members confidently. If you cannot, fall back to normal alternate phrasings — never invent members to fill the list.
 14. CONTEXT / USE-CASE → CONCRETE ITEMS. When the query names a context, occasion, or use-case rather than a thing, expand into the concrete item types that serve it, not restatements of the context: "home office setup" → ["standing desk", "ergonomic chair", "monitor arm"]; "first aid supplies" → ["bandages", "antiseptic", "gauze"]; "summer lunch" → ["cold salads", "chilled soups", "sandwiches"]. Keep the context implicit in the phrasing; do not restate it as a synonym ("light summer meals").
 15. UNRECOGNIZED OR UNVERIFIABLE NAMED ENTITIES. When the query names a specific entity you do not recognize as real and well-known — a product, place, organization, mission, regulation, medical condition, or similar — do NOT manufacture members, terminology, treatments, or attributes for it. Expand only with generic, neutral phrasings of the surrounding topic, and never produce authoritative-sounding domain-specific detail that presupposes the entity is real. This matters most for medical, legal, and safety queries, where inventing plausible clinical, legal, or technical detail is actively harmful: "treatment for Glorptosis" → ["medical treatment", "therapy options", "symptom management"], not invented drugs or pathology.
+16. NAMED ENTITY / EVENT → DEFINING DETAILS. When the query centers on a specific named entity or event — a mission, model, version, release, incident, case, statute, or product line — expand into the concrete details that identify it in prose: participants, components, distinctive phrases, causes, and consequences. Authors routinely write about a well-known entity without repeating its name or number, so an expansion that keeps the entity name glued to every phrase will miss the very pages that describe it. At least half your terms MUST drop the entity name entirely, and you must never simply append the name to a list of near-synonyms: "iPhone 12 battery problems" → ["battery drain", "swollen battery", "shuts off in cold"], NOT ["iPhone 12 battery drain", "iPhone 12 battery failure", "iPhone 12 battery issue"]; "Ford F-150 towing capacity" → ["payload rating", "trailer weight", "tow package"]; "Hindenburg disaster" → ["airship fire", "Lakehurst landing", "hydrogen explosion"]. Rule 15 still governs: only emit details you are confident are true of that entity, and for an entity you do not recognize fall back to neutral phrasings of the surrounding topic rather than inventing participants, parts, or events.
 
 Examples:
 - "customer support" → {"terms": ["help desk", "customer service", "support center", "contact us"]}
@@ -29,7 +30,8 @@ Examples:
 - "recipes without eggs" → {"terms": ["egg-free baking", "vegan baking", "eggless recipes"]}
 - "gluten-free desserts" → {"terms": ["gluten-free baking", "celiac safe sweets", "wheat-free pastry"]}
 - "version control systems" → {"terms": ["Git", "Mercurial", "Subversion", "Perforce"]}
-- "home office setup" → {"terms": ["standing desk", "ergonomic chair", "monitor arm"]}"#;
+- "home office setup" → {"terms": ["standing desk", "ergonomic chair", "monitor arm"]}
+- "iPhone 12 battery problems" → {"terms": ["battery drain", "swollen battery", "shuts off in cold"]}"#;
 
 /// Template for summarizing search results in response to a user query.
 pub const SUMMARIZE: &str = r#"You are a search assistant for the {SITE_NAME} {SITE_DESCRIPTION}. You behave like a knowledgeable expert who has reviewed the search results and curates the best answers — not a narrator reading results back to the user.
@@ -67,8 +69,10 @@ METADATA RULES:
 GROUNDING CHECK:
 - Use ONLY information from the provided excerpts. Do not draw on training knowledge to describe, infer, or fill gaps for anything not explicitly in the excerpts.
 - If a detail is not in the excerpts, omit it — never estimate or invent it.
-- CORPUS AWARENESS: You are searching a specific collection described above, not the entire internet or a complete knowledge base. When few or no results match the query, explain this honestly by referencing the collection's scope from the site description — e.g., "[site name] focuses on [scope], so it doesn't include a dedicated article on [topic]" or "[topic] may fall outside what this collection covers." Do NOT invent statistics about the collection (article counts, totals, sizes); describe its scope qualitatively from the site description, never with a number you cannot verify. Do NOT pretend the collection should have the answer. Do NOT redirect to external sources. Suggest related terms the user could try within THIS collection.
-- When results are only tangentially related to the query, still try to help — present what the collection DOES have and extract whatever is genuinely useful. But be upfront that the results are indirect: "This collection doesn't have a dedicated article on [topic], but here's what I found in related articles:" is better than presenting tangential results as if they directly answer the question. The attempt to help is valuable; the honesty about the gap is what prevents confusion.
+- PARTIAL VIEW: The excerpts you are shown are a small slice of the collection selected by a single search, never the collection itself. You cannot see what else it contains, so you are never in a position to judge what it does or does not have.
+- NEVER ASSERT ABSENCE: Do NOT state or imply that the collection lacks an article, has no dedicated coverage, does not include a topic, or that the topic falls outside its scope. You have no evidence for such a claim and it is frequently false — the content often exists under wording these excerpts did not match. Banned phrasings include "the collection doesn't have a dedicated article on [topic]", "there is no article about [topic]", "[topic] isn't covered here", and every variant of them. Describe what the excerpts DO contain instead.
+- WEAK RESULT SETS: A context header may be marked "[No result matched the full query...]", and excerpts may be thin or off-target. Attribute that to THIS SEARCH, never to the collection: "This search didn't surface a close match on [topic]. Try [more specific terms]." is correct; "this collection has nothing on [topic]" is not. Suggest more specific terms the user could try within THIS collection, and still present whatever genuinely relevant material the excerpts do contain.
+- Do NOT invent statistics about the collection (article counts, totals, sizes). Do NOT pretend the collection should have the answer. Do NOT redirect to external sources.
 
 Tone: Direct, expert, helpful. Like a knowledgeable friend who has reviewed the options for you."#;
 
@@ -111,7 +115,7 @@ WHAT YOU MUST NEVER DO:
 
 GROUNDING CHECK:
 - Before citing any fact, verify it appears in the provided excerpts — never from training data alone.
-- If the excerpts don't cover the question, say so by referencing the collection scope — e.g., "This collection doesn't appear to have content on [topic]." Suggest alternative search terms the user could try within this collection. Do NOT redirect to external sources.
+- If the excerpts don't cover the question, say that these results don't cover it — never that the collection lacks the content. You only ever see the excerpts from one search, so you cannot know what else the collection holds: "These results don't cover [topic]." is correct; "This collection doesn't have content on [topic]." is not. Suggest alternative search terms the user could try within this collection. Do NOT redirect to external sources.
 
 Tone: Direct, expert, helpful. Like a knowledgeable friend who has reviewed the options for you."##;
 
@@ -283,34 +287,113 @@ mod tests {
     }
 
     #[test]
-    fn test_summarize_corpus_awareness_forbids_inventing_statistics() {
-        // The rule must explicitly forbid fabricating corpus counts/totals/sizes.
-        assert!(
-            SUMMARIZE.contains("CORPUS AWARENESS"),
-            "summarize template must retain the CORPUS AWARENESS rule"
-        );
+    fn test_summarize_forbids_inventing_statistics() {
+        // The grounding rules must explicitly forbid fabricating corpus
+        // counts/totals/sizes. (The guard formerly lived under a "CORPUS
+        // AWARENESS" heading, which was removed because the surrounding rule
+        // instructed the model to assert absence — see the tests below.)
         assert!(
             SUMMARIZE.contains("Do NOT invent statistics about the collection"),
-            "CORPUS AWARENESS must explicitly forbid inventing corpus statistics"
+            "summarize must explicitly forbid inventing corpus statistics"
+        );
+    }
+
+    // Identifier / proper-noun queries — the summary must never generalize a
+    // single search's slice of the corpus into a claim about the whole corpus.
+
+    #[test]
+    fn test_summarize_forbids_asserting_absence() {
+        assert!(
+            SUMMARIZE.contains("NEVER ASSERT ABSENCE"),
+            "summarize must carry the NEVER ASSERT ABSENCE rule"
+        );
+        assert!(
+            SUMMARIZE.contains(
+                "Do NOT state or imply that the collection lacks an article, has no dedicated coverage"
+            ),
+            "the rule must forbid claiming the collection lacks coverage"
         );
     }
 
     #[test]
-    fn test_summarize_corpus_awareness_matches_canonical_snapshot() {
-        // Snapshot guard: pin the exact CORPUS AWARENESS bullet so any future edit
+    fn test_summarize_bans_the_observed_absence_phrasings() {
+        // These are the exact phrasings the old CORPUS AWARENESS rule taught,
+        // and that produced the false "no dedicated article" overview.
+        for banned in [
+            "the collection doesn't have a dedicated article on [topic]",
+            "there is no article about [topic]",
+            "[topic] isn't covered here",
+        ] {
+            assert!(
+                SUMMARIZE.contains(banned),
+                "summarize must name `{banned}` as a banned phrasing"
+            );
+        }
+    }
+
+    #[test]
+    fn test_summarize_no_longer_instructs_absence_claims() {
+        // Regression guard: the template must not reintroduce wording that
+        // tells the model to report the collection as lacking a topic.
+        assert!(
+            !SUMMARIZE.contains("so it doesn't include a dedicated article on"),
+            "summarize must not instruct the model to claim a missing article"
+        );
+        assert!(
+            !SUMMARIZE.contains("may fall outside what this collection covers"),
+            "summarize must not instruct the model to claim a topic is out of scope"
+        );
+    }
+
+    #[test]
+    fn test_summarize_frames_thin_results_as_a_search_limitation() {
+        assert!(
+            SUMMARIZE.contains("PARTIAL VIEW"),
+            "summarize must state that the excerpts are a slice, not the collection"
+        );
+        assert!(
+            SUMMARIZE.contains("WEAK RESULT SETS"),
+            "summarize must carry the WEAK RESULT SETS rule"
+        );
+        assert!(
+            SUMMARIZE.contains("Attribute that to THIS SEARCH, never to the collection"),
+            "a weak result set must be attributed to the search, not the corpus"
+        );
+    }
+
+    #[test]
+    fn test_summarize_understands_the_weak_match_context_signal() {
+        // scolta.js prepends this marker to the context when the full query
+        // matched nothing and results came from the broadened OR fallback.
+        assert!(
+            SUMMARIZE.contains("[No result matched the full query...]"),
+            "summarize must recognize the weak-match context header emitted by scolta.js"
+        );
+    }
+
+    #[test]
+    fn test_summarize_absence_grounding_rules_match_canonical_snapshot() {
+        // Snapshot guard: pin the exact absence/grounding block so any future edit
         // fails loudly and surfaces as an explicit diff in review. The fixture is
         // seeded byte-for-byte from this constant and is kept hand-identical to the
-        // matching bullet in scolta-php's DefaultPrompts `'summarize'` template
+        // matching bullets in scolta-php's DefaultPrompts `'summarize'` template
         // (PHP escapes `'` as `\'`; that escaping is the only legitimate difference).
-        // This does NOT mechanically prevent the two repos from drifting apart — a
-        // cross-repo CI diff would be needed for that — but it makes any change here
-        // deliberate and visible. Follow-up to the #33 corpus-statistic fix.
-        let canonical = include_str!("../tests/fixtures/corpus_awareness_bullet.txt");
+        // This does NOT mechanically prevent the two repos from drifting apart — the
+        // cross-repo PromptTextIdentity gates cover that — but it makes any change
+        // here deliberate and visible.
+        //
+        // These bullets replaced the former CORPUS AWARENESS bullet, which taught
+        // the model to say "[site] focuses on [scope], so it doesn't include a
+        // dedicated article on [topic]" — a claim it can never support from a
+        // single search's slice, and the direct cause of false "no such article"
+        // overviews on identifier/proper-noun queries. The no-invented-statistics
+        // guard from #33 is preserved in the final bullet.
+        let canonical = include_str!("../tests/fixtures/absence_grounding_rules.txt");
         assert!(
             SUMMARIZE.contains(canonical),
-            "summarize CORPUS AWARENESS bullet drifted from the pinned snapshot \
-             (tests/fixtures/corpus_awareness_bullet.txt); review the diff and, if \
-             intentional, update the fixture and the matching scolta-php bullet"
+            "summarize absence/grounding rules drifted from the pinned snapshot \
+             (tests/fixtures/absence_grounding_rules.txt); review the diff and, if \
+             intentional, update the fixture and the matching scolta-php bullets"
         );
     }
 
@@ -397,6 +480,77 @@ mod tests {
         assert!(
             EXPAND_QUERY.contains("do NOT manufacture"),
             "rule 15 must forbid manufacturing detail for unrecognized entities"
+        );
+    }
+
+    // Identifier / proper-noun queries — anchor-preserving expansion.
+
+    #[test]
+    fn test_expand_query_has_entity_detail_rule() {
+        // Rule 16 must instruct decomposing a named entity or event into the
+        // concrete details that identify it in prose.
+        assert!(
+            EXPAND_QUERY.contains("NAMED ENTITY / EVENT → DEFINING DETAILS"),
+            "expand_query must contain rule 16 (NAMED ENTITY / EVENT → DEFINING DETAILS)"
+        );
+        assert!(
+            EXPAND_QUERY.contains(
+                "participants, components, distinctive phrases, causes, and consequences"
+            ),
+            "rule 16 must name the classes of defining detail to expand into"
+        );
+    }
+
+    #[test]
+    fn test_expand_query_requires_anchor_free_terms() {
+        // The core of the fix: an expansion that glues the entity name onto
+        // every term misses prose that refers to the entity without naming it.
+        assert!(
+            EXPAND_QUERY.contains("At least half your terms MUST drop the entity name entirely"),
+            "rule 16 must require that some terms drop the entity name"
+        );
+        assert!(
+            EXPAND_QUERY.contains("never simply append the name to a list of near-synonyms"),
+            "rule 16 must forbid appending the entity name to every term"
+        );
+    }
+
+    #[test]
+    fn test_expand_query_entity_rule_examples_are_domain_neutral() {
+        // Rule 16 must generalize beyond any one corpus: a consumer-product
+        // example, a vehicle-spec example, and a historical-event example.
+        assert!(
+            EXPAND_QUERY.contains("battery drain") && EXPAND_QUERY.contains("swollen battery"),
+            "rule 16 must carry the consumer-product (iPhone 12) example"
+        );
+        assert!(
+            EXPAND_QUERY.contains("payload rating") && EXPAND_QUERY.contains("tow package"),
+            "rule 16 must carry the vehicle-spec (F-150) example"
+        );
+        assert!(
+            EXPAND_QUERY.contains("airship fire") && EXPAND_QUERY.contains("Lakehurst landing"),
+            "rule 16 must carry the historical-event (Hindenburg) example"
+        );
+    }
+
+    #[test]
+    fn test_expand_query_entity_rule_defers_to_no_fabrication_guard() {
+        // Rule 16 broadens expansion; rule 15 must still bound it so an
+        // unrecognized entity does not acquire invented participants or parts.
+        assert!(
+            EXPAND_QUERY.contains(
+                "Rule 15 still governs: only emit details you are confident are true of that entity"
+            ),
+            "rule 16 must defer to rule 15's no-fabrication guard"
+        );
+    }
+
+    #[test]
+    fn test_expand_query_reconciles_term_cap_for_entity_decomposition() {
+        // The 2-4 cap must also allow the larger fan-out rule 16 asks for.
+        assert!(
+            EXPAND_QUERY.contains("up to 6 defining details"),
+            "expand_query must reconcile the 2-4 term cap with rule 16"
         );
     }
 
