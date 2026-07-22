@@ -494,7 +494,9 @@ mod tests {
             "expand_query must contain rule 16 (NAMED ENTITY / EVENT → DEFINING DETAILS)"
         );
         assert!(
-            EXPAND_QUERY.contains("participants, components, distinctive phrases, causes, and consequences"),
+            EXPAND_QUERY.contains(
+                "participants, components, distinctive phrases, causes, and consequences"
+            ),
             "rule 16 must name the classes of defining detail to expand into"
         );
     }
