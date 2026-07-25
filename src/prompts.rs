@@ -22,7 +22,7 @@ IMPORTANT RULES:
 14. CONTEXT / USE-CASE → CONCRETE ITEMS. When the query names a context, occasion, or use-case rather than a thing, expand into the concrete item types that serve it, not restatements of the context: "home office setup" → ["standing desk", "ergonomic chair", "monitor arm"]; "first aid supplies" → ["bandages", "antiseptic", "gauze"]; "summer lunch" → ["cold salads", "chilled soups", "sandwiches"]. Keep the context implicit in the phrasing; do not restate it as a synonym ("light summer meals").
 15. UNRECOGNIZED OR UNVERIFIABLE NAMED ENTITIES. When the query names a specific entity you do not recognize as real and well-known — a product, place, organization, mission, regulation, medical condition, or similar — do NOT manufacture members, terminology, treatments, or attributes for it. Expand only with generic, neutral phrasings of the surrounding topic, and never produce authoritative-sounding domain-specific detail that presupposes the entity is real. This matters most for medical, legal, and safety queries, where inventing plausible clinical, legal, or technical detail is actively harmful: "treatment for Glorptosis" → ["medical treatment", "therapy options", "symptom management"], not invented drugs or pathology.
 16. NAMED ENTITY / EVENT → DEFINING DETAILS. When the query centers on a specific named entity or event — a mission, model, version, release, incident, case, statute, or product line — expand into the concrete details that identify it in prose: participants, components, distinctive phrases, causes, and consequences. Authors routinely write about a well-known entity without repeating its name or number, so an expansion that keeps the entity name glued to every phrase will miss the very pages that describe it. At least half your terms MUST drop the entity name entirely, and you must never simply append the name to a list of near-synonyms: "iPhone 12 battery problems" → ["battery drain", "swollen battery", "shuts off in cold"], NOT ["iPhone 12 battery drain", "iPhone 12 battery failure", "iPhone 12 battery issue"]; "Ford F-150 towing capacity" → ["payload rating", "trailer weight", "tow package"]; "Hindenburg disaster" → ["airship fire", "Lakehurst landing", "hydrogen explosion"]. Rule 15 still governs: only emit details you are confident are true of that entity, and for an entity you do not recognize fall back to neutral phrasings of the surrounding topic rather than inventing participants, parts, or events.
-17. QUALITY / EXPERIENCE → CONCRETE INSTANCES. When the query describes a feeling, reaction, or judgment about content rather than a topic itself — a "scary moment", "inspiring story", "dramatic rescue", "funniest post", "embarrassing mistake" — expand into the concrete kinds of events, systems, or situations that embody that quality in the writing, not synonyms of the adjective. Writers convey a frightening episode by narrating the specific thing that went wrong: the malfunction, the alarm that sounded, the aborted attempt, the near-disaster — they seldom label it "scary". So on an aviation-history site "scariest moment" → ["engine failure", "emergency landing", "cockpit alarm", "near collision"]; on a software blog "most embarrassing incident" → ["data loss", "production outage", "shipped regression"] — NOT ["frightening experience", "terrifying incident"] or other adjective restatements. Keep the quality implicit in the concrete phrasing. Rule 15 still governs: emit only instances you are confident fit this site domain, and fall back to neutral topic phrasings when unsure.
+17. QUALITY / EXPERIENCE → CONCRETE INSTANCES. When the query describes a feeling, reaction, or judgment about content rather than a topic itself — a "scary moment", "inspiring story", "dramatic rescue", "funniest post", "embarrassing mistake" — expand into the concrete kinds of events, systems, or situations that embody that quality in the writing, not synonyms of the adjective. Writers convey such an episode by narrating the specific thing that happened and seldom label it: a frightening one through the malfunction, the alarm that sounded, the aborted attempt; a funny one through the mix-up, the mishap, the nickname that stuck, the off-hand remark, the stunt or object brought along for fun; an inspiring one through the first, the record, the obstacle overcome. This applies to every valence, not only to things that went wrong, and it holds even on an otherwise serious or technical site: such a site still has its light and uplifting episodes, and they are just as specific as its grave ones. So on a wildlife-photography site "scariest moment" → ["charging elephant", "snake underfoot", "lost in fog"] and "funniest moment" → ["monkey took the lens cap", "tripod in the mud", "mistimed shutter"]; on a software blog "most embarrassing incident" → ["data loss", "production outage", "shipped regression"] and "most inspiring project" → ["first release", "rewrite that shipped", "outage recovered in minutes"]. These examples show the transformation, not a term bank: always derive the instances from the subject matter of THIS site, and never reuse the terms of an example unless they genuinely belong there. Never emit the vocabulary of the quality itself: NOT ["frightening experience", "terrifying incident"], NOT ["amusing story", "humorous anecdote", "comical incident", "blooper"], NOT ["uplifting narrative", "moving account"], and no other adjective restatement or genre label. Keep the quality implicit in the concrete phrasing. Rule 15 still governs: emit only instances you are confident fit this site domain. But its fallback is itself concrete: when you are unsure which specific episodes the site contains, fall back to concrete neutral subjects of the site domain, never to the vocabulary of the quality and never to a genre label for the content itself.
 
 Examples:
 - "customer support" → {"terms": ["help desk", "customer service", "support center", "contact us"]}
@@ -192,6 +192,42 @@ mod tests {
         assert!(t.contains(
             "up to 6 concrete instances when decomposing a quality or experience under rule 17"
         ));
+    }
+
+    #[test]
+    fn test_expand_query_quality_rule_covers_every_valence() {
+        // Observed failure: with only negative-valence guidance (fear,
+        // embarrassment) the model had no template for humour or admiration and
+        // fell back to adjective synonyms ("amusing story", "uplifting
+        // narrative") on exactly those queries. The rule must name the positive
+        // valences too, and ban their vocabulary explicitly.
+        let t = get_template("expand_query").unwrap();
+        assert!(t.contains("This applies to every valence, not only to things that went wrong"));
+        assert!(t.contains("a funny one through the mix-up"));
+        assert!(t.contains("an inspiring one through the first, the record, the obstacle overcome"));
+        assert!(t.contains("humorous anecdote"));
+        assert!(t.contains("uplifting narrative"));
+    }
+
+    #[test]
+    fn test_expand_query_quality_rule_forbids_reusing_its_own_examples() {
+        // Observed failure: the model emitted the rule's own example terms
+        // verbatim ("engine failure", "distance record") for an unrelated
+        // corpus, so the expansion described the example domain instead of the
+        // site. The rule must mark the examples as illustrations, not a bank.
+        let t = get_template("expand_query").unwrap();
+        assert!(t.contains("These examples show the transformation, not a term bank"));
+        assert!(t.contains("derive the instances from the subject matter of THIS site"));
+    }
+
+    #[test]
+    fn test_expand_query_quality_rule_fallback_stays_concrete() {
+        // Rule 15's "fall back to neutral topic phrasings when unsure" was
+        // being read as licence to emit the very genre labels rule 17 bans.
+        // Rule 17 must state that the fallback is itself concrete.
+        let t = get_template("expand_query").unwrap();
+        assert!(t.contains("But its fallback is itself concrete"));
+        assert!(t.contains("never to the vocabulary of the quality"));
     }
 
     #[test]
