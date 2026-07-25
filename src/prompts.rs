@@ -3,7 +3,7 @@
 /// Template for expanding user search queries into alternative terms.
 pub const EXPAND_QUERY: &str = r#"You expand search queries for {SITE_NAME} {SITE_DESCRIPTION}.
 
-Return a JSON object with a "terms" key containing 2-4 alternative search terms — or up to 6 concrete members when decomposing a category, family, region, or context under rules 13-14 below, or up to 6 defining details when decomposing a named entity or event under rule 16 below. Do NOT include the original query — only return different phrasings that would find additional relevant content.
+Return a JSON object with a "terms" key containing 2-4 alternative search terms — or up to 6 concrete members when decomposing a category, family, region, or context under rules 13-14 below, or up to 6 defining details when decomposing a named entity or event under rule 16 below, or up to 6 concrete instances when decomposing a quality or experience under rule 17 below. Do NOT include the original query — only return different phrasings that would find additional relevant content.
 
 IMPORTANT RULES:
 1. Extract the KEY TOPIC from the query — ignore question words (what, who, how, why, where, when, is, are, etc.)
@@ -22,6 +22,7 @@ IMPORTANT RULES:
 14. CONTEXT / USE-CASE → CONCRETE ITEMS. When the query names a context, occasion, or use-case rather than a thing, expand into the concrete item types that serve it, not restatements of the context: "home office setup" → ["standing desk", "ergonomic chair", "monitor arm"]; "first aid supplies" → ["bandages", "antiseptic", "gauze"]; "summer lunch" → ["cold salads", "chilled soups", "sandwiches"]. Keep the context implicit in the phrasing; do not restate it as a synonym ("light summer meals").
 15. UNRECOGNIZED OR UNVERIFIABLE NAMED ENTITIES. When the query names a specific entity you do not recognize as real and well-known — a product, place, organization, mission, regulation, medical condition, or similar — do NOT manufacture members, terminology, treatments, or attributes for it. Expand only with generic, neutral phrasings of the surrounding topic, and never produce authoritative-sounding domain-specific detail that presupposes the entity is real. This matters most for medical, legal, and safety queries, where inventing plausible clinical, legal, or technical detail is actively harmful: "treatment for Glorptosis" → ["medical treatment", "therapy options", "symptom management"], not invented drugs or pathology.
 16. NAMED ENTITY / EVENT → DEFINING DETAILS. When the query centers on a specific named entity or event — a mission, model, version, release, incident, case, statute, or product line — expand into the concrete details that identify it in prose: participants, components, distinctive phrases, causes, and consequences. Authors routinely write about a well-known entity without repeating its name or number, so an expansion that keeps the entity name glued to every phrase will miss the very pages that describe it. At least half your terms MUST drop the entity name entirely, and you must never simply append the name to a list of near-synonyms: "iPhone 12 battery problems" → ["battery drain", "swollen battery", "shuts off in cold"], NOT ["iPhone 12 battery drain", "iPhone 12 battery failure", "iPhone 12 battery issue"]; "Ford F-150 towing capacity" → ["payload rating", "trailer weight", "tow package"]; "Hindenburg disaster" → ["airship fire", "Lakehurst landing", "hydrogen explosion"]. Rule 15 still governs: only emit details you are confident are true of that entity, and for an entity you do not recognize fall back to neutral phrasings of the surrounding topic rather than inventing participants, parts, or events.
+17. QUALITY / EXPERIENCE → CONCRETE INSTANCES. When the query describes a feeling, reaction, or judgment about content rather than a topic itself — a "scary moment", "inspiring story", "dramatic rescue", "funniest post", "embarrassing mistake" — expand into the concrete kinds of events, systems, or situations that embody that quality in the writing, not synonyms of the adjective. Writers convey a frightening episode by narrating the specific thing that went wrong: the malfunction, the alarm that sounded, the aborted attempt, the near-disaster — they seldom label it "scary". So on an aviation-history site "scariest moment" → ["engine failure", "emergency landing", "cockpit alarm", "near collision"]; on a software blog "most embarrassing incident" → ["data loss", "production outage", "shipped regression"] — NOT ["frightening experience", "terrifying incident"] or other adjective restatements. Keep the quality implicit in the concrete phrasing. Rule 15 still governs: emit only instances you are confident fit this site domain, and fall back to neutral topic phrasings when unsure.
 
 Examples:
 - "customer support" → {"terms": ["help desk", "customer service", "support center", "contact us"]}
@@ -180,6 +181,17 @@ mod tests {
         assert!(get_template("expand_query")
             .unwrap()
             .contains("alternative search terms"));
+    }
+
+    #[test]
+    fn test_expand_query_has_quality_experience_rule() {
+        // Rule 17: quality/experience queries decompose into concrete instances,
+        // not adjective synonyms. Guards the rule and its reconciled term cap.
+        let t = get_template("expand_query").unwrap();
+        assert!(t.contains("17. QUALITY / EXPERIENCE → CONCRETE INSTANCES"));
+        assert!(t.contains(
+            "up to 6 concrete instances when decomposing a quality or experience under rule 17"
+        ));
     }
 
     #[test]
