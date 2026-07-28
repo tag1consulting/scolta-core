@@ -234,6 +234,12 @@ fn redact_ipv6(text: &str) -> String {
         .into_owned()
 }
 
+/// Longest textual IPv6 address, in bytes: six 4-digit groups, six colons and
+/// a dotted-quad tail, `ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255`. The
+/// all-hex form is shorter at 39. No accepted form is longer, so a prefix past
+/// this point cannot parse.
+const MAX_IPV6_TEXT_LEN: usize = 45;
+
 /// Byte length of the longest prefix of `candidate` that is a redactable IPv6
 /// address, or `None` if no prefix is.
 ///
@@ -241,13 +247,20 @@ fn redact_ipv6(text: &str) -> String {
 /// includes `.`, so `fe80::1.` (address at the end of a sentence) and
 /// `1:2:3:4:5:6:7:8:9` (one group too many) both need a shorter prefix to
 /// parse. Taking the longest keeps `::ffff:192.0.2.1` whole.
+///
+/// The scan is capped at [`MAX_IPV6_TEXT_LEN`] rather than run over the whole
+/// candidate. `ipv6_candidate_regex` matches unbounded runs, and `from_str` is
+/// itself linear, so scanning every prefix length made the cost quadratic in
+/// the length of a hex-and-colon run — reachable from a search query, which is
+/// untrusted text, in the function whose whole job is to handle it. Capping is
+/// behavior-preserving: a longer prefix could never have parsed anyway.
 fn longest_redactable_ipv6_prefix(candidate: &str) -> Option<usize> {
     if !candidate.contains(':') {
         return None;
     }
     // The candidate character class is ASCII, so every byte index is a char
     // boundary and slicing cannot panic.
-    (1..=candidate.len())
+    (1..=candidate.len().min(MAX_IPV6_TEXT_LEN))
         .rev()
         .find(|&end| is_redactable_ipv6(&candidate[..end]))
 }
@@ -487,6 +500,45 @@ mod tests {
             let result = sanitize_query(query, &all_redact());
             assert_eq!(result, expected, "query: {query}");
         }
+    }
+
+    #[test]
+    fn test_redact_ipv6_longest_textual_form() {
+        // Pins MAX_IPV6_TEXT_LEN: this is the longest string `from_str`
+        // accepts, so lowering the cap would stop redacting it.
+        let addr = "ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255";
+        assert_eq!(addr.len(), MAX_IPV6_TEXT_LEN);
+        assert_eq!(
+            sanitize_query(&format!("host {addr} down"), &all_redact()),
+            "host [IP] down"
+        );
+    }
+
+    #[test]
+    fn test_long_hex_colon_run_is_not_quadratic() {
+        // An unbounded prefix scan over this took milliseconds and grew
+        // quadratically; capped, it is flat. Asserted for correctness — the
+        // run contains no address and must survive untouched — with the length
+        // chosen so a regression is felt in the suite runtime.
+        //
+        // Five-hex-digit groups are what make it addressless: no group may
+        // exceed four, so no prefix parses. ("a:" repeated would NOT work —
+        // `a:a:a:a:a:a:a:a` is a perfectly valid address.)
+        let junk = "aaaaa:".repeat(20_000);
+        let query = format!("q {junk} end");
+        assert_eq!(sanitize_query(&query, &all_redact()), query);
+    }
+
+    #[test]
+    fn test_redact_ipv6_after_long_junk_run() {
+        // The cap must not stop a real address later in the query from being
+        // found: each candidate run is scanned independently.
+        let junk = "aaaaa:".repeat(5_000);
+        let query = format!("{junk} then fe80::1");
+        assert_eq!(
+            sanitize_query(&query, &all_redact()),
+            format!("{junk} then [IP]")
+        );
     }
 
     #[test]
