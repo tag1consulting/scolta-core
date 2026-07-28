@@ -364,6 +364,68 @@ fn sanitize_query_passes_clean_query() {
     assert_eq!(result, "drupal performance optimization");
 }
 
+/// The four classes reported unredacted in issue #53, checked through the same
+/// entry point the WASM export uses.
+#[test]
+fn sanitize_query_redacts_ipv6_and_unhyphenated_ssn() {
+    let cases = [
+        (
+            "host 2001:0db8:85a3:0000:0000:8a2e:0370:7334 down",
+            "host [IP] down",
+        ),
+        ("host fe80::1 down", "host [IP] down"),
+        ("ssn 123 45 6789", "ssn [SSN]"),
+        ("ssn 123456789", "ssn [SSN]"),
+    ];
+    for (query, expected) in cases {
+        let result = inner::sanitize_query(&json!({ "query": query })).unwrap();
+        assert_eq!(result, expected, "query: {query}");
+    }
+}
+
+/// The classes that already worked must keep working, and a clean query must
+/// not acquire a redaction from the widened patterns.
+#[test]
+fn sanitize_query_existing_classes_unchanged() {
+    let cases = [
+        ("contact user@example.com", "contact [EMAIL]"),
+        ("call 555-867-5309", "call [PHONE]"),
+        ("my ssn is 123-45-6789", "my ssn is [SSN]"),
+        ("card 4111 1111 1111 1111", "card [CC]"),
+        ("server at 192.168.1.1", "server at [IP]"),
+        ("clip at 12:34:56 mark", "clip at 12:34:56 mark"),
+    ];
+    for (query, expected) in cases {
+        let result = inner::sanitize_query(&json!({ "query": query })).unwrap();
+        assert_eq!(result, expected, "query: {query}");
+    }
+}
+
+/// Over-redaction the widened patterns introduced and no longer commit: an
+/// address format and a documentation-corpus identifier both read as PII.
+#[test]
+fn sanitize_query_does_not_over_redact() {
+    let unchanged = [
+        // 5+4 groupings are not SSNs.
+        "zip 12345-6789",
+        "ship to 90210-1234",
+        "part no 12345-6789",
+        // Hex-only namespace syntax. Valid IPv6 by grammar, not an address.
+        "db::add docs",
+        "abc::def namespace",
+        "ec::add curve",
+        "cafe::babe example",
+    ];
+    for query in unchanged {
+        let result = inner::sanitize_query(&json!({ "query": query })).unwrap();
+        assert_eq!(result, query, "query: {query}");
+    }
+
+    // A valid address must be consumed whole, leaving no fragment behind.
+    let result = inner::sanitize_query(&json!({ "query": "host 1::2:3:4:5:6:7 down" })).unwrap();
+    assert_eq!(result, "host [IP] down");
+}
+
 // ── truncate_conversation ─────────────────────────────────────────────────────
 
 #[test]
