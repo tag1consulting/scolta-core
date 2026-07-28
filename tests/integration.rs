@@ -364,6 +364,43 @@ fn sanitize_query_passes_clean_query() {
     assert_eq!(result, "drupal performance optimization");
 }
 
+/// The four classes reported unredacted in issue #53, checked through the same
+/// entry point the WASM export uses.
+#[test]
+fn sanitize_query_redacts_ipv6_and_unhyphenated_ssn() {
+    let cases = [
+        (
+            "host 2001:0db8:85a3:0000:0000:8a2e:0370:7334 down",
+            "host [IP] down",
+        ),
+        ("host fe80::1 down", "host [IP] down"),
+        ("ssn 123 45 6789", "ssn [SSN]"),
+        ("ssn 123456789", "ssn [SSN]"),
+    ];
+    for (query, expected) in cases {
+        let result = inner::sanitize_query(&json!({ "query": query })).unwrap();
+        assert_eq!(result, expected, "query: {query}");
+    }
+}
+
+/// The classes that already worked must keep working, and a clean query must
+/// not acquire a redaction from the widened patterns.
+#[test]
+fn sanitize_query_existing_classes_unchanged() {
+    let cases = [
+        ("contact user@example.com", "contact [EMAIL]"),
+        ("call 555-867-5309", "call [PHONE]"),
+        ("my ssn is 123-45-6789", "my ssn is [SSN]"),
+        ("card 4111 1111 1111 1111", "card [CC]"),
+        ("server at 192.168.1.1", "server at [IP]"),
+        ("clip at 12:34:56 mark", "clip at 12:34:56 mark"),
+    ];
+    for (query, expected) in cases {
+        let result = inner::sanitize_query(&json!({ "query": query })).unwrap();
+        assert_eq!(result, expected, "query: {query}");
+    }
+}
+
 // ── truncate_conversation ─────────────────────────────────────────────────────
 
 #[test]

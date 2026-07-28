@@ -300,6 +300,16 @@ Redact PII from a query string before analytics logging.
 - `query` — required string.
 - `config` — optional. All boolean fields default to `true`. Custom patterns use the `regex` crate syntax.
 
+Built-in classes and the forms each one covers:
+
+| Flag | Replacement | Covers |
+| --- | --- | --- |
+| `redact_email` | `[EMAIL]` | Standard addresses. |
+| `redact_phone` | `[PHONE]` | US numbers, with or without country code, `-`/`.`/space separators, optional area-code parens. |
+| `redact_ssn` | `[SSN]` | `123-45-6789`, `123 45 6789`, and bare `123456789`. Separators are independently optional, so mixed forms match. Any bare nine-digit number in a query is redacted. |
+| `redact_credit_card` | `[CC]` | 16 digits, with or without `-`/space separators. |
+| `redact_ip` | `[IP]` | IPv4 dotted quads; IPv6 in uncompressed eight-group form and in `::`-compressed form. Forms with a *leading* `::` (`::1`) are not matched — the pattern would collide with `Namespace::method` syntax; in `::ffff:192.0.2.1` the IPv4 half is still redacted. Colon runs that are not valid IPv6 (`12:34:56`, MAC addresses) are left alone. |
+
 Custom patterns are validated up front: an entry with a missing or non-string `regex`/`replacement`, or a regex that fails to compile, is a `JsError` — a misconfigured pattern can never silently skip redaction. Compiled patterns are cached per pattern string, so repeated calls with the same config do not recompile.
 
 **Output JSON:** Sanitized query string.
