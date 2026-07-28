@@ -401,6 +401,31 @@ fn sanitize_query_existing_classes_unchanged() {
     }
 }
 
+/// Over-redaction the widened patterns introduced and no longer commit: an
+/// address format and a documentation-corpus identifier both read as PII.
+#[test]
+fn sanitize_query_does_not_over_redact() {
+    let unchanged = [
+        // 5+4 groupings are not SSNs.
+        "zip 12345-6789",
+        "ship to 90210-1234",
+        "part no 12345-6789",
+        // Hex-only namespace syntax. Valid IPv6 by grammar, not an address.
+        "db::add docs",
+        "abc::def namespace",
+        "ec::add curve",
+        "cafe::babe example",
+    ];
+    for query in unchanged {
+        let result = inner::sanitize_query(&json!({ "query": query })).unwrap();
+        assert_eq!(result, query, "query: {query}");
+    }
+
+    // A valid address must be consumed whole, leaving no fragment behind.
+    let result = inner::sanitize_query(&json!({ "query": "host 1::2:3:4:5:6:7 down" })).unwrap();
+    assert_eq!(result, "host [IP] down");
+}
+
 // ── truncate_conversation ─────────────────────────────────────────────────────
 
 #[test]

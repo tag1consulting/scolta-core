@@ -7,6 +7,8 @@
 use regex::Regex;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::net::Ipv6Addr;
+use std::str::FromStr;
 use std::sync::OnceLock;
 
 /// A custom PII redaction pattern as supplied in config JSON (uncompiled).
@@ -137,7 +139,7 @@ pub fn sanitize_query(query: &str, config: &SanitizationConfig) -> String {
     }
 
     if config.redact_ip {
-        result = ipv6_regex().replace_all(&result, "[IP]").into_owned();
+        result = redact_ipv6(&result);
         result = ipv4_regex().replace_all(&result, "[IP]").into_owned();
     }
 
@@ -165,18 +167,29 @@ fn phone_regex() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"(\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}").unwrap())
 }
 
-/// US SSN in every form people actually type it: `123-45-6789`, `123 45 6789`,
-/// and the bare `123456789`. Both separators are independently optional, so
-/// mixed forms (`123-45 6789`) match too.
+/// US SSN as an explicit alternation over the three forms it is actually
+/// written in: `123-45-6789`, `123 45 6789`, and the bare `123456789`.
+///
+/// The alternation is load-bearing, not stylistic. Writing this as one pattern
+/// with independently optional separators (`\d{3}[-\s]?\d{2}[-\s]?\d{4}`) does
+/// not express "3-2-4" at all — it expresses "nine digits with optional breaks
+/// after the third and fifth", which also matches every 5+4 grouping, so ZIP+4
+/// (`12345-6789`) and part numbers were redacted as SSNs. Each branch here
+/// pins its own separator positions, so a 5+4 split matches no branch.
+///
+/// Mixed separators (`123-45 6789`) are deliberately not supported: no such
+/// form was reported, and admitting it reintroduces the independent-optional
+/// structure that caused the ZIP+4 collision.
 ///
 /// The `\b` at each end keeps this off longer digit runs: a 10-digit phone
 /// number or a 16-digit card has no word boundary after the ninth digit, so
-/// neither is ever redacted as an SSN. The flip side is that any bare
-/// nine-digit number in a query is now redacted — deliberate, since that is
-/// exactly how an unformatted SSN reaches the analytics log.
+/// neither is ever redacted as an SSN. The bare branch does mean any isolated
+/// nine-digit run is redacted, including a 9-digit ZIP — unavoidable, since an
+/// unformatted SSN is byte-identical to one, and that is the form the issue
+/// asked for.
 fn ssn_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\b\d{3}[-\s]?\d{2}[-\s]?\d{4}\b").unwrap())
+    RE.get_or_init(|| Regex::new(r"\b(?:\d{3}-\d{2}-\d{4}|\d{3}\s\d{2}\s\d{4}|\d{9})\b").unwrap())
 }
 
 fn cc_regex() -> &'static Regex {
@@ -189,29 +202,86 @@ fn ipv4_regex() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b").unwrap())
 }
 
-/// IPv6, as two alternatives: the uncompressed form and the `::`-compressed
-/// form.
+/// Every maximal run of characters an IPv6 literal can be built from.
 ///
-/// The uncompressed branch requires exactly eight groups, because that is the
-/// only valid uncompressed length — a looser `{2,7}` repetition would also
-/// swallow `12:34:56` (a duration) and MAC addresses, neither of which this
-/// function is meant to redact.
+/// Deliberately loose. Validity is decided by [`Ipv6Addr::from_str`] in
+/// [`redact_ipv6`], not by this pattern, because hand-rolling the IPv6 grammar
+/// into a regex is what produced the two defects this replaced: a `{0,4}`
+/// group bound one short of the grammar, which matched `1::2:3:4:5:6:7` only
+/// as far as `1::2:3:4:5:6` and left a `:7` fragment behind, and a compressed
+/// branch that could not tell an address from `namespace::member` syntax.
+/// A parser has the whole grammar and cannot drift from it.
 ///
-/// Forms with a leading `::` (`::1`, `::ffff:…`) are deliberately not matched.
-/// A branch for them cannot carry a leading `\b`, so it would also match the
-/// `::method` tail of namespace syntax — `Path::add`, `Duration::add` — which
-/// is ordinary query text on a developer-documentation site. In the
-/// `::ffff:192.0.2.1` case the identifying half is still redacted by the IPv4
-/// pass.
-fn ipv6_regex() -> &'static Regex {
+/// Runs without a colon (plain numbers, hex-looking words such as `decade`)
+/// are discarded in [`longest_redactable_ipv6_prefix`] before any parse.
+fn ipv6_candidate_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(concat!(
-            r"\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b",
-            r"|\b(?:[0-9a-fA-F]{1,4}:){1,6}:(?:[0-9a-fA-F]{1,4}:){0,4}[0-9a-fA-F]{1,4}\b",
-        ))
-        .unwrap()
-    })
+    RE.get_or_init(|| Regex::new(r"[0-9A-Fa-f.:]+").unwrap())
+}
+
+/// Replace every IPv6 address in `text` with `[IP]`.
+fn redact_ipv6(text: &str) -> String {
+    ipv6_candidate_regex()
+        .replace_all(text, |caps: &regex::Captures| {
+            let candidate = &caps[0];
+            match longest_redactable_ipv6_prefix(candidate) {
+                // The tail is whatever the address ran into: sentence
+                // punctuation, a `:port`, the rest of a malformed address.
+                Some(end) => format!("[IP]{}", &candidate[end..]),
+                None => candidate.to_string(),
+            }
+        })
+        .into_owned()
+}
+
+/// Byte length of the longest prefix of `candidate` that is a redactable IPv6
+/// address, or `None` if no prefix is.
+///
+/// A prefix rather than the whole candidate because the candidate class
+/// includes `.`, so `fe80::1.` (address at the end of a sentence) and
+/// `1:2:3:4:5:6:7:8:9` (one group too many) both need a shorter prefix to
+/// parse. Taking the longest keeps `::ffff:192.0.2.1` whole.
+fn longest_redactable_ipv6_prefix(candidate: &str) -> Option<usize> {
+    if !candidate.contains(':') {
+        return None;
+    }
+    // The candidate character class is ASCII, so every byte index is a char
+    // boundary and slicing cannot panic.
+    (1..=candidate.len())
+        .rev()
+        .find(|&end| is_redactable_ipv6(&candidate[..end]))
+}
+
+/// Whether `s` is an IPv6 address that can be told apart from source-code
+/// namespace syntax.
+///
+/// Parsing is necessary but *not* sufficient. `abc::def`, `db::add`,
+/// `ec::add` and `cafe::babe` are all syntactically valid IPv6 addresses, so
+/// a parser accepts every one of them — and on a developer-documentation
+/// search index that is live corpus, not a hypothetical. The second condition
+/// separates the two readings: `namespace::member` can only ever produce a
+/// single `::` and, being an identifier, contains no decimal digit. So a
+/// candidate is redacted when it parses AND either
+///
+/// - it contains a digit (`fe80::1`, `::1`, `2001:db8::1`), or
+/// - it contains a colon outside the `::` run (`dead:beef::cafe`), which no
+///   namespace path can produce.
+///
+/// The trade is a digit-free two-group address such as `cafe::babe` passing
+/// through unredacted. That form is a documentation example rather than a
+/// host anyone is assigned: every real-world prefix (link-local `fe80::/10`,
+/// global unicast `2000::/3`, loopback `::1`, multicast `ff02::/16`) carries a
+/// digit in its very first group. The reverse trade — redacting `db::add` on a
+/// Rust or C++ documentation site — is the one that destroys real queries, and
+/// it is not detectable after the fact because the log only keeps `[IP]`.
+///
+/// Multi-level paths (`std::fmt::Debug`) need none of this: two `::` runs are
+/// not valid IPv6, so the parser rejects them outright.
+fn is_redactable_ipv6(s: &str) -> bool {
+    if Ipv6Addr::from_str(s).is_err() {
+        return false;
+    }
+    s.bytes().any(|b| b.is_ascii_digit()) || s.replace("::", "").contains(':')
 }
 
 #[cfg(test)]
@@ -272,9 +342,29 @@ mod tests {
     }
 
     #[test]
-    fn test_redact_ssn_mixed_separators() {
-        let result = sanitize_query("ssn 123-45 6789 filed", &all_redact());
-        assert_eq!(result, "ssn [SSN] filed");
+    fn test_ssn_pattern_does_not_swallow_zip_plus_four() {
+        // ZIP+4 is a 5+4 split. An SSN pattern built from independently
+        // optional separators reads it as "nine digits with a break after the
+        // fifth" and redacts it, taking address and store-locator queries with
+        // it; the explicit 3-2-4 alternation cannot.
+        for query in [
+            "zip 12345-6789",
+            "ship to 90210-1234",
+            "part no 12345-6789",
+            "zip 12345 6789",
+        ] {
+            let result = sanitize_query(query, &all_redact());
+            assert_eq!(result, query, "query: {query}");
+        }
+    }
+
+    #[test]
+    fn test_ssn_pattern_does_not_accept_mixed_separators() {
+        // Mixed separators are out of scope and their support is what made
+        // ZIP+4 match. Pinned so a future "simplification" back to optional
+        // separators fails here.
+        let query = "ssn 123-45 6789 filed";
+        assert_eq!(sanitize_query(query, &all_redact()), query);
     }
 
     #[test]
@@ -349,10 +439,62 @@ mod tests {
 
     #[test]
     fn test_ipv6_pattern_ignores_namespace_syntax() {
-        for query in ["std::fmt::Debug", "Path::add", "Duration::as_secs"] {
+        for query in [
+            // Non-hex letters, or more than one `::`: rejected by the parser.
+            "std::fmt::Debug",
+            "Path::add",
+            "Duration::as_secs",
+            "Vec::dedup",
+            // Hex-only identifiers on both sides. These ARE syntactically
+            // valid IPv6 addresses, so the parser accepts them and only the
+            // digit/single-colon check keeps them out of the redaction. This
+            // is the live corpus on a Rust or C++ documentation site.
+            "db::add docs",
+            "abc::def namespace",
+            "ec::add curve",
+            "cafe::babe example",
+            "dead::beef",
+            "::add",
+            "::acc",
+        ] {
             let result = sanitize_query(query, &all_redact());
             assert_eq!(result, query, "query: {query}");
         }
+    }
+
+    #[test]
+    fn test_redact_ipv6_leading_double_colon() {
+        // Reachable now that a parser rather than a `\b`-anchored regex
+        // decides validity: the digit check, not the pattern shape, is what
+        // keeps `::add` out.
+        for (query, expected) in [
+            ("localhost ::1 up", "localhost [IP] up"),
+            ("mapped ::ffff:192.0.2.1 up", "mapped [IP] up"),
+        ] {
+            let result = sanitize_query(query, &all_redact());
+            assert_eq!(result, expected, "query: {query}");
+        }
+    }
+
+    #[test]
+    fn test_redact_ipv6_leaves_no_fragment() {
+        // A hand-rolled group bound one short of the grammar matched this
+        // only as far as `1::2:3:4:5:6` and left `:7` in the log.
+        for (query, expected) in [
+            ("host 1::2:3:4:5:6:7 down", "host [IP] down"),
+            ("host 1:2:3:4:5:6:7:8 down", "host [IP] down"),
+        ] {
+            let result = sanitize_query(query, &all_redact());
+            assert_eq!(result, expected, "query: {query}");
+        }
+    }
+
+    #[test]
+    fn test_redact_ipv6_at_end_of_sentence() {
+        // The candidate class includes `.`, so the trailing stop must fall
+        // outside the match rather than defeating it.
+        let result = sanitize_query("the host is fe80::1.", &all_redact());
+        assert_eq!(result, "the host is [IP].");
     }
 
     #[test]

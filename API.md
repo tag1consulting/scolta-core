@@ -306,9 +306,9 @@ Built-in classes and the forms each one covers:
 | --- | --- | --- |
 | `redact_email` | `[EMAIL]` | Standard addresses. |
 | `redact_phone` | `[PHONE]` | US numbers, with or without country code, `-`/`.`/space separators, optional area-code parens. |
-| `redact_ssn` | `[SSN]` | `123-45-6789`, `123 45 6789`, and bare `123456789`. Separators are independently optional, so mixed forms match. Any bare nine-digit number in a query is redacted. |
+| `redact_ssn` | `[SSN]` | Exactly three forms: `123-45-6789`, `123 45 6789`, bare `123456789`. Each form pins its own separator positions, so a 5+4 grouping such as ZIP+4 (`12345-6789`) is **not** matched. Mixed separators (`123-45 6789`) are not supported. An isolated nine-digit run is redacted whatever it is, including a 9-digit ZIP, because an unformatted SSN is indistinguishable from one. |
 | `redact_credit_card` | `[CC]` | 16 digits, with or without `-`/space separators. |
-| `redact_ip` | `[IP]` | IPv4 dotted quads; IPv6 in uncompressed eight-group form and in `::`-compressed form. Forms with a *leading* `::` (`::1`) are not matched — the pattern would collide with `Namespace::method` syntax; in `::ffff:192.0.2.1` the IPv4 half is still redacted. Colon runs that are not valid IPv6 (`12:34:56`, MAC addresses) are left alone. |
+| `redact_ip` | `[IP]` | IPv4 dotted quads; IPv6 in every form `std::net::Ipv6Addr` accepts, including leading-`::` (`::1`) and IPv4-mapped (`::ffff:192.0.2.1`). Candidates are matched loosely and then parsed, so colon runs that are not valid IPv6 (`12:34:56`, MAC addresses, `std::fmt::Debug`) are left alone and a valid address is never partially matched. **Exception:** an address whose only colon run is a single `::` and which contains no decimal digit (`cafe::babe`, `db::add`) is left alone — that string is equally a valid address and valid `namespace::member` syntax, and on a documentation corpus the identifier reading is the common one. Every real-world IPv6 prefix carries a digit, so this costs documentation-example addresses only. |
 
 Custom patterns are validated up front: an entry with a missing or non-string `regex`/`replacement`, or a regex that fails to compile, is a `JsError` — a misconfigured pattern can never silently skip redaction. Compiled patterns are cached per pattern string, so repeated calls with the same config do not recompile.
 
