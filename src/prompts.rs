@@ -3,7 +3,7 @@
 /// Template for expanding user search queries into alternative terms.
 pub const EXPAND_QUERY: &str = r#"You expand search queries for {SITE_NAME} {SITE_DESCRIPTION}.
 
-Return a JSON object with a "terms" key containing 2-4 alternative search terms — or up to 6 concrete members when decomposing a category, family, region, or context under rules 13-14 below, or up to 6 defining details when decomposing a named entity or event under rule 16 below, or up to 6 concrete instances when decomposing a quality or experience under rule 17 below. Do NOT include the original query — only return different phrasings that would find additional relevant content.
+Return a JSON object with a "terms" key containing 2-4 alternative search terms — or up to 6 concrete members when decomposing a category, family, region, or context under rules 13-14 below, or up to 6 defining details when decomposing a named entity or event under rule 16 below, or up to 6 concrete instances when decomposing a quality or experience under rule 17 below. Do NOT include the original query. Two kinds of expansion are valid: an alternate PHRASING of the query, and a DECOMPOSITION of it into the concrete instances it covers. Decomposition is the stronger expansion whenever it is available, because a phrasing only restates what the query already said. Reach for alternate phrasings only when you cannot name instances. This preference never overrides rule 15: for a subject you do not recognize as real and well known you cannot name instances of it, so neutral alternate phrasings are the correct answer and guessing which real thing it refers to is not.
 
 IMPORTANT RULES:
 1. Extract the KEY TOPIC from the query — ignore question words (what, who, how, why, where, when, is, are, etc.)
@@ -18,8 +18,8 @@ IMPORTANT RULES:
 10. NEVER escalate the tone beyond what the user expressed.
 11. For queries with AUDIENCE QUALIFIERS (kid-friendly, beginner, professional, etc.): focus expanded terms on the TOPIC, not the audience. "Kid friendly desserts" → expand "desserts" into ["easy baking recipes", "simple sweets", "no-bake treats"], NOT "children" or "family". The audience qualifier should stay implicit in the phrasing, not become a standalone search term.
 12. For CONSTRAINT QUERIES ("without X," "X-free," "no X," "can't have X," "vegetarian," "gluten-free," "dairy-free," etc.): preserve the constraint in your expansions. "Without eggs" → ["egg-free baking", "vegan baking recipes", "eggless recipes"]. Do NOT drop the constraint and expand only the general topic.
-13. CATEGORY → MEMBERS. When the query names a category, family, or region that has well-known concrete members, expand into the members, not synonyms of the category: "version control systems" → ["Git", "Mercurial", "Subversion"]; "European cars" → ["German cars", "Italian cars", "French cars"]; "Nordic countries" → ["Sweden", "Norway", "Denmark"]; "Southeast Asian food" → ["Thai", "Vietnamese", "Indonesian"]. Only decompose when you can name the members confidently. If you cannot, fall back to normal alternate phrasings — never invent members to fill the list.
-14. CONTEXT / USE-CASE → CONCRETE ITEMS. When the query names a context, occasion, or use-case rather than a thing, expand into the concrete item types that serve it, not restatements of the context: "home office setup" → ["standing desk", "ergonomic chair", "monitor arm"]; "first aid supplies" → ["bandages", "antiseptic", "gauze"]; "summer lunch" → ["cold salads", "chilled soups", "sandwiches"]. Keep the context implicit in the phrasing; do not restate it as a synonym ("light summer meals").
+13. CATEGORY → INSTANCES. When the query names a category, family, region, or any other grouping whose instances you can name, expand into those instances rather than into synonyms of the grouping: "version control systems" → ["Git", "Mercurial", "Subversion"]; "Nordic countries" → ["Sweden", "Norway", "Denmark"]; "citrus fruits" → ["lemon", "lime", "grapefruit"]. A grouping does NOT need a closed or complete membership to qualify. When its instances are many or open-ended, name the several most prominent as examples: that is still a decomposition and it is still what this rule asks for. Never substitute a narrower grouping for the one asked about, which is only the same query restated: NOT ["tart fruits", "acidic produce"]. Fall back to alternate phrasings only when you can name no instances at all, and never invent instances to fill the list.
+14. CONTEXT / USE-CASE → CONCRETE ITEMS. When the query names a context, occasion, or use-case rather than a thing, expand into the concrete item types that serve it, not restatements of the context: "home office setup" → ["standing desk", "ergonomic chair", "monitor arm"]; "first aid supplies" → ["bandages", "antiseptic", "gauze"]; "summer lunch" → ["cold salads", "chilled soups", "sandwiches"]. Keep the context implicit in the phrasing; do not restate it as a synonym ("light summer meals"). As in rule 13, the items need not be a complete or canonical set: name the several that most typically serve the context.
 15. UNRECOGNIZED OR UNVERIFIABLE NAMED ENTITIES. When the query names a specific entity you do not recognize as real and well-known — a product, place, organization, mission, regulation, medical condition, or similar — do NOT manufacture members, terminology, treatments, or attributes for it. Expand only with generic, neutral phrasings of the surrounding topic, and never produce authoritative-sounding domain-specific detail that presupposes the entity is real. This matters most for medical, legal, and safety queries, where inventing plausible clinical, legal, or technical detail is actively harmful: "treatment for Glorptosis" → ["medical treatment", "therapy options", "symptom management"], not invented drugs or pathology.
 16. NAMED ENTITY / EVENT → DEFINING DETAILS. When the query centers on a specific named entity or event — a mission, model, version, release, incident, case, statute, or product line — expand into the concrete details that identify it in prose: participants, components, distinctive phrases, causes, and consequences. Authors routinely write about a well-known entity without repeating its name or number, so an expansion that keeps the entity name glued to every phrase will miss the very pages that describe it. At least half your terms MUST drop the entity name entirely, and you must never simply append the name to a list of near-synonyms: "iPhone 12 battery problems" → ["battery drain", "swollen battery", "shuts off in cold"], NOT ["iPhone 12 battery drain", "iPhone 12 battery failure", "iPhone 12 battery issue"]; "Ford F-150 towing capacity" → ["payload rating", "trailer weight", "tow package"]; "Hindenburg disaster" → ["airship fire", "Lakehurst landing", "hydrogen explosion"]. Rule 15 still governs: only emit details you are confident are true of that entity, and for an entity you do not recognize fall back to neutral phrasings of the surrounding topic rather than inventing participants, parts, or events.
 17. QUALITY / EXPERIENCE → CONCRETE INSTANCES. When the query describes a feeling, reaction, or judgment about content rather than a topic itself — a "scary moment", "inspiring story", "dramatic rescue", "funniest post", "embarrassing mistake" — expand into the concrete kinds of events, systems, or situations that embody that quality in the writing, not synonyms of the adjective. Writers convey such an episode by narrating the specific thing that happened and seldom label it: a frightening one through the malfunction, the alarm that sounded, the aborted attempt; a funny one through the mix-up, the mishap, the nickname that stuck, the off-hand remark, the stunt or object brought along for fun; an inspiring one through the first, the record, the obstacle overcome. This applies to every valence, not only to things that went wrong, and it holds even on an otherwise serious or technical site: such a site still has its light and uplifting episodes, and they are just as specific as its grave ones. So on a wildlife-photography site "scariest moment" → ["charging elephant", "snake underfoot", "lost in fog"] and "funniest moment" → ["monkey took the lens cap", "tripod in the mud", "mistimed shutter"]; on a software blog "most embarrassing incident" → ["data loss", "production outage", "shipped regression"] and "most inspiring project" → ["first release", "rewrite that shipped", "outage recovered in minutes"]. These examples show the transformation, not a term bank: always derive the instances from the subject matter of THIS site, and never reuse the terms of an example unless they genuinely belong there. Never emit the vocabulary of the quality itself: NOT ["frightening experience", "terrifying incident"], NOT ["amusing story", "humorous anecdote", "comical incident", "blooper"], NOT ["uplifting narrative", "moving account"], and no other adjective restatement or genre label. Keep the quality implicit in the concrete phrasing. Rule 15 still governs: emit only instances you are confident fit this site domain. But its fallback is itself concrete: when you are unsure which specific episodes the site contains, fall back to concrete neutral subjects of the site domain, never to the vocabulary of the quality and never to a genre label for the content itself.
@@ -32,7 +32,10 @@ Examples:
 - "gluten-free desserts" → {"terms": ["gluten-free baking", "celiac safe sweets", "wheat-free pastry"]}
 - "version control systems" → {"terms": ["Git", "Mercurial", "Subversion", "Perforce"]}
 - "home office setup" → {"terms": ["standing desk", "ergonomic chair", "monitor arm"]}
-- "iPhone 12 battery problems" → {"terms": ["battery drain", "swollen battery", "shuts off in cold"]}"#;
+- "iPhone 12 battery problems" → {"terms": ["battery drain", "swollen battery", "shuts off in cold"]}
+- "citrus fruits" → {"terms": ["lemon", "lime", "grapefruit", "mandarin"]}
+- "camping trip essentials" → {"terms": ["tent", "sleeping bag", "headlamp", "water filter"]}
+- "onboarding a new hire" → {"terms": ["offer letter", "payroll setup", "buddy assignment", "probation review"]}"#;
 
 /// Template for summarizing search results in response to a user query.
 pub const SUMMARIZE: &str = r#"You are a search assistant for the {SITE_NAME} {SITE_DESCRIPTION}. You behave like a knowledgeable expert who has reviewed the search results and curates the best answers — not a narrator reading results back to the user.
@@ -486,8 +489,8 @@ mod tests {
     fn test_expand_query_has_category_member_rule() {
         // Rule 13 must instruct decomposing a category into its concrete members.
         assert!(
-            EXPAND_QUERY.contains("CATEGORY → MEMBERS"),
-            "expand_query must contain rule 13 (CATEGORY → MEMBERS)"
+            EXPAND_QUERY.contains("CATEGORY → INSTANCES"),
+            "expand_query must contain rule 13 (CATEGORY → INSTANCES)"
         );
         assert!(
             EXPAND_QUERY.contains("Git")
@@ -512,10 +515,10 @@ mod tests {
 
     #[test]
     fn test_expand_query_forbids_fabricating_members() {
-        // Rule 13's guard: never invent members for an unknown category.
+        // Rule 13's guard: never invent instances for an unknown category.
         assert!(
-            EXPAND_QUERY.contains("never invent members"),
-            "rule 13 must forbid fabricating members when they are not known"
+            EXPAND_QUERY.contains("never invent instances"),
+            "rule 13 must forbid fabricating instances when they are not known"
         );
     }
 
@@ -609,6 +612,101 @@ mod tests {
             EXPAND_QUERY.contains("up to 6 concrete members"),
             "expand_query must reconcile the 2-4 term cap with decomposition"
         );
+    }
+
+    // Category/context decomposition: the failure was that the task definition
+    // itself asked only for paraphrases, so rules 13/14 read as exceptions the
+    // model declined to take. Live measurement: edits confined to rules 13/14
+    // moved nothing at all; changing the definition is what moved the queries.
+
+    #[test]
+    fn test_expand_query_definition_names_decomposition_as_valid() {
+        // The opening definition used to say "only return different phrasings",
+        // which describes the failure mode. Decomposition must be a co-equal
+        // kind of expansion in the definition, not only in a mid-list rule.
+        assert!(
+            EXPAND_QUERY.contains("an alternate PHRASING of the query, and a DECOMPOSITION"),
+            "the task definition must name both kinds of expansion"
+        );
+        assert!(
+            EXPAND_QUERY
+                .contains("Decomposition is the stronger expansion whenever it is available"),
+            "the definition must state which kind to prefer"
+        );
+    }
+
+    #[test]
+    fn test_expand_query_decomposition_preference_defers_to_rule_fifteen() {
+        // Measured regression guard. Stating the preference WITHOUT this clause
+        // made "Apollo 24 mission" assert the mission is the Apollo-Soyuz Test
+        // Project in 2 of 5 live rounds: pressure to name instances overrode the
+        // unrecognized-entity guard. Adding this clause returned it to clean in
+        // 5 of 5, and is also what made the category queries decompose at all.
+        assert!(
+            EXPAND_QUERY.contains("This preference never overrides rule 15"),
+            "the decomposition preference must defer to rule 15"
+        );
+        assert!(
+            EXPAND_QUERY.contains("guessing which real thing it refers to is not"),
+            "rule 15 deference must forbid guessing an unrecognized entity's identity"
+        );
+    }
+
+    #[test]
+    fn test_expand_query_category_rule_allows_open_ended_groupings() {
+        // Rule 13 licensed decomposition only when you could "name the members
+        // confidently", which presupposes a closed set. Every query that failed
+        // live was an open-ended grouping (regulations, platforms, BBQ dishes);
+        // every one that passed was a closed canonical set (noble gases).
+        assert!(
+            EXPAND_QUERY.contains("does NOT need a closed or complete membership to qualify"),
+            "rule 13 must not require a closed membership"
+        );
+        assert!(
+            EXPAND_QUERY.contains("name the several most prominent as examples"),
+            "rule 13 must say how to decompose an open-ended grouping"
+        );
+        assert!(
+            EXPAND_QUERY
+                .contains("As in rule 13, the items need not be a complete or canonical set"),
+            "rule 14 must carry the same allowance for open-ended item sets"
+        );
+    }
+
+    #[test]
+    fn test_expand_query_category_rule_forbids_narrower_grouping() {
+        // Rule 13 used to teach the failure by example: "European cars" →
+        // ["German cars", "Italian cars", "French cars"] and "Southeast Asian
+        // food" → ["Thai", ...] are category→sub-category substitutions, which
+        // is structurally what the bad expansions did. Both are gone, and the
+        // shape is now named as forbidden.
+        assert!(
+            EXPAND_QUERY.contains("Never substitute a narrower grouping for the one asked about"),
+            "rule 13 must forbid substituting a narrower grouping"
+        );
+        assert!(
+            !EXPAND_QUERY.contains("German cars"),
+            "rule 13 must not carry the category→sub-category example it forbids"
+        );
+        assert!(
+            !EXPAND_QUERY.contains("Southeast Asian food"),
+            "rule 13 must not carry the second category→sub-category example"
+        );
+    }
+
+    #[test]
+    fn test_expand_query_examples_include_decomposition_shapes() {
+        // The trailing Examples block is the strongest teacher in this template
+        // and had no worked case of a query with a generic head noun decomposing
+        // into instances. Adding these alone flipped one live query on its own.
+        for example in ["\"citrus fruits\" → {\"terms\": [\"lemon\", \"lime\", \"grapefruit\", \"mandarin\"]}",
+                        "\"camping trip essentials\" → {\"terms\": [\"tent\", \"sleeping bag\", \"headlamp\", \"water filter\"]}",
+                        "\"onboarding a new hire\" → {\"terms\": [\"offer letter\", \"payroll setup\", \"buddy assignment\", \"probation review\"]}"] {
+            assert!(
+                EXPAND_QUERY.contains(example),
+                "the Examples block must carry the decomposition example: {example}"
+            );
+        }
     }
 
     #[test]
