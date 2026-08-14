@@ -7,12 +7,21 @@ How Scolta versions its packages, what compatibility guarantees you get, how fun
 Scolta is a family of packages, not a single library:
 
 ```
-scolta-core          Rust/WASM — scoring, prompts, query expansion, context extraction, result merging
-scolta-php           PHP Composer package — wraps scolta-core for PHP platforms
-scolta-drupal        Drupal module — depends on scolta-php
-scolta-wp            WordPress plugin — depends on scolta-php
-scolta-laravel       Laravel package — depends on scolta-php
+scolta-core          Rust/WASM: scoring, prompts, query expansion, context extraction, result merging
+scolta-php           PHP Composer package: wraps scolta-core for PHP platforms
+scolta-drupal        Drupal module: depends on scolta-php
+scolta-wp            WordPress plugin: depends on scolta-php
+scolta-laravel       Laravel package: depends on scolta-php
+scolta-python        Python package: wraps scolta-core for Python platforms
+scolta-django        Django and Wagtail adapter: depends on scolta-python
+scolta-node          Node/TypeScript package: wraps scolta-core for JavaScript platforms
+scolta-next          Next.js adapter: depends on scolta-node
+scolta-nuxt          Nuxt adapter: depends on scolta-node
+scolta-astro         Astro adapter: depends on scolta-node
 ```
+
+Eleven packages. `MAINTAINING.md` in this repo is the list of record and carries the maintenance detail
+for each one.
 
 ## Version Numbers
 
@@ -72,17 +81,7 @@ For patch-only work on a released version: `1.0.1-dev` → `1.0.1`.
    - Breaking changes → next major (`2.0.0-dev`) — coordinated across all packages
 
 
-**Where the version lives:**
-
-| Package | File | Field |
-|---|---|---|
-| scolta-core | `Cargo.toml` | `version = "1.0.1-dev"` |
-| scolta-php | `composer.json` | `"version": "1.0.1-dev"` |
-| scolta-drupal | `composer.json` + `scolta.info.yml` | `"version"` in both; must match |
-| scolta-wp | `composer.json` + `scolta.php` + `readme.txt` | `"version"` + `SCOLTA_VERSION` constant + plugin header + `Stable Tag` |
-| scolta-laravel | `composer.json` | `"version": "1.0.1-dev"` |
-
-For WordPress, the version appears in four places (composer.json, the plugin header comment, the `SCOLTA_VERSION` constant, and `readme.txt` `Stable Tag`). All four must match. For Drupal, the version appears in both `composer.json` and `scolta.info.yml`; both must match.
+**Where the version lives** differs per package, and for Drupal and WordPress the `composer.json` `version` key must be absent rather than present. The table is in `MAINTAINING.md`, "Where the version lives", which is the single place that fact is maintained.
 
 ## Dependency Constraints
 
@@ -256,9 +255,9 @@ Every major release ships with an `UPGRADE-X.0.md` file that lists every breakin
 
 If you're contributing to a Scolta package:
 
-**Platform adapter contributors** (scolta-drupal, scolta-wp, scolta-laravel) work in pure PHP. You implement platform-specific integrations — config UI, routing, content export, CLI commands. You never touch the Rust crate or the WASM binary. Scoring, prompts, and HTML cleaning are handled by scolta-core through scolta-php. You can't introduce scoring drift because you don't implement scoring.
+**Platform adapter contributors** (scolta-drupal, scolta-wp, scolta-laravel in PHP; scolta-django in Python; scolta-next, scolta-nuxt, scolta-astro in TypeScript) work only in their platform's language. You implement platform-specific integrations: config UI, routing, content export, CLI commands. You never touch the Rust crate or the WASM binary. Scoring, prompts, and HTML cleaning are handled by scolta-core through the binding your adapter depends on. You can't introduce scoring drift because you don't implement scoring.
 
-**Core contributors** (scolta-core, scolta-php) must follow the lifecycle rules:
+**Binding and core contributors** (scolta-core, scolta-php, scolta-python, scolta-node) must follow the lifecycle rules:
 
 1. New functions start as `experimental` unless the API is proven.
 2. Promoting experimental to stable is a deliberate decision (requires a minor version bump).
