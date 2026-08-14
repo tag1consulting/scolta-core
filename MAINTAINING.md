@@ -227,8 +227,9 @@ and a version-format check on `Cargo.toml`.
 validates the tarball, and attaches it to a GitHub release. It does not publish the crate: run
 `cargo publish --dry-run` and then `cargo publish` yourself. A first publish also needs a metadata check.
 
-**Watch out for.** The prompt text and the expansion rules are authored here, and the bindings carry
-mirrors of them: `scolta-node` and `scolta-python` each run a prompt-identity test in CI against this
-repo's `src/prompts.rs`, checked out live. A change here that the mirrors don't match turns those repos
-red, so a prompt change ships here first and the mirrors follow. `VERSIONING.md` lives here too; keep its
-package list at eleven.
+**Watch out for.** The prompt text and the expansion rules are authored here, and all three bindings
+carry mirrors of them. `scolta-php`, `scolta-node` and `scolta-python` each run a prompt-text identity
+test in CI against this repo's `src/prompts.rs`, checked out live and pointed at by a
+`SCOLTA_CORE_PROMPTS` environment variable. A change here that the mirrors don't match turns those three
+repos red, so a prompt change ships here first and the mirrors follow. `VERSIONING.md` lives here too;
+keep its package list at eleven.

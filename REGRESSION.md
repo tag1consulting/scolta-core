@@ -129,9 +129,9 @@ Check each one. Most are fixes already in place that a change could undo.
   and an OR-fallback spike are both regressions. Neither is a reason to re-bless.
 - **An expired Amazee trial key:** expand echoes the query back, summarize returns `{}`, and health still
   says `ai_configured: true`. Use the expand call, not health, as the AI signal.
-- **A prompt change that only landed in one port.** `scolta-node` and `scolta-python` run an identity
-  test against scolta-core's `src/prompts.rs` in their own CI, so a mirror that drifts turns those repos
-  red rather than quietly changing what a demo returns.
+- **A prompt change that only landed in one port.** `scolta-php`, `scolta-node` and `scolta-python` each
+  run a prompt-text identity test against scolta-core's `src/prompts.rs` in their own CI, so a mirror
+  that drifts turns those repos red rather than quietly changing what a demo returns.
 
 ## 4. The regression corpus (`regression/`)
 
