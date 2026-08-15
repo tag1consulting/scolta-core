@@ -46,9 +46,10 @@ It covers the nine Composer (PHP) demos: four Drupal, three WordPress, two Larav
 - fetches every result-card URL and every AI-citation URL and checks for HTTP 200;
 - compares live counts against `baselines.json` within tolerance bands;
 - sets the demo's memory limit from the manifest, so it doesn't leave a dirty `settings.php`;
-- applies the overlay: a demo's committed adapter copy is swapped aside for the duration, because
-  Composer installs *underneath* a checked-in plugin and the lock is then silent about the code
-  actually calling the library.
+- applies the overlay, so the run measures the code it says it measures. Where a demo commits the
+  adapter rather than installing it, that directory is renamed aside for the duration and put back
+  afterwards, because Composer installs the library *underneath* a checked-in plugin and the lock is
+  then silent about the code actually calling it.
 
 Exit codes: 0 everything passed, 1 an armed row missed, 2 a precondition failed, 3 a usage error.
 
