@@ -1,8 +1,8 @@
-# RELEASING — how to cut a release
+# Releasing Scolta
 
-How to release across all the Scolta packages. Read `MAINTAINING.md` first for the package list, where
-each one publishes, and the version rules. The tests to run before you ship are in `REGRESSION.md`. The
-tooling these steps call (the harness, the coherence checks) lives in the private `scolta-fleet` repo.
+For the maintainer cutting a release. Read [MAINTAINING.md](MAINTAINING.md) first for the package list,
+where each one publishes, and the version rules. The tests to run before you ship are in
+[REGRESSION.md](REGRESSION.md). Steps marked maintainer-only need the private `scolta-fleet` repo.
 
 For every package, the release is finished when the registry serves the new version, not when the tag
 exists.
@@ -13,19 +13,21 @@ Release in dependency order. Each step waits for the previous registry to serve 
 the packages that depend on it tag.
 
 1. `scolta-core` (tag by hand, then `cargo publish` by hand).
-2. `scolta-php` → wait for Packagist → then `scolta-drupal`, `scolta-laravel`, `scolta-wp` in parallel.
-3. `scolta-python` → then `scolta-django`.
-4. `scolta-node` → then `scolta-next`, `scolta-nuxt`, `scolta-astro`.
+2. `scolta-php` to Packagist, then `scolta-drupal`, `scolta-laravel`, `scolta-wp` in parallel.
+3. `scolta-python`, then `scolta-django`.
+4. `scolta-node`, then `scolta-next`, `scolta-nuxt`, `scolta-astro`.
 
 ## Before you tag anything
 
 1. Every target `main` is green. A red `main` blocks that repo's tag. If you think a red is an
    infrastructure fluke, reproduce it in a throwaway worktree at the failing commit with real
    credentials before you dismiss it.
-2. Run the regression tests (`REGRESSION.md`) and note the report filename.
+2. Run the regression tests ([REGRESSION.md](REGRESSION.md)) and note the report filename.
+   Maintainer-only.
 3. In scolta-fleet, run the workspace coherence check
    (`npx tsx src/coherence-cli.ts --packages DIR --demos DIR`) with the siblings checked out. Each
    package's own `Version coherence` CI job covers the per-package half. Fix any drift first.
+   Maintainer-only.
 4. On every repo, `git remote get-url origin` reads `tag1consulting/<pkg>`. A tag pushed to a fork fires
    no workflows.
 5. Check that the last release actually reached every registry. A tag whose webhook failed never
@@ -33,18 +35,24 @@ the packages that depend on it tag.
 
 ## Releasing one package
 
-For each package: bump the version → write a `## [X.Y.Z]` CHANGELOG entry with the date → merge to
-`main` → tag from the release merge commit (not `main`, which already carries `-dev`) → push only the
-tag → wait for the registry → bump to the next `-dev` and re-open the CHANGELOG `Unreleased` stub.
+For each package: bump the version, write a `## [X.Y.Z]` CHANGELOG entry with the date, merge to `main`,
+tag, push only the tag, wait for the registry, then bump to the next `-dev` and re-open the CHANGELOG
+`Unreleased` stub.
 
-Tags are annotated and named `vX.Y.Z`. Copy the CHANGELOG entry into the GitHub release notes as-is;
-where a release workflow exists it extracts that section itself, so a missing or misnamed heading ships
-empty notes.
+Tag the merge commit that carries the release version, which is `main` at that moment. Do not tag after
+the next `-dev` bump has landed.
 
-**The tag filter is not the same everywhere.** scolta-core matches `v[0-9]+.[0-9]+.[0-9]+*` (the
-trailing `*` catches `-rc` and `-beta`). The four PHP repos match that and the same glob without the `v`,
-because drupal.org needs an unprefixed tag. The npm repos match `v*.*.*`. `scolta-python` and
-`scolta-django` have no release workflow, so a tag there triggers nothing at all.
+Tags are annotated and named `vX.Y.Z`. Don't paste release notes by hand. scolta-core and the four PHP
+repos extract the matching `## [X.Y.Z]` section from the CHANGELOG into the GitHub release themselves, so
+a missing or misnamed heading ships empty notes: write the heading correctly, then read the published
+release to confirm. The npm repos cut no GitHub release at all; their workflow publishes to npm and
+stops.
+
+The tag filter is not the same everywhere. scolta-core and the four PHP repos fire on two globs,
+`v[0-9]+.[0-9]+.[0-9]+*` and the same pattern without the `v`, so a bare `X.Y.Z` tag triggers a release
+in any of the five. The trailing `*` catches `-rc` and `-beta`. drupal.org is why the unprefixed glob
+exists. The npm repos match `v*.*.*` only. `scolta-python` and `scolta-django` have no release workflow,
+so a tag there triggers nothing at all.
 
 ### scolta-core (crates.io)
 Bump `Cargo.toml`. Run `cargo publish --dry-run` (a first publish also needs a metadata check). Tag. CI
@@ -63,11 +71,11 @@ and you must not tag the adapters until it resolves. Check it served:
 Set `tag1/scolta-php` to `^X.Y.0` at the version you just shipped (drop any `@dev`), then re-lock. Bump,
 tag, check Packagist. `lock-guard` in `release.yml` refuses to publish while the lock names a development
 version of scolta-php. Laravel keeps no copy of the bundle; its `vendor:publish` staleness check is a
-regression test, not a release step (`REGRESSION.md`).
+regression test, not a release step ([REGRESSION.md](REGRESSION.md)).
 
 ### scolta-drupal (drupal.org)
 > This section depends on the `scripts/validate-release.php` decision that is still open
-> (`MAINTAINING.md`, Still open #1). Finish it once that's settled. The known steps:
+> ([MAINTAINING.md](MAINTAINING.md), Still open #1). Finish it once that's settled. The known steps:
 
 Bump `scolta.info.yml` (the real version file). Push two tags: `vX.Y.Z` on GitHub, and `X.Y.Z` (no `v`)
 for drupal.org, which ignores `v`-prefixed tags. `git fetch origin`, then
@@ -83,7 +91,7 @@ Bump all three version places (plugin header, `SCOLTA_VERSION`, `readme.txt` `St
 confirm they match; `scripts/plugin-version.sh` is what CI reads. Set `Tested up to:` in `readme.txt` to
 the current WP core version or higher, and add the matching `readme.txt` changelog entry: both are gates
 in `release.yml` (`check-wp-version`, `check-readme-changelog`), not PR checks, so they first fire at the
-tag. Tag → Packagist. wordpress.org is a separate publish: the reviewed dist zip is what ships, and
+tag. Tag, then Packagist. wordpress.org is a separate publish: the reviewed dist zip is what ships, and
 wp.org rejects a non-numeric version, so never publish from a `-dev` or `-rc` commit. Don't build the zip
 locally; CI builds it and `scripts/validate-dist.sh` must pass. SVN steps: update `trunk` from the zip,
 `svn cp trunk tags/X.Y.Z`, then bump `Stable Tag`. The wp.org slug is `scolta-ai-search`. Check the
@@ -91,18 +99,17 @@ wp.org plugin page shows the version.
 
 ### scolta-python (PyPI, published as `scolta`)
 Bump `src/scolta/__init__.py` `__version__`. That is the only place: `pyproject.toml` reads it through
-`[tool.hatch.version]`, so the two cannot drift. Rehearse on TestPyPI: `uv build` →
-`uvx twine check dist/*` → upload to testpypi → `pip install` from testpypi in a clean venv. **There is
-no release workflow**, so the real upload is manual too: `uv build` then `twine upload dist/*`. CI's
-`dist` job builds and validates the same artifacts on every pull request, which is the only gate in
-front of the upload. Tag for the record. Check: `pip install scolta` in a fresh venv resolves the new
-version.
+`[tool.hatch.version]`, so the two cannot drift. Rehearse on TestPyPI: `uv build`,
+`uvx twine check dist/*`, upload to testpypi, then `pip install` from testpypi in a clean venv. There is
+no release workflow, so the real upload is manual too: `uv build` then `twine upload dist/*`. CI's `dist`
+job builds and validates the same artifacts on every pull request, which is the only gate in front of
+the upload. Tag for the record. Check: `pip install scolta` in a fresh venv resolves the new version.
 
 ### scolta-django (PyPI, published as `scolta-django`)
 Release only after `scolta` is up. Same Python steps, same manual upload, same single version source
 (`src/scolta_django/__init__.py`).
 
-### scolta-node / -next / -nuxt / -astro (npm)
+### scolta-node, -next, -nuxt, -astro (npm)
 Release `scolta-node` first (its npm name is `scolta`); the adapters require `scolta@^X.Y.0`. Bump
 `package.json`. Run `npm run check:pack` and `npm run check:publish` locally, the same guards the release
 workflow runs: the tarball must stay inside the `files` allowlist and under its size cap, and must not
@@ -137,7 +144,7 @@ include a leftover `file:` or `link:` dependency. Tag; CI runs the build, the te
   aren't rebuilt, stop before measuring: a warm cache can report a false green. A gate that actually ran
   and failed is a code problem. Don't treat them the same.
 - **Serving the right bytes doesn't mean the browser ran them.** A demo's `composer update` can silently
-  skip the asset copy. The browser regression tests are not optional (`REGRESSION.md`).
+  skip the asset copy. The browser regression tests are not optional ([REGRESSION.md](REGRESSION.md)).
 
 ## Keep the release clean
 

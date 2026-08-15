@@ -1,26 +1,35 @@
-# regression — the public query corpus and benchmarks
+# The public query corpus and benchmarks (proposal)
 
-This is the durable, public record of what Scolta returns for a fixed set of queries, release over
-release. The private harness in `scolta-fleet` tells you a count or a response shape moved; this corpus
-tells you the *content* of an answer moved, that a query's expanded terms shifted or its summary got
-worse, and it tracks the numbers as benchmarks, so the commit history reads as progress, not noise.
+For anyone deciding whether to build this, or reading a future corpus once it exists. It is a design,
+not a working record.
 
-It's checked into scolta-core (public) so anyone can see how a release compares to the last one. The
-per-release churn is the point: each release adds a benchmark snapshot and a sample, and the history is
-the trend line.
+**Status: not built.** `corpus/`, `benchmarks/` and `samples/` are empty scaffolds, each holding only a
+`.gitkeep`. Filling them needs a capture run against the live demos, which needs the private harness plus
+ddev and API keys, and needs capture mode itself built. It is not part of the release process and
+[REGRESSION.md](../REGRESSION.md) does not depend on it. Do not hand-write corpus data: a number nobody
+measured reads exactly like evidence, which is why `baselines.json` in scolta-fleet replaced four copied
+fragment counts with nulls. That private file keeps holding the numeric tripwires in the meantime.
 
-The fixed set of queries every release is measured against is documented in `QUERIES.md`. That file is
-the list of record, and the corpus and benchmarks are built from it.
+## What it would be
 
-AI answers aren't deterministic, so this does not diff raw answer text. It records four things, each
-chosen to stay meaningful across runs:
+A durable, public record of what Scolta returns for a fixed set of queries, release over release. The
+private harness in `scolta-fleet` tells you a count or a response shape moved; this corpus would tell you
+the *content* of an answer moved, that a query's expanded terms shifted or its summary got worse, and
+would track the numbers as benchmarks. Checked into scolta-core, which is public, so anyone can compare
+one release against the last.
+
+The query set is documented in [QUERIES.md](QUERIES.md), which explains what each query is for.
+`baselines.json` in scolta-fleet stays the record for live counts and blessings.
+
+AI answers aren't deterministic, so this would not diff raw answer text. It would record four things,
+each chosen to stay meaningful across runs:
 
 1. **Deterministic index results:** the ordered result set the index returns. This comes from the index,
    not the model, so the same query on the same index gives the same answer. A change here is a real
-   signal and it **blocks**: treat it as a regression until a human explains it.
+   signal and it blocks: treat it as a regression until a human explains it.
 2. **Property checks on the AI answer:** assertions that survive nondeterminism (the expansion contains a
    term, the summary cites an on-site URL, the sort intent is NEVER, nothing is fabricated). A failed
-   property **blocks**.
+   property blocks.
 3. **Benchmarks:** the numbers, aggregated per release: how many queries ran, how many properties
    passed, how many deterministic results changed, citation on-site rate, AI-usable rate, and timings.
    These don't block on their own; they're the progress record, and a sharp move is worth a look.
@@ -32,7 +41,7 @@ chosen to stay meaningful across runs:
 ```
 regression/
   README.md                     <- this file
-  QUERIES.md                    <- the fixed benchmark query set, per demo: the list of record
+  QUERIES.md                    <- the documented benchmark query set, per demo
   corpus/
     <demo>.json                 <- expected index results and property checks, one query per row
   benchmarks/
@@ -70,6 +79,8 @@ on). `<version>` is the released tag captured against, for example `1.2.0`.
 }
 ```
 
+The values above are a shape example, not a measurement.
+
 - `results` is the deterministic part. `orderedUrls` is the result set in index order; `count` is the
   total. A diff on either blocks.
 - `answerProperties` is what must be true of the AI answer without pinning its exact text. Only assert
@@ -102,8 +113,8 @@ on). `<version>` is the released tag captured against, for example `1.2.0`.
 }
 ```
 
-`history.md` is an append-only markdown table, one row per release, so the progress is legible without
-opening JSON:
+`history.md` would be an append-only markdown table, one row per release, so the progress is legible
+without opening JSON:
 
 ```
 | version | queries | props pass | det. changed | on-site cites | AI usable | median results |
@@ -111,8 +122,8 @@ opening JSON:
 | 1.2.0   | 24      | 71/72     | 0            | 0.96          | 9/9       | 33             |
 ```
 
-Add the new row in the same PR that cuts the release. Never rewrite an old row: a past benchmark is a
-past benchmark, the same rule `baselines.json` follows in scolta-fleet.
+Add the new row in the same pull request that cuts the release. Never rewrite an old row: a past
+benchmark is a past benchmark, the same rule `baselines.json` follows in scolta-fleet.
 
 ## samples/<version>/<demo>.md
 
@@ -121,29 +132,22 @@ from one capture run. Plain markdown. Nobody diffs this automatically. It's the 
 property check fails and you want to see what actually came back, and the record you scroll to compare
 one release against the next by eye.
 
-## Updating the corpus on a release
+## How updating it would work
 
-1. Run the harness in capture mode against the demos (it needs ddev and the API keys, so it runs from
-   `scolta-fleet`):
+Once capture mode exists:
+
+1. Run the harness in capture mode against the demos. It needs ddev and the API keys, so it runs from
+   `scolta-fleet`. The command name is provisional and the mode is not built:
 
    ```
    npx tsx src/cli.ts capture --corpus ../scolta-core/regression
    ```
-
-   The command name is provisional: capture mode is the follow-up that populates this, and it does not
-   exist in the harness yet. See "Status".
 2. It writes `corpus/<demo>.json` deterministic results, `benchmarks/<version>.json`, the new
    `history.md` row, and `samples/<version>/<demo>.md`.
 3. Review the diff. A changed `orderedUrls`/`count` or a failed property is a regression: explain it or
    fix it before release. A benchmark that moved sharply is worth a look. A changed sample is expected.
-4. Commit the reviewed corpus in the same release. The churn is the progress record, which is wanted here.
+4. Commit the reviewed corpus in the same release. The per-release churn is the progress record, which is
+   wanted here.
 
-## Status
-
-This is the spec and the layout. `corpus/`, `benchmarks/` and `samples/` are empty scaffolds, each
-holding only a `.gitkeep`. Filling them needs a capture run against the live demos, which needs the
-harness plus ddev and API keys, and needs the capture mode itself built. That first population is a
-follow-up task, separate from landing these docs. Do not hand-write corpus data: a number nobody measured
-reads exactly like evidence, which is why `baselines.json` in scolta-fleet replaced four copied fragment
-counts with nulls. The private `baselines.json` keeps holding the numeric tripwires in the meantime; this
-corpus is the content-level and benchmark record that complements it.
+Adding this to the release sequence in [RELEASING.md](../RELEASING.md) is the last step of building it,
+not the first.

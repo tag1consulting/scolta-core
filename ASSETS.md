@@ -1,4 +1,7 @@
-# ASSETS — the browser bundle and how it stays in sync
+# The browser bundle and how it stays in sync
+
+For anyone changing the browser bundle or wondering why a package carries a copy of it. Read it before
+you edit anything under an `assets/` directory in any Scolta repo.
 
 `scolta-php` owns the canonical copy of the browser bundle. Some packages ship their own committed copy
 of it; others read it from their Composer vendor directory at run time. Which packages do which is set by
@@ -29,10 +32,10 @@ hash at run time.
 
 ## Which packages carry a copy, and why
 
-Here's the reason it splits: Composer runs a package's `post-install-cmd` and `post-update-cmd` scripts
-only for the root package, never for a dependency. So a site that installs an adapter never gets the
-assets copied out of `vendor/` at install time. If the install can't copy the file, the file has to be
-committed already.
+Composer runs a package's `post-install-cmd` and `post-update-cmd` scripts only for the root package,
+never for a dependency. So a site that installs an adapter never gets the assets copied out of `vendor/`
+at install time. If the install can't copy the file, the file has to be committed already. That is what
+splits the table below: read it for whether the package you are changing carries a copy, and where.
 
 | Package | Carries a copy? | Committed at | Why |
 |---|---|---|---|
@@ -47,7 +50,7 @@ because it's an ordinary Composer install and reads from vendor. Node and Python
 reason WordPress does: the published artifact has to contain the file. Always confirm a package's
 committed paths against its own vendor script before you rely on this table.
 
-`scolta-wp` deliberately commits **no** `.sha256` sidecar. It had one; nothing generated it and nothing
+`scolta-wp` deliberately commits no `.sha256` sidecar. It had one; nothing generated it and nothing
 read it, so it drifted for two revisions and was removed. scolta-php owns the canonical record, and the
 parity check compares asset bytes rather than a claim about them.
 
@@ -61,7 +64,8 @@ package.
 
 ## How it's enforced
 
-**The parity check, `assets-in-sync`.** Drupal and WordPress each run one, and the Drupal job is the
+**The parity check, `assets-in-sync`.** It is a public CI job, so it runs on an outside contributor's
+pull request too. Drupal and WordPress each run one, and the Drupal job is the
 model (`scolta-drupal/.github/workflows/ci.yml`). In one CI job it rewrites `composer.json` to resolve
 `tag1/scolta-php` from `dev-main` through a Composer VCS repository, then runs `cmp` on each of the four
 committed assets against `vendor/tag1/scolta-php/assets/<path>`. Byte comparison, not checksums: it needs
@@ -71,7 +75,8 @@ and the second case is the common one. Do not run the copy command to make that 
 overwrites the new bundle with the old one, which is the exact failure the check exists to catch. Prove
 the check can fail by corrupting one committed asset in a scratch commit.
 
-**The gap.** `scolta-node` and `scolta-python` commit a copy and have **no** parity check. Nothing goes
+**What nothing watches.** `scolta-node` and `scolta-python` commit a copy and have no parity check.
+Nothing goes
 red when their copy falls behind scolta-php, and on 2026-08-09 the four carriers were measured in three
 different states. Modelling a check on Drupal's is not a straight copy: neither repo has a Composer link
 to scolta-php, so it would have to fetch the source through a public `actions/checkout`, and both would

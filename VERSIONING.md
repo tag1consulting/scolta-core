@@ -1,35 +1,37 @@
 # Versioning
 
-How Scolta versions its packages, what compatibility guarantees you get, how functions move through their lifecycle, and how long old versions are supported.
+For anyone who installs or depends on a Scolta package: how Scolta versions its packages, what compatibility guarantees you get, how functions move through their lifecycle, and how long old versions are supported. Maintainers should read [MAINTAINING.md](MAINTAINING.md) alongside it, which carries the operational detail.
 
 ## Packages
 
 Scolta is a family of packages, not a single library:
 
 ```
-scolta-core          Rust/WASM: scoring, prompts, query expansion, context extraction, result merging
-scolta-php           PHP Composer package: wraps scolta-core for PHP platforms
+scolta-core          Rust compiled to browser WASM: scoring, prompts, query expansion,
+                     context extraction, result merging
+scolta-php           PHP index builder and AI proxy; ships the browser bundle
 scolta-drupal        Drupal module: depends on scolta-php
 scolta-wp            WordPress plugin: depends on scolta-php
 scolta-laravel       Laravel package: depends on scolta-php
-scolta-python        Python package: wraps scolta-core for Python platforms
+scolta-python        Python index builder and AI proxy; ships the browser bundle
 scolta-django        Django and Wagtail adapter: depends on scolta-python
-scolta-node          Node/TypeScript package: wraps scolta-core for JavaScript platforms
+scolta-node          TypeScript index builder and AI proxy; ships the browser bundle
 scolta-next          Next.js adapter: depends on scolta-node
 scolta-nuxt          Nuxt adapter: depends on scolta-node
 scolta-astro         Astro adapter: depends on scolta-node
 ```
 
-Eleven packages. `MAINTAINING.md` in this repo is the list of record and carries the maintenance detail
-for each one.
+Eleven packages. The three bindings each implement their own server side and vendor the same browser
+bundle; they do not wrap scolta-core at run time. [MAINTAINING.md](MAINTAINING.md) in this repo is the
+list of record, carries the maintenance detail for each package, and describes the boundary in §1.
 
 ## Version Numbers
 
 All packages follow [Semantic Versioning](https://semver.org/) (MAJOR.MINOR.PATCH) with one additional rule: **the major version is synchronized across all packages.**
 
-When Scolta is in the 1.x generation, every package has major version 1. scolta-core 1.4.2, scolta-php 1.7.0, scolta-drupal 1.3.1 — all compatible. When the project moves to 2.x, every package bumps to 2.0.0 in a coordinated release.
+When Scolta is in the 1.x generation, every package has major version 1. scolta-core 1.4.2, scolta-php 1.7.0, scolta-drupal 1.3.1: all compatible. When the project moves to 2.x, every package bumps to 2.0.0 in a coordinated release.
 
-Minor and patch versions are independent. Each package ships features and bug fixes at its own pace. scolta-drupal might be at 1.3 while scolta-php is at 1.7 — that's normal. The major number tells you they belong to the same generation and work together.
+Minor and patch versions are independent. Each package ships features and bug fixes at its own pace. scolta-drupal might be at 1.3 while scolta-php is at 1.7, and that's normal. The major number tells you they belong to the same generation and work together.
 
 **In short:**
 
@@ -49,9 +51,9 @@ Minor and patch versions are independent. Each package ships features and bug fi
 
 Between releases, the version in the repo carries a `-dev` pre-release suffix. The `-dev` suffix is a [semver pre-release identifier](https://semver.org/#spec-item-9) that sorts lower than the bare version (`1.1.0-dev < 1.1.0`).
 
-**Why we use it:** Scolta is a multi-package project with multiple contributors (human and automated). When someone opens `Cargo.toml` or `composer.json` in the repo, `-dev` makes the state self-documenting — you can immediately tell whether you're looking at a tagged release or unreleased work in progress, without cross-referencing git tags.
+**Why we use it:** Scolta is a multi-package project with multiple contributors (human and automated). When someone opens `Cargo.toml` or `composer.json` in the repo, `-dev` makes the state self-documenting: you can immediately tell whether you're looking at a tagged release or unreleased work in progress, without cross-referencing git tags.
 
-**Ecosystem notes:** The `-dev` suffix is a first-class concept in Composer (PHP), where it maps to a stability level that prevents accidental installation in production (requires `minimum-stability: dev` or an explicit `@dev` flag). In Cargo (Rust), pre-release identifiers are valid semver and work correctly, but most Rust crates don't use them between releases — we do because of the multi-package coordination benefit.
+**Ecosystem notes:** The `-dev` suffix is a first-class concept in Composer (PHP), where it maps to a stability level that prevents accidental installation in production (requires `minimum-stability: dev` or an explicit `@dev` flag). In Cargo (Rust), pre-release identifiers are valid semver and work correctly, but most Rust crates don't use them between releases. We do, because of the multi-package coordination benefit.
 
 **The workflow:**
 
@@ -78,7 +80,7 @@ For patch-only work on a released version: `1.0.1-dev` → `1.0.1`.
 5. **Decide the target version based on what changed:**
    - Only bug fixes since last release → next patch (`1.0.1-dev`)
    - New features or deprecations → next minor (`1.1.0-dev`)
-   - Breaking changes → next major (`2.0.0-dev`) — coordinated across all packages
+   - Breaking changes → next major (`2.0.0-dev`), coordinated across all packages
 
 
 **Where the version lives** differs per package, and for Drupal and WordPress the `composer.json` `version` key must be absent rather than present. The table is in `MAINTAINING.md`, "Where the version lives", which is the single place that fact is maintained.
@@ -98,13 +100,13 @@ Each adapter declares what it needs from scolta-php using a caret constraint:
 
 This means "any 1.x version of scolta-php that's at least 1.0.0." If you have scolta-php 1.7 installed, it satisfies the constraint. If scolta-drupal later uses a feature added in scolta-php 1.5, its constraint tightens to `^1.5`. Composer handles this automatically.
 
-Adapters bundle the exact scolta-php version recorded in their committed `composer.lock`, resolved from Packagist. Tagging an adapter release does NOT require a matching scolta-php tag — the lock pins the version. To adopt a newer scolta-php, run `composer update tag1/scolta-php` in a PR, test, and commit the updated lock.
+Adapters bundle the exact scolta-php version recorded in their committed `composer.lock`, resolved from Packagist. Tagging an adapter release does NOT require a matching scolta-php tag: the lock pins the version. To adopt a newer scolta-php, run `composer update tag1/scolta-php` in a PR, test, and commit the updated lock.
 
-scolta-core ships as a compiled WASM binary inside the scolta-php package. You don't install scolta-core separately — it comes bundled. The scolta-core version used by scolta-php is documented in scolta-php's changelog.
+scolta-core ships as a compiled WASM binary inside scolta-php, scolta-python and scolta-node. You don't install scolta-core separately: each binding vendors the browser bundle and serves it to the page. The scolta-core version a binding carries is recorded in that binding's changelog. The WASM runs in the browser only; the server side of each binding is written in that binding's own language ([MAINTAINING.md](MAINTAINING.md), §1).
 
 ## Function Lifecycle
 
-Every exported function in scolta-core and every public method in scolta-php has a lifecycle state. Four states, one direction:
+Every function scolta-core exports to the browser, and every public method in a binding, has a lifecycle state. Four states, one direction:
 
 ```
 experimental → stable → deprecated → removed
@@ -112,13 +114,13 @@ experimental → stable → deprecated → removed
 
 ### States
 
-**experimental** — New, still being shaped. The API may change or disappear in the next minor release. Use it, report bugs, but don't build production workflows around it yet.
+**experimental.** New, still being shaped. The API may change or disappear in the next minor release. Use it, report bugs, but don't build production workflows around it yet.
 
-**stable** — Proven, tested, recommended. Will not break within a major version. If we need to change a stable function's behavior, we deprecate the old one and introduce a new one alongside it.
+**stable.** Proven, tested, recommended. Will not break within a major version. If we need to change a stable function's behavior, we deprecate the old one and introduce a new one alongside it.
 
-**deprecated** — Still works, but has a replacement. Fires a deprecation warning in PHP (`E_USER_DEPRECATED`) and a `console.warn` in JavaScript. The warning tells you what to use instead and when the function will be removed (always the next major version). Your code keeps working — you just get a heads-up to migrate.
+**deprecated.** Still works, but has a replacement. Fires a deprecation warning in PHP (`E_USER_DEPRECATED`) and a `console.warn` in JavaScript. The warning tells you what to use instead and when the function will be removed (always the next major version). Your code keeps working; the warning is your notice to migrate.
 
-**internal** — Not part of the public API. May change without notice in any release. If you're calling internal functions, you're on your own.
+**internal.** Not part of the public API. May change without notice in any release. If you're calling internal functions, you're on your own.
 
 ### How to Check
 
@@ -155,12 +157,13 @@ In Rust, the same information lives in doc comments and Rust's native `#[depreca
 pub fn score_results(input: &str) -> Result<String, JsError> { ... }
 ```
 
-**At runtime:** scolta-core exposes a `describe()` function that returns a machine-readable manifest of every exported function, its lifecycle state, when it was introduced, and (if deprecated) when it will be removed:
+**At runtime:** scolta-core's browser WASM exports a `describe()` function that returns a machine-readable manifest of every exported function, its lifecycle state, when it was introduced, and (if deprecated) when it will be removed:
 
 ```json
 {
+  "name": "scolta-core",
   "version": "1.5.0",
-  "wasm_interface_version": 1,
+  "wasm_interface_version": 4,
   "functions": {
     "score_results": {
       "since": "1.0.0",
@@ -185,53 +188,48 @@ pub fn score_results(input: &str) -> Result<String, JsError> { ... }
 }
 ```
 
-This manifest is the single source of truth. CI validates it. The PHP wrapper reads it at load time to generate deprecation warnings automatically. Documentation is generated from it. If you're building tooling on top of Scolta, `describe()` gives you everything you need.
+The example above shows the shape; call `describe()` for the live manifest. It is the source of truth for what the loaded WASM exports and what state each export is in, and it is the answer to "which build is this page running". If you're building tooling on top of Scolta in the browser, read it there.
+
+Its limits, so you don't rely on something that isn't there. Nothing on the server side reads it: there is no server-side WASM in any binding, so nothing generates PHP or Python deprecation warnings from it. No documentation is generated from it. No CI job compares it against the source annotations. Keeping the manifest, the annotations and this document in step is a review step, and the pull request template asks for it.
 
 ### Deprecation Timeline
 
 A function must be deprecated for **at least one minor release** before it can be removed in the next major version. In practice, we deprecate as early as possible to give you maximum runway.
 
-Example timeline:
+Example timeline, using a hypothetical function:
 
 ```
 1.0.0  expandTermsParse() introduced (stable)
-1.4.0  expandTermsParse() deprecated — replacement: parseExpansion()
-       ↳ PHP: trigger_deprecation() fires on every call
-       ↳ JS: console.warn on every call
-       ↳ describe() manifest updated
-       ↳ CHANGELOG and UPGRADE.md document the migration
-1.5–1.x expandTermsParse() still works, still fires warnings
+1.4.0  expandTermsParse() deprecated, replacement: parseExpansion()
+       + @deprecated annotation naming the replacement and the removal version
+       + a runtime deprecation warning where the language has one
+       + describe() manifest updated, for a core export
+       + CHANGELOG and UPGRADE.md document the migration
+1.5 to 1.x expandTermsParse() still works, still fires warnings
 2.0.0  expandTermsParse() removed
-       ↳ UPGRADE-2.0.md has before/after code examples
+       + UPGRADE-2.0.md has before/after code examples
 ```
 
-No function goes from stable to removed without passing through deprecated first. CI enforces this — a PR that removes a stable function without a deprecation phase will not merge.
+No function goes from stable to removed without passing through deprecated first. That is a review rule, not a CI gate: no job today compares a pull request against the previous release's public surface, so a reviewer is what catches a removal that skipped the deprecation phase.
 
 ## WASM Interface Version
 
-Separate from the package version, scolta-core declares a **WASM interface version** — a single integer (currently **4**) that tracks binary compatibility between scolta-core and its host wrappers (scolta-php).
+Separate from the package version, scolta-core declares a WASM interface version: a single integer, currently 4, that tracks binary compatibility between the WASM binary and the front end that loads it.
 
-The interface version is an internal protocol version that is incremented whenever the WASM binary's function signatures or calling conventions change in a way that breaks binary compatibility with host wrappers. It does not align with the package major version — it has been incremented multiple times within the 0.x and 1.0-rc series as exports were added or removed.
+The interface version is an internal protocol version that is incremented whenever the WASM binary's function signatures or calling conventions change in a way that breaks binary compatibility with the code calling it. It does not align with the package major version. It has been incremented multiple times within the 0.x and 1.0-rc series as exports were added or removed.
 
 Historical progression:
-- Version 1 — initial wasm-bindgen exports (0.2.0)
-- Version 2 — removed `clean_html`, `build_pagefind_html`, `debug_call`; added context/sanitize/conversation functions (0.2.3)
-- Version 3 — added `batch_score_results` (0.2.2)
-- Version 4 — current; stabilized for 1.0
+- Version 1: initial wasm-bindgen exports (0.2.0)
+- Version 2: removed `clean_html`, `build_pagefind_html`, `debug_call`; added context/sanitize/conversation functions (0.2.3)
+- Version 3: added `batch_score_results` (0.2.2)
+- Version 4: current, stabilized for 1.0
 
 The interface version is tracked separately from the package version because:
 
-- A major version bump in scolta-php might change PHP-side APIs without changing the WASM interface.
-- A WASM interface change always requires wrapper updates, but not necessarily public API changes.
+- A major version bump in a binding might change its server-side API without changing the WASM interface.
+- A WASM interface change always requires the front end to be updated, but not necessarily any public API change.
 
-scolta-php checks the interface version at load time. If it loads a WASM binary with an unexpected interface version, it fails immediately with a clear error:
-
-```
-scolta-core reports WASM interface version 4, but this version of
-scolta-php expects version 3. Update scolta-php to a compatible version.
-```
-
-You should never see this in normal use — it's a safety net for development and version mismatches during manual upgrades.
+No binding enforces the interface version at load time today. It is a declaration, readable through `describe()`, that tells you which protocol a given bundle speaks. The thing that actually keeps a bundle and its front end together is that they ship as one vendored set of files: change the bundle, re-vendor it, and the parity checks in [ASSETS.md](ASSETS.md) catch a carrier left behind. Bump the integer when you change a signature, so the manifest tells the truth.
 
 ## Multi-Version Support
 
@@ -241,7 +239,7 @@ We maintain **at most two active major versions** at a time.
 |---|---|---|---|
 | Current major (e.g., 2.x) | Yes | Yes | Yes |
 | Previous major (e.g., 1.x) | Critical only (6 months) | Yes (12 months) | No |
-| Older | End of life | End of life | — |
+| Older | End of life | End of life | n/a |
 
 When Scolta 2.0 ships, the 1.x branch enters maintenance. It gets security fixes for 12 months and critical bug fixes (data loss, index corruption, security) for 6 months. After 12 months, 1.x reaches end of life.
 
@@ -249,19 +247,21 @@ Security fixes are developed on the current branch and cherry-picked to the main
 
 ### Upgrading Between Majors
 
-Every major release ships with an `UPGRADE-X.0.md` file that lists every breaking change with before-and-after code examples. If you've addressed all deprecation warnings in your code during the 1.x cycle, upgrading to 2.0 should be straightforward — the deprecated functions you already migrated away from are the only things that get removed.
+Every major release ships with an `UPGRADE-X.0.md` file that lists every breaking change with before-and-after code examples. If you've addressed all deprecation warnings in your code during the 1.x cycle, upgrading to 2.0 should be straightforward: the deprecated functions you already migrated away from are the only things that get removed.
 
 ## For Contributors
 
 If you're contributing to a Scolta package:
 
-**Platform adapter contributors** (scolta-drupal, scolta-wp, scolta-laravel in PHP; scolta-django in Python; scolta-next, scolta-nuxt, scolta-astro in TypeScript) work only in their platform's language. You implement platform-specific integrations: config UI, routing, content export, CLI commands. You never touch the Rust crate or the WASM binary. Scoring, prompts, and HTML cleaning are handled by scolta-core through the binding your adapter depends on. You can't introduce scoring drift because you don't implement scoring.
+**Platform adapter contributors** (scolta-drupal, scolta-wp, scolta-laravel in PHP; scolta-django in Python; scolta-next, scolta-nuxt, scolta-astro in TypeScript) work only in their platform's language. You implement platform-specific integrations: config UI, routing, content export, CLI commands. You never touch the Rust crate or the WASM binary, and you don't implement scoring, HTML cleaning, indexing or prompt logic: scoring comes from the browser WASM, and the rest from the binding your adapter depends on.
 
-**Binding and core contributors** (scolta-core, scolta-php, scolta-python, scolta-node) must follow the lifecycle rules:
+You can still change what a search returns without writing a line of scoring code. What your adapter exports, in what order, with which fields and which build settings, decides what goes into the index. If your change moves result counts, say so in the pull request and name the query.
+
+**Binding and core contributors** (scolta-core, scolta-php, scolta-python, scolta-node) implement the server side in their own language: HTML cleaning, indexing, tokenizing, stemming and the AI proxy are native in each binding, and parity with the PHP reference is held by fixtures and identity tests rather than by shared code ([MAINTAINING.md](MAINTAINING.md), §1). Follow the lifecycle rules:
 
 1. New functions start as `experimental` unless the API is proven.
 2. Promoting experimental to stable is a deliberate decision (requires a minor version bump).
-3. Deprecating a stable function requires: `@deprecated` annotation with version and replacement, `trigger_deprecation()` call in PHP / `console.warn` in JS, a CHANGELOG fragment, and an entry in UPGRADE.md with migration instructions.
+3. Deprecating a stable function requires: an `@deprecated` annotation with the version and the replacement, a runtime deprecation warning where the language has one, a CHANGELOG fragment, and an entry in UPGRADE.md with migration instructions.
 4. Removing a function requires: it was deprecated for at least one minor release, and the removal happens in a major version.
 
-CI checks all of this. A PR that adds a public function without `@since` and `@stability` will fail. A PR that removes a stable function without a deprecation phase will fail. A PR that changes a function signature without a version bump will fail.
+None of that is enforced by a CI job. The pull request templates in scolta-core and scolta-php ask for the annotations and the CHANGELOG entry; scolta-python and scolta-node have no template, so the reviewer is the only check. Say in the pull request which of the four applies to your change.
