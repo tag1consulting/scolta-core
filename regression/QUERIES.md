@@ -66,7 +66,7 @@ Terms used here (armed row, capture row, track, base-only, settled-expanded) are
 
 | query | track | mode | why it is here |
 |---|---|---|---|
-| meatless | base-only | armed | Single word that stems to a small set. |
+| meatless | base-only | armed | Single word that matches a narrow slice of a corpus where most terms match a lot. |
 | crispy soft | base-only | armed | Two ordinary adjectives, so the intersection is the signal. |
 | chicken garlic onion | base-only | armed | Replaced `quick weeknight dinner`, which measured 0. |
 
