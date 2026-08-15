@@ -64,9 +64,9 @@ package.
 
 ## How it's enforced
 
-**The parity check, `assets-in-sync`.** It is a public CI job, so it runs on an outside contributor's
-pull request too. Drupal and WordPress each run one, and the Drupal job is the
-model (`scolta-drupal/.github/workflows/ci.yml`). In one CI job it rewrites `composer.json` to resolve
+**The parity check, `assets-in-sync`.** Drupal and WordPress each run one, and the Drupal job is the
+model (`scolta-drupal/.github/workflows/ci.yml`). It is a public CI job, so it runs on an outside
+contributor's pull request too. In one job it rewrites `composer.json` to resolve
 `tag1/scolta-php` from `dev-main` through a Composer VCS repository, then runs `cmp` on each of the four
 committed assets against `vendor/tag1/scolta-php/assets/<path>`. Byte comparison, not checksums: it needs
 no manifest and works against every scolta-php version. No skip, no tolerance. A stale copy goes red, and
@@ -76,8 +76,7 @@ overwrites the new bundle with the old one, which is the exact failure the check
 the check can fail by corrupting one committed asset in a scratch commit.
 
 **What nothing watches.** `scolta-node` and `scolta-python` commit a copy and have no parity check.
-Nothing goes
-red when their copy falls behind scolta-php, and on 2026-08-09 the four carriers were measured in three
+Nothing goes red when their copy falls behind scolta-php, and on 2026-08-09 the four carriers were measured in three
 different states. Modelling a check on Drupal's is not a straight copy: neither repo has a Composer link
 to scolta-php, so it would have to fetch the source through a public `actions/checkout`, and both would
 need a one-time re-vendor first so the new check lands green. Until that exists, treat their copies as
