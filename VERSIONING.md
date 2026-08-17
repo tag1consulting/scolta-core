@@ -190,7 +190,7 @@ pub fn score_results(input: &str) -> Result<String, JsError> { ... }
 
 The example above shows the shape; call `describe()` for the live manifest. It is the source of truth for what the loaded WASM exports and what state each export is in, and it is the answer to "which build is this page running". If you're building tooling on top of Scolta in the browser, read it there.
 
-Its limits, so you don't rely on something that isn't there. Nothing on the server side reads it: there is no server-side WASM in any binding, so nothing generates PHP or Python deprecation warnings from it. No documentation is generated from it. No CI job compares it against the source annotations. Keeping the manifest, the annotations and this document in step is a review step, and the pull request template asks for it.
+Its limits. Nothing on the server side reads it: there is no server-side WASM in any binding, so nothing generates PHP or Python deprecation warnings from it. No documentation is generated from it. No CI job compares it against the source annotations. Keeping the manifest, the annotations and this document in step is a review step, and the pull request template asks for it.
 
 ### Deprecation Timeline
 
@@ -210,7 +210,7 @@ Example timeline, using a hypothetical function:
        + UPGRADE-2.0.md has before/after code examples
 ```
 
-No function goes from stable to removed without passing through deprecated first. That is a review rule, not a CI gate: no job today compares a pull request against the previous release's public surface, so a reviewer is what catches a removal that skipped the deprecation phase.
+No function goes from stable to removed without passing through deprecated first. That is a review rule, not a CI gate: no job today compares a pull request against the previous release's public surface.
 
 ## WASM Interface Version
 
