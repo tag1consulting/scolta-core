@@ -218,11 +218,17 @@ Separate from the package version, scolta-core declares a WASM interface version
 
 The interface version is an internal protocol version that is incremented whenever the WASM binary's function signatures or calling conventions change in a way that breaks binary compatibility with the code calling it. It does not align with the package major version. It has been incremented multiple times within the 0.x and 1.0-rc series as exports were added or removed.
 
-Historical progression:
-- Version 1: initial wasm-bindgen exports (0.2.0)
-- Version 2: removed `clean_html`, `build_pagefind_html`, `debug_call`; added context/sanitize/conversation functions (0.2.3)
-- Version 3: added `batch_score_results` (0.2.2)
-- Version 4: current, stabilized for 1.0
+Historical progression, each step named for the change that bumped it. Reproduce it with
+`git log -S WASM_INTERFACE_VERSION` in this repo:
+
+- Version 1: the constant introduced alongside the lifecycle annotations, over the wasm-bindgen exports
+  as they then stood.
+- Version 2: the server-side plugin target removed. `clean_html`, `build_pagefind_html` and `debug_call`
+  went with it, and the browser exports became the whole surface.
+- Version 3: `batch_score_results` added.
+- Version 4: context extraction (`extract_context`, `batch_extract_context`), query sanitizing
+  (`sanitize_query`), conversation trimming (`truncate_conversation`) and priority-page matching
+  (`match_priority_pages`) added; `to_js_scoring_config` dropped. Current.
 
 The interface version is tracked separately from the package version because:
 
