@@ -172,3 +172,5 @@ include a leftover `file:` or `link:` dependency. Tag; CI runs the build, the te
 
 Don't fix unrelated things during a release. If a prerequisite, doc, or test fails, stop and report it
 rather than working around it. Every release ends when the registry serves the new version, confirmed.
+The release round is not finished there: the live demos still have to be moved to the released versions,
+which is its own maintainer-only process in `scolta-fleet`.
