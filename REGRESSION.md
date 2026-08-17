@@ -53,7 +53,7 @@ It covers the nine Composer (PHP) demos: four Drupal, three WordPress, two Larav
 
 Exit codes: 0 everything passed, 1 an armed row missed, 2 a precondition failed, 3 a usage error.
 
-It does not check: summary quality, the expanded-count track (it varies by design), whether the AI is
+It does not check: summary quality, the `settled-expanded` track (it varies by design), whether the AI is
 usable via the health endpoint (health is wrong in both directions, so use the expand call as the real
 signal), sort-intent correctness, decomposition, or grounding. Those are the browser pass. Citation
 resolution is measured but armed on no demo: its state moved between two runs of identical code on three
@@ -88,12 +88,15 @@ For each demo, in a real browser, check:
 - **The admin settings page.** Every field shows the saved value. A hardcoded-provider form won't show up
   in a CLI audit.
 
-Then the judgment checks: sort intent (YES / NO / NEVER, where a NEVER key on a demo that isn't a NEVER
-demo is a P0 config leak; wp-recipes is the only real NEVER demo), decomposition (members vs synonyms, a
-2-of-N oracle, case-insensitive substring; clear caches before a fresh pass, and re-run a failing row
-after clearing rather than resampling), no fabrication (echoing a made-up proper noun back is not a
-failure), and summary quality (poll the summary element on its own; check computed figures separately
-from copied ones).
+**Then the judgment checks**, the four the harness cannot do:
+
+1. **Sort intent.** YES / NO / NEVER. A NEVER key on a demo that isn't a NEVER demo is a P0 config leak;
+   wp-recipes is the only real NEVER demo.
+2. **Decomposition.** Members vs synonyms, a 2-of-N oracle, case-insensitive substring. Clear caches
+   before a fresh pass, and re-run a failing row after clearing rather than resampling.
+3. **No fabrication.** Echoing a made-up proper noun back is not a failure.
+4. **Summary quality.** Poll the summary element on its own, and check computed figures separately from
+   copied ones.
 
 Asset freshness matters most on Laravel. `composer update` updates `vendor/` but does not re-publish
 `public/vendor/`; `vendor:publish` runs once and doesn't notice staleness. Check the published asset by
