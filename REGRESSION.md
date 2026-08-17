@@ -144,7 +144,7 @@ query's answer changed: that a query's expanded terms shifted, or its summary go
 proposed in [regression/](regression/) is meant to fill that, as a public record anyone can read to see
 whether a release made a specific query worse.
 
-It does not exist yet. `regression/` holds the spec and empty scaffolds, and the capture command that
+It does not exist yet. `regression/` holds the spec and the query set, and the capture command that
 would populate it has not been built. It is not a release step, and nothing above depends on it. It
 becomes one when the capture command and the first measured corpus land, and this section says so on the
 same day. Design and layout are in [regression/README.md](regression/README.md); the query set is in

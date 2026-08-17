@@ -3,9 +3,11 @@
 For anyone deciding whether to build this, or reading a future corpus once it exists. It is a design,
 not a working record.
 
-**Status: not built.** `corpus/`, `benchmarks/` and `samples/` are empty scaffolds, each holding only a
-`.gitkeep`. Filling them needs a capture run against the live demos, which needs the private harness plus
-ddev and API keys, and needs capture mode itself built. It is not part of the release process and
+**Status: not built.** This directory holds the design and the query set, and nothing else. The
+`corpus/`, `benchmarks/` and `samples/` directories described below do not exist: the pull request that
+lands the first measured corpus creates them, so until then there is nowhere to drop a file by hand.
+Filling them needs a capture run against the live demos, which needs the private harness plus ddev and
+API keys, and needs capture mode itself built. It is not part of the release process and
 [REGRESSION.md](../REGRESSION.md) does not depend on it. Do not hand-write corpus data: a number nobody
 measured reads exactly like evidence, which is why `baselines.json` in scolta-fleet replaced four copied
 fragment counts with nulls. That private file keeps holding the numeric tripwires in the meantime.
@@ -37,6 +39,8 @@ each chosen to stay meaningful across runs:
    can read how the wording drifts. Not asserted against.
 
 ## Layout
+
+What the capture command would create. Only the two markdown files exist today:
 
 ```
 regression/

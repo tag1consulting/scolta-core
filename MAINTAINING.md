@@ -243,7 +243,7 @@ grounded its answer: a person checks those. Full method is in [REGRESSION.md](RE
 
 A public record of what each query returns, release over release, is proposed in
 [regression/](regression/): the query set, the deterministic index results, property checks on the AI
-answer, and one sampled answer per release. It is a spec and an empty scaffold today. See
+answer, and one sampled answer per release. It is a spec today, with nothing captured. See
 [regression/README.md](regression/README.md).
 
 ## What a contributor without fleet access can do
@@ -272,7 +272,7 @@ Most of §6 and §7 needs the private repo. Everything a public pull request is 
    are absent and the Django Packages and Wagtail directories cannot find `scolta-django`.
 4. `scolta-node` and `scolta-python` commit a copy of the browser bundle with no CI check that the copy
    still matches scolta-php. See [ASSETS.md](ASSETS.md).
-5. The public regression corpus under [regression/](regression/) is a spec with an empty scaffold. It
+5. The public regression corpus under [regression/](regression/) is a spec with nothing captured yet. It
    becomes a release step once capture mode and a first measured corpus land, and not before.
 
 ---
