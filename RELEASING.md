@@ -155,6 +155,11 @@ include a leftover `file:` or `link:` dependency. Tag; CI runs the build, the te
   `git fetch origin`, not your local `main`, which is a stale bookmark, and read "Everything up-to-date"
   as a sign the pull request wasn't merged. Confirm the mirror caught up with `git ls-remote` against
   drupalcode. Never put a trailing `# comment` on a push line: zsh sends the `#` as a refspec.
+- **Re-tagging after the dev bump has merged.** Never tag `main` for this. Branch from the release merge
+  commit, the merge of `release/vX.Y.Z` immediately before the `chore/open-X.Y.Z-dev` commit, check that
+  the version strings at that commit are the release ones, tag there, and push only the tag. Tagging
+  `main` instead is how a release once carried a dev version string into the artifact and wordpress.org
+  rejected the upload for a non-numeric version.
 - **Don't build zips locally.** A path repo mirrors the filesystem, not the git tree, so `.gitignore`
   and `.gitattributes` don't apply and a nested `vendor/` gets dragged in. Fix the workflow and re-tag.
 - **A missed prerequisite is not a gate failure.** If a dependency PR is green but unmerged, or the demos
