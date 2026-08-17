@@ -77,14 +77,24 @@ regression test, not a release step ([REGRESSION.md](REGRESSION.md)).
 > This section depends on the `scripts/validate-release.php` decision that is still open
 > ([MAINTAINING.md](MAINTAINING.md), Still open #1). Finish it once that's settled. The known steps:
 
-Bump `scolta.info.yml` (the real version file). Push two tags: `vX.Y.Z` on GitHub, and `X.Y.Z` (no `v`)
-for drupal.org, which ignores `v`-prefixed tags. `git fetch origin`, then
-`git push drupal origin/main:X.Y.Z`. Fast-forward the devel branch: `git push drupal origin/main:1.0.x`
-(skip this and the branch sits stale for a whole cycle). Create the release node by hand on drupal.org:
-the notes must be HTML, not markdown, so draft them for review rather than pasting markdown. A new minor
-branch needs its release node before `composer require drupal/scolta:N.M.x-dev` will resolve. Check the
-packages.drupal.org page shows the version. The GitHub tag itself only cuts a GitHub release; nothing
-about drupal.org is automated.
+Bump `scolta.info.yml` (the real version file). Push both tags to GitHub, and only to GitHub: `vX.Y.Z`,
+and `X.Y.Z` without the `v` for drupal.org, which ignores `v`-prefixed tags. Both exist and both point at
+the same commit. Then advance the devel branch, again on GitHub only: `git fetch origin`, then
+`git push origin origin/main:X.Y.x`, written as a placeholder because drupal.org names the devel branch
+after the minor line (skip this and the branch sits stale for a whole cycle).
+
+Nothing gets pushed to git.drupalcode.org. The pull mirror carries branches and tags there on its own.
+Verify it moved rather than assuming: `git ls-remote https://git.drupalcode.org/project/scolta.git`, and
+check both the unprefixed tag and the devel branch head. Mirror sync is minutes, not seconds; packaging
+end to end has measured under an hour. If the mirror hasn't moved, that is a mirror problem to raise with
+Moshe, and never a reason to push to GitLab directly. If `ls-remote` shows a ref on drupalcode that
+GitHub doesn't have, someone pushed directly and the mirror may be broken: stop and report it.
+
+Create the release node by hand on drupal.org: the notes must be HTML, not markdown, so draft them for
+review rather than pasting markdown. A new minor branch needs its release node before
+`composer require drupal/scolta:X.Y.x-dev` will resolve. Check the packages.drupal.org page shows the
+version. Tag and branch propagation to drupalcode is automatic through the mirror; the release node is
+the manual part.
 
 ### scolta-wp (Packagist and wordpress.org)
 Bump all three version places (plugin header, `SCOLTA_VERSION`, `readme.txt` `Stable Tag`) and grep to
@@ -135,9 +145,10 @@ include a leftover `file:` or `link:` dependency. Tag; CI runs the build, the te
 - **A CI job that rewrites the scolta-php constraint before resolving tests nothing.** The parity and
   upstream jobs do exactly that on purpose (they resolve `dev-main`); check for the rewrite before you
   read a green adapter build as a statement about the released line.
-- **Drupal push traps.** Push `origin/main` after `git fetch`: your local `main` is a stale bookmark.
-  Confirm the mirror actually moved with `git ls-remote --heads`; "Everything up-to-date" usually means
-  the PR wasn't merged. Never put a trailing `# comment` on a push line: zsh sends the `#` as a refspec.
+- **Drupal push traps.** Everything goes to GitHub; the mirror moves drupalcode. Push `origin/main` after
+  `git fetch origin`, not your local `main`, which is a stale bookmark, and read "Everything up-to-date"
+  as a sign the pull request wasn't merged. Confirm the mirror caught up with `git ls-remote` against
+  drupalcode. Never put a trailing `# comment` on a push line: zsh sends the `#` as a refspec.
 - **Don't build zips locally.** A path repo mirrors the filesystem, not the git tree, so `.gitignore`
   and `.gitattributes` don't apply and a nested `vendor/` gets dragged in. Fix the workflow and re-tag.
 - **A missed prerequisite is not a gate failure.** If a dependency PR is green but unmerged, or the demos
