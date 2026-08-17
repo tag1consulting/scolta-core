@@ -168,8 +168,11 @@ moves in all three, together, or the ports stop agreeing on what a query matches
 
 ## 4. Release order
 
-Release in dependency order: a package's registry has to serve the new version before anything that
-depends on it tags. Full steps are in [RELEASING.md](RELEASING.md).
+Release in dependency order. The registry rule (a package's registry has to serve the new version before
+anything that depends on it tags) binds steps 2 through 4. scolta-core goes first for a different reason:
+nothing in step 2 reaches it through a registry, but the browser bundle has to be rebuilt and re-vendored
+into the carriers before they tag. Full steps, and what a stale bundle costs, are in
+[RELEASING.md](RELEASING.md).
 
 1. `scolta-core` (tag it by hand, then publish the crate by hand).
 2. `scolta-php` to Packagist, then `scolta-drupal`, `scolta-laravel`, `scolta-wp` (these three can go in
