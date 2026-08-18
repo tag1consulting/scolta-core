@@ -2,7 +2,7 @@
 
 ## Versioning (CRITICAL — read VERSIONING.md)
 
-This project follows strict semantic versioning with synchronized major versions across all Scolta packages. Minor and patch versions are released independently per package; adapters pin scolta-php via `composer.lock` within their `^1.x` constraint. **Violations of the major-version rule are blocking errors.**
+This project follows strict semantic versioning, and each Scolta package versions independently from its own git tags. Compatibility between packages is expressed by the dependency constraint an adapter declares for scolta-php, and adapters pin the resolved version in `composer.lock` within that constraint. There is no synchronized major version, and no check compares one package's version number with another's.
 
 ### Adding a new public function
 
@@ -45,7 +45,7 @@ The version in the repo is always either a tagged release (`0.2.0`) or a dev pre
 - If the current version is a bare release (e.g., `0.1.0`) and you are making the first change after that release, **bump to the next target with `-dev`**:
   - Bug fix only → `0.1.1-dev`
   - New feature or deprecation → `0.2.0-dev`
-  - Breaking change → `1.0.0-dev` (coordinated across all packages)
+  - Breaking change → `1.0.0-dev` (for this package alone)
 - Update `Cargo.toml` `version` field.
 
 **WARNING:** Never commit a bare version bump (e.g., `0.2.0`) without tagging it as a release. A bare version in the repo without a corresponding git tag means the release process was not completed.

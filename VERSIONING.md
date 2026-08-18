@@ -27,21 +27,19 @@ list of record, carries the maintenance detail for each package, and describes t
 
 ## Version Numbers
 
-All packages follow [Semantic Versioning](https://semver.org/) (MAJOR.MINOR.PATCH) with one additional rule: **the major version is synchronized across all packages.**
+All packages follow [Semantic Versioning](https://semver.org/) (MAJOR.MINOR.PATCH), and **each package versions independently from its own git tags.** A release is the tag; the version written into the repository between releases is a working value that says where this package is heading, not a promise about any other package.
 
-When Scolta is in the 1.x generation, every package has major version 1. scolta-core 1.4.2, scolta-php 1.7.0, scolta-drupal 1.3.1: all compatible. When the project moves to 2.x, every package bumps to 2.0.0 in a coordinated release.
-
-Minor and patch versions are independent. Each package ships features and bug fixes at its own pace. scolta-drupal might be at 1.3 while scolta-php is at 1.7, and that's normal. The major number tells you they belong to the same generation and work together.
+There is no rule that the major numbers match. scolta-core 1.4.2, scolta-php 1.7.0 and scolta-drupal 2.1.0 are a legitimate set if scolta-drupal's declared constraint accepts that scolta-php. **Compatibility is expressed in exactly one place: the dependency constraint a package declares for its upstream**, which Composer reads on every install and enforces. Matching majors across five repositories expressed nothing that the constraint did not already express, and it charged a release to every package whenever one of them broke its API.
 
 **In short:**
 
-- Same major number = compatible.
-- `composer require tag1/scolta-drupal:^1.0` gives you a working set of packages. Always.
-- When you upgrade to `^2.0`, update all Scolta packages together.
+- The constraint answers what works together. `"tag1/scolta-php": "^1.2.0"` in scolta-drupal means any scolta-php from 1.2.0 up to but not including 2.0.0.
+- `composer require tag1/scolta-drupal` resolves a working set, because the constraint is what resolution reads.
+- A major bump in one package obliges nothing in another. When an adapter starts using an API that only the new line has, it raises its constraint, and that is the whole of the coordination.
 
 ## What Each Number Means
 
-**MAJOR** (1.x → 2.x): Breaking changes. Deprecated functions are removed. The WASM interface may change. All packages bump together. This is the only coordinated release.
+**MAJOR** (1.x → 2.x): Breaking changes in this package. Deprecated functions are removed. The WASM interface may change. Each package bumps its own major when its own public API breaks; there is no all-package major release.
 
 **MINOR** (1.2 → 1.3): New features, new functions, promotions from experimental to stable, deprecations announced. Fully backward compatible within the same major. Each package increments independently.
 
@@ -80,10 +78,10 @@ For patch-only work on a released version: `1.0.1-dev` → `1.0.1`.
 5. **Decide the target version based on what changed:**
    - Only bug fixes since last release → next patch (`1.0.1-dev`)
    - New features or deprecations → next minor (`1.1.0-dev`)
-   - Breaking changes → next major (`2.0.0-dev`), coordinated across all packages
+   - Breaking changes → next major (`2.0.0-dev`) for this package alone
 
 
-**Where the version lives** differs per package, and for Drupal and WordPress the `composer.json` `version` key must be absent rather than present. The table is in `MAINTAINING.md`, "Where the version lives", which is the single place that fact is maintained.
+**Where the version lives** differs per package, and for Drupal and WordPress the `composer.json` `version` key must be absent rather than present. These files hold the working version between releases; the version of record for a release is the tag. The table is in `MAINTAINING.md`, "Where the version lives", which is the single place that fact is maintained.
 
 ## Dependency Constraints
 
@@ -100,7 +98,9 @@ Each adapter declares what it needs from scolta-php using a caret constraint:
 
 This means "any 1.x version of scolta-php that's at least 1.0.0." If you have scolta-php 1.7 installed, it satisfies the constraint. If scolta-drupal later uses a feature added in scolta-php 1.5, its constraint tightens to `^1.5`. Composer handles this automatically.
 
-Adapters bundle the exact scolta-php version recorded in their committed `composer.lock`, resolved from Packagist. Tagging an adapter release does NOT require a matching scolta-php tag: the lock pins the version. To adopt a newer scolta-php, run `composer update tag1/scolta-php` in a PR, test, and commit the updated lock.
+Adapters bundle the exact scolta-php version recorded in their committed `composer.lock`, resolved from Packagist. Tagging an adapter release does not require a matching scolta-php tag, and no CI job compares one package's version number against another's. To adopt a newer scolta-php, run `composer update tag1/scolta-php` in a PR, test, and commit the updated lock.
+
+**One cross-repository rule survives, and it is about releases rather than numbers: a stable release must not depend on an unreleased upstream.** Each repository's release workflow enforces it with a lock guard that refuses to publish while the committed lock names a development version, which is why scolta-drupal 1.2.0 could not ship before scolta-php 1.2.0 existed. Everything else a package asserts about versions it asserts about itself: the `coherence` check refuses a package that states two different development lines about its own version, which is self-consistency and not agreement with a sibling.
 
 scolta-core ships as a compiled WASM binary inside scolta-php, scolta-python and scolta-node. You don't install scolta-core separately: each binding vendors the browser bundle and serves it to the page. The scolta-core version a binding carries is recorded in that binding's changelog. The WASM runs in the browser only; the server side of each binding is written in that binding's own language ([MAINTAINING.md](MAINTAINING.md), §1).
 
@@ -239,7 +239,7 @@ No binding enforces the interface version at load time today. It is a declaratio
 
 ## Multi-Version Support
 
-We maintain **at most two active major versions** at a time.
+We maintain **at most two active major versions of a package** at a time.
 
 | Branch | Bug fixes | Security fixes | New features |
 |---|---|---|---|
@@ -247,7 +247,7 @@ We maintain **at most two active major versions** at a time.
 | Previous major (e.g., 1.x) | Critical only (6 months) | Yes (12 months) | No |
 | Older | End of life | End of life | n/a |
 
-When Scolta 2.0 ships, the 1.x branch enters maintenance. It gets security fixes for 12 months and critical bug fixes (data loss, index corruption, security) for 6 months. After 12 months, 1.x reaches end of life.
+When a package's 2.0 ships, its 1.x branch enters maintenance. It gets security fixes for 12 months and critical bug fixes (data loss, index corruption, security) for 6 months. After 12 months, 1.x reaches end of life.
 
 Security fixes are developed on the current branch and cherry-picked to the maintenance branch. New features are never backported.
 

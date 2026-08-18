@@ -123,8 +123,11 @@ pull mirror.
 
 ## 3. Version numbers
 
-- The major version moves together across all packages. Minor and patch move on their own, per package.
-  A new major is a change to five or more repos at once.
+- Each package versions independently from its own git tags: major, minor and patch all move per
+  package, and no check compares one package's version number against another's. Compatibility between
+  packages is the dependency constraint an adapter declares for its upstream, not matching numbers
+  ([VERSIONING.md](VERSIONING.md)). A package bumps its own major when its own public API breaks;
+  nothing else is obliged to follow.
 - Keep exactly one unreleased dev line at a time. Right after you tag a release, bump to the next dev
   suffix (PHP and Rust use `X.Y.Z-dev`, Python uses `X.Y.Z.dev0`) and add an
   `## [X.Y.Z] - Unreleased` stub to the CHANGELOG.
@@ -148,7 +151,7 @@ The `version` key in `composer.json` is not uniform, and the difference is delib
 never declare one, and their CI hard-fails if one appears: a declared version overrides the version
 Composer derives from the branch or tag, Packagist ignores that but the drupal.org Composer facade
 honours it, and a site tracking a dev branch could then `composer update` but never `composer install`
-from the resulting lock. Neither Drupal nor WordPress needs it: drupal.org injects the version into
+from the resulting lock. That broke a client build on 2026-07-27. Neither Drupal nor WordPress needs it: drupal.org injects the version into
 `scolta.info.yml` at packaging time, and WordPress reads the plugin header.
 
 `@since` annotations in source are a third place a version appears, and no check compares them to the
