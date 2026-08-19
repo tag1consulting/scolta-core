@@ -2,7 +2,7 @@
 
 ## Versioning (CRITICAL — read VERSIONING.md)
 
-This project follows strict semantic versioning with synchronized major versions across all Scolta packages. Minor and patch versions are released independently per package; adapters pin scolta-php via `composer.lock` within their `^1.x` constraint. **Violations of the major-version rule are blocking errors.**
+This project follows strict semantic versioning, and each Scolta package versions independently from its own git tags. Compatibility between packages is expressed by the dependency constraint an adapter declares for scolta-php, and adapters pin the resolved version in `composer.lock` within that constraint. There is no synchronized major version, and no check compares one package's version number with another's.
 
 ### Adding a new public function
 

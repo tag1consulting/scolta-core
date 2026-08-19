@@ -16,21 +16,19 @@ scolta-laravel       Laravel package — depends on scolta-php
 
 ## Version Numbers
 
-All packages follow [Semantic Versioning](https://semver.org/) (MAJOR.MINOR.PATCH) with one additional rule: **the major version is synchronized across all packages.**
+All packages follow [Semantic Versioning](https://semver.org/) (MAJOR.MINOR.PATCH), and **each package versions independently from its own git tags.** A release is the tag; the version written into the repository between releases is a working value that says where this package is heading, not a promise about any other package.
 
-When Scolta is in the 1.x generation, every package has major version 1. scolta-core 1.4.2, scolta-php 1.7.0, scolta-drupal 1.3.1 — all compatible. When the project moves to 2.x, every package bumps to 2.0.0 in a coordinated release.
-
-Minor and patch versions are independent. Each package ships features and bug fixes at its own pace. scolta-drupal might be at 1.3 while scolta-php is at 1.7 — that's normal. The major number tells you they belong to the same generation and work together.
+There is no rule that the major numbers match. scolta-core 1.4.2, scolta-php 1.7.0 and scolta-drupal 2.1.0 are a legitimate set if scolta-drupal's declared constraint accepts that scolta-php. **Compatibility is expressed in exactly one place: the dependency constraint a package declares for its upstream**, which Composer reads on every install and enforces. Matching majors across five repositories expressed nothing that the constraint did not already express, and it charged a release to every package whenever one of them broke its API.
 
 **In short:**
 
-- Same major number = compatible.
-- `composer require tag1/scolta-drupal:^1.0` gives you a working set of packages. Always.
-- When you upgrade to `^2.0`, update all Scolta packages together.
+- The constraint answers what works together. `"tag1/scolta-php": "^1.2.0"` in scolta-drupal means any scolta-php from 1.2.0 up to but not including 2.0.0.
+- `composer require tag1/scolta-drupal` resolves a working set, because the constraint is what resolution reads.
+- A major bump in one package obliges nothing in another. When an adapter starts using an API that only the new line has, it raises its constraint, and that is the whole of the coordination.
 
 ## What Each Number Means
 
-**MAJOR** (1.x → 2.x): Breaking changes. Deprecated functions are removed. The WASM interface may change. All packages bump together. This is the only coordinated release.
+**MAJOR** (1.x → 2.x): Breaking changes in this package. Deprecated functions are removed. The WASM interface may change. Each package bumps its own major when its own public API breaks; there is no all-package major release.
 
 **MINOR** (1.2 → 1.3): New features, new functions, promotions from experimental to stable, deprecations announced. Fully backward compatible within the same major. Each package increments independently.
 
@@ -69,7 +67,7 @@ For patch-only work on a released version: `1.0.1-dev` → `1.0.1`.
 5. **Decide the target version based on what changed:**
    - Only bug fixes since last release → next patch (`1.0.1-dev`)
    - New features or deprecations → next minor (`1.1.0-dev`)
-   - Breaking changes → next major (`2.0.0-dev`) — coordinated across all packages
+   - Breaking changes → next major (`2.0.0-dev`) for this package alone
 
 
 **Where the version lives:**
@@ -78,11 +76,15 @@ For patch-only work on a released version: `1.0.1-dev` → `1.0.1`.
 |---|---|---|
 | scolta-core | `Cargo.toml` | `version = "1.0.1-dev"` |
 | scolta-php | `composer.json` | `"version": "1.0.1-dev"` |
-| scolta-drupal | `composer.json` + `scolta.info.yml` | `"version"` in both; must match |
-| scolta-wp | `composer.json` + `scolta.php` + `readme.txt` | `"version"` + `SCOLTA_VERSION` constant + plugin header + `Stable Tag` |
+| scolta-drupal | `scolta.info.yml` | `version: 1.0.1-dev` |
+| scolta-wp | `scolta.php` + `readme.txt` | plugin header `Version:` + `SCOLTA_VERSION` constant + `Stable Tag` |
 | scolta-laravel | `composer.json` | `"version": "1.0.1-dev"` |
 
-For WordPress, the version appears in four places (composer.json, the plugin header comment, the `SCOLTA_VERSION` constant, and `readme.txt` `Stable Tag`). All four must match. For Drupal, the version appears in both `composer.json` and `scolta.info.yml`; both must match.
+**Neither scolta-drupal nor scolta-wp may declare a `version` in `composer.json`, and both fail CI if one appears.** A declared version overrides the version Composer derives from the branch or tag. Packagist ignores the declared string, but the drupal.org Composer facade honours it, so the package presents itself as one fixed version whatever branch it was built from: a site constrained to a dev branch can then run `composer update` and never `composer install` from the resulting lock. That broke a client build on 2026-07-27. `extra.branch-alias` is what describes the dev branch mapping, and it is enough.
+
+For WordPress the version appears in three places (the plugin header comment, the `SCOLTA_VERSION` constant and the `readme.txt` `Stable Tag`), and all three must match. For Drupal it appears in `scolta.info.yml` alone.
+
+**These files hold the working version, not the version of record for a release.** That is the tag. On drupal.org the packager derives the released version from the tag and writes it into `scolta.info.yml` at packaging time, so the committed `version:` there is what a git or dev checkout reports before packaging. Keep it roughly current and treat it as a fallback.
 
 ## Dependency Constraints
 
@@ -99,7 +101,9 @@ Each adapter declares what it needs from scolta-php using a caret constraint:
 
 This means "any 1.x version of scolta-php that's at least 1.0.0." If you have scolta-php 1.7 installed, it satisfies the constraint. If scolta-drupal later uses a feature added in scolta-php 1.5, its constraint tightens to `^1.5`. Composer handles this automatically.
 
-Adapters bundle the exact scolta-php version recorded in their committed `composer.lock`, resolved from Packagist. Tagging an adapter release does NOT require a matching scolta-php tag — the lock pins the version. To adopt a newer scolta-php, run `composer update tag1/scolta-php` in a PR, test, and commit the updated lock.
+Adapters bundle the exact scolta-php version recorded in their committed `composer.lock`, resolved from Packagist. Tagging an adapter release does not require a matching scolta-php tag, and no CI job compares one package's version number against another's. To adopt a newer scolta-php, run `composer update tag1/scolta-php` in a PR, test, and commit the updated lock.
+
+**One cross-repository rule survives, and it is about releases rather than numbers: a stable release must not depend on an unreleased upstream.** Each repository's release workflow enforces it with a lock guard that refuses to publish while the committed lock names a development version, which is why scolta-drupal 1.2.0 could not ship before scolta-php 1.2.0 existed. Everything else a package asserts about versions it asserts about itself: the `coherence` check refuses a package that states two different development lines about its own version, which is self-consistency and not agreement with a sibling.
 
 scolta-core ships as a compiled WASM binary inside the scolta-php package. You don't install scolta-core separately — it comes bundled. The scolta-core version used by scolta-php is documented in scolta-php's changelog.
 
@@ -236,7 +240,7 @@ You should never see this in normal use — it's a safety net for development an
 
 ## Multi-Version Support
 
-We maintain **at most two active major versions** at a time.
+We maintain **at most two active major versions of a package** at a time.
 
 | Branch | Bug fixes | Security fixes | New features |
 |---|---|---|---|
@@ -244,7 +248,7 @@ We maintain **at most two active major versions** at a time.
 | Previous major (e.g., 1.x) | Critical only (6 months) | Yes (12 months) | No |
 | Older | End of life | End of life | — |
 
-When Scolta 2.0 ships, the 1.x branch enters maintenance. It gets security fixes for 12 months and critical bug fixes (data loss, index corruption, security) for 6 months. After 12 months, 1.x reaches end of life.
+When a package's 2.0 ships, its 1.x branch enters maintenance. It gets security fixes for 12 months and critical bug fixes (data loss, index corruption, security) for 6 months. After 12 months, 1.x reaches end of life.
 
 Security fixes are developed on the current branch and cherry-picked to the maintenance branch. New features are never backported.
 
