@@ -18,6 +18,7 @@
 - [ ] All existing tests pass (`cargo test`)
 - [ ] WASM build succeeds (`wasm-pack build --target web --release`)
 - [ ] I have updated CHANGELOG.md with a summary of my changes
+- [ ] If this changes how the package is versioned, built, or published, it changes MAINTAINING.md in the same pull request
 - [ ] New public functions have `since` and `stability` fields in `describe()`
 - [ ] No stable function signatures were changed
 

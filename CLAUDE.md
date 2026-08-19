@@ -45,7 +45,7 @@ The version in the repo is always either a tagged release (`0.2.0`) or a dev pre
 - If the current version is a bare release (e.g., `0.1.0`) and you are making the first change after that release, **bump to the next target with `-dev`**:
   - Bug fix only → `0.1.1-dev`
   - New feature or deprecation → `0.2.0-dev`
-  - Breaking change → `1.0.0-dev` (coordinated across all packages)
+  - Breaking change → `1.0.0-dev` (for this package alone)
 - Update `Cargo.toml` `version` field.
 
 **WARNING:** Never commit a bare version bump (e.g., `0.2.0`) without tagging it as a release. A bare version in the repo without a corresponding git tag means the release process was not completed.
