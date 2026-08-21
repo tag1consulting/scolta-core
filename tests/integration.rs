@@ -133,6 +133,34 @@ fn score_results_priority_page_boost() {
     assert_eq!(result[0]["url"], "/contact");
 }
 
+#[test]
+fn score_results_forced_phrase_excludes_scattered_terms() {
+    // Quoted query: a result whose terms appear only scattered apart (per its
+    // locations) is dropped; the adjacent-phrase result survives. Unquoted,
+    // both survive.
+    let results = json!([
+        {"title": "Unspeakable: The Tulsa Race Massacre", "url": "/tulsa",
+         "excerpt": "written by Carole Weatherford", "locations": [3, 40]},
+        {"title": "Revolutionary Era Sources", "url": "/boston",
+         "excerpt": "primary sources", "locations": [7, 8]}
+    ]);
+    let quoted = inner::score_results(&json!({
+        "query": "\"boston massacre\"",
+        "results": results
+    }))
+    .unwrap();
+    let arr = quoted.as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["url"], "/boston");
+
+    let unquoted = inner::score_results(&json!({
+        "query": "boston massacre",
+        "results": results
+    }))
+    .unwrap();
+    assert_eq!(unquoted.as_array().unwrap().len(), 2);
+}
+
 // ── score_results: sort_override ──────────────────────────────────────────────
 
 #[test]
