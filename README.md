@@ -95,7 +95,8 @@ pkg/scolta_core.js
 pkg/scolta_core.d.ts
 ```
 
-The platform adapters ship a pre-built copy of these files. Build from source only when modifying the core.
+Every platform adapter serves a pre-built copy of these files — some commit one, others deploy it out of
+`scolta-php`'s `assets/` at run time. Build from source only when modifying the core.
 
 ### Native build (for testing and development)
 

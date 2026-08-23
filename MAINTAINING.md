@@ -14,7 +14,7 @@ The other guides in this repo:
 |---|---|
 | [RELEASING.md](RELEASING.md) | How to cut a release, per package, and what goes wrong. |
 | [REGRESSION.md](REGRESSION.md) | The tests to run before you ship. |
-| [ASSETS.md](ASSETS.md) | The browser bundle and how the committed copies stay in sync. |
+| [ASSETS.md](ASSETS.md) | The browser bundle: which packages carry a copy, which read it from vendor, and what checks each. |
 | [VERSIONING.md](VERSIONING.md) | The compatibility contract users read. |
 | [API.md](API.md) | The exported WASM functions and their signatures. |
 | [IMPLEMENTATION.md](IMPLEMENTATION.md) | How the crate is built internally. |
@@ -174,7 +174,9 @@ moves in all three, together, or the ports stop agreeing on what a query matches
 Release in dependency order. The registry rule (a package's registry has to serve the new version before
 anything that depends on it tags) binds steps 2 through 4. scolta-core goes first for a different reason:
 nothing in step 2 reaches it through a registry, but the browser bundle has to be rebuilt and re-vendored
-into the carriers before they tag. Full steps, and what a stale bundle costs, are in
+into the three carriers (`scolta-wp`, `scolta-node`, `scolta-python`) before they tag. `scolta-drupal` and
+`scolta-laravel` carry no copy and need no re-vendor commit; they pick a new bundle up out of `vendor/`
+through `composer.lock`. Full steps, and what a stale bundle costs, are in
 [RELEASING.md](RELEASING.md).
 
 1. `scolta-core` (tag it by hand, then publish the crate by hand).

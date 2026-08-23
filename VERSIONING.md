@@ -235,7 +235,7 @@ The interface version is tracked separately from the package version because:
 - A major version bump in a binding might change its server-side API without changing the WASM interface.
 - A WASM interface change always requires the front end to be updated, but not necessarily any public API change.
 
-No binding enforces the interface version at load time today. It is a declaration, readable through `describe()`, that tells you which protocol a given bundle speaks. The thing that actually keeps a bundle and its front end together is that they ship as one vendored set of files: change the bundle, re-vendor it, and the parity checks in [ASSETS.md](ASSETS.md) catch a carrier left behind. Bump the integer when you change a signature, so the manifest tells the truth.
+No binding enforces the interface version at load time today. It is a declaration, readable through `describe()`, that tells you which protocol a given bundle speaks. The thing that actually keeps a bundle and its front end together is that they move as one set from scolta-php's `assets/`: change the bundle, then re-vendor it into each package that commits a copy. Only scolta-wp's `assets-in-sync` job catches a carrier left behind; which packages carry a copy, and what watches each, is in [ASSETS.md](ASSETS.md). Bump the integer when you change a signature, so the manifest tells the truth.
 
 ## Multi-Version Support
 
