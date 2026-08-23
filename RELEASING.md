@@ -13,10 +13,11 @@ Release in dependency order. The registry wait binds steps 2 through 4: each of 
 previous registry to serve the new version before the packages that depend on it tag. scolta-core goes
 first for a different reason, because nothing in step 2 reaches it through a registry (`scolta-php`
 declares no scolta-core dependency, and the node and python bindings vendor the compiled bundle as
-committed files): the browser bundle has to be rebuilt and re-vendored into the carriers before they tag.
-A carrier tagged with a stale bundle is the risk. `assets-in-sync` catches it for scolta-drupal and
-scolta-wp; nothing catches it for scolta-node and scolta-python ([MAINTAINING.md](MAINTAINING.md), Still
-open #4).
+committed files): the browser bundle has to be rebuilt and re-vendored into the three carriers before
+they tag. A carrier tagged with a stale bundle is the risk. `assets-in-sync` catches it for scolta-wp;
+nothing catches it for scolta-node and scolta-python ([MAINTAINING.md](MAINTAINING.md), Still open #4).
+scolta-drupal and scolta-laravel are not carriers: they read the bundle out of `vendor/tag1/scolta-php`,
+so re-locking is the whole step ([ASSETS.md](ASSETS.md)).
 
 1. `scolta-core` (tag by hand, then `cargo publish` by hand).
 2. `scolta-php` to Packagist, then `scolta-drupal`, `scolta-laravel`, `scolta-wp` in parallel.
