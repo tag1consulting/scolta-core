@@ -663,6 +663,14 @@ fn min_phrase_span(n: usize, locations: &[u32]) -> Option<u32> {
 
 /// Strip `<…>` markup spans so a literal-phrase test can run over an excerpt
 /// that carries Pagefind's `<mark>` highlighting.
+///
+/// Two known quirks, acceptable because a miss here only falls through to the
+/// locations test (or fails open): a bare `>` in text is swallowed rather than
+/// emitted, and tags are removed with no separator, so adjacent-tag text with
+/// no whitespace between tags (`<mark>Boston</mark><mark>Massacre</mark>`)
+/// concatenates to "bostonmassacre" and misses a literal check, while text
+/// split across a block boundary ("boston </p><p>massacre") joins and passes
+/// it.
 fn strip_markup(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut in_tag = false;
@@ -688,13 +696,25 @@ fn strip_markup(s: &str) -> String {
 /// multiplier only *boosts* adjacency; this filter is the exclusion the
 /// quotes promise.
 ///
+/// The literal phrase and the span budget both come from the *raw* tokens
+/// inside the quotes, stop words included. The filtered terms would break
+/// every query with an interior stop word: `"statue of liberty"` filters to
+/// `statue liberty`, which no correct title contains literally, and whose
+/// matched positions sit one word apart (the "of" occupies a word index even
+/// though only non-stop terms record matches), so a filtered-terms adjacency
+/// test would drop every exact-phrase document.
+///
 /// A result is kept when any of the following holds:
-/// - its title or excerpt (markup stripped, lowercased) contains the filtered
-///   terms as a literal adjacent phrase, or
-/// - its `locations` contain `n` matched-term positions on consecutive word
-///   indexes (the same adjacency test `phrase_proximity_multiplier` rewards),
-///   or
-/// - it carries no location evidence at all (`locations` absent or empty):
+/// - its URL matches a priority page whose keywords match the query: priority
+///   pages are pinned editorially and are exempt from this filter, or
+/// - its title or excerpt (markup stripped, lowercased) contains the raw
+///   quoted phrase (whitespace-normalized) literally, or
+/// - its `locations` contain the meaningful terms' matched positions on word
+///   indexes spanning less than the raw token count (the adjacency test
+///   `phrase_proximity_multiplier` rewards, widened by one index per interior
+///   stop word), or
+/// - it carries too little location evidence to judge (`locations` absent,
+///   empty, or holding fewer positions than there are meaningful terms):
 ///   absence of data is not evidence of the phrase's absence, so such results
 ///   fail open and keep their pre-existing behavior.
 pub fn retain_forced_phrase_matches(
@@ -702,28 +722,56 @@ pub fn retain_forced_phrase_matches(
     query: &str,
     config: &ScoringConfig,
 ) {
+    let stripped = query.trim();
+    let forced_phrase = stripped.starts_with('"') && stripped.ends_with('"') && stripped.len() > 2;
+    if !forced_phrase {
+        return;
+    }
+    let inner = stripped[1..stripped.len() - 1].to_lowercase();
+    let raw_tokens: Vec<&str> = inner.split_whitespace().collect();
+    let raw_len = raw_tokens.len();
+    let raw_phrase = raw_tokens.join(" ");
+
     let query_info = if config.custom_stop_words.is_empty() {
         common::extract_query(query, &config.language)
     } else {
         common::extract_query_with_custom(query, &config.language, &config.custom_stop_words)
     };
     let n = query_info.terms.len();
-    if !query_info.forced_phrase || n < 2 {
+    if n < 2 {
         return;
     }
-    let phrase = query_info.terms.join(" ");
+
+    let matched_priority_pages: Vec<&PriorityPage> = config
+        .priority_pages
+        .iter()
+        .filter(|pp| {
+            pp.keywords
+                .iter()
+                .any(|kw| inner.contains(&kw.to_lowercase()))
+        })
+        .collect();
+
     results.retain(|r| {
-        if strip_markup(&r.title).to_lowercase().contains(&phrase)
-            || strip_markup(&r.excerpt).to_lowercase().contains(&phrase)
+        if matched_priority_pages
+            .iter()
+            .any(|pp| r.url.contains(&pp.url_pattern))
+        {
+            return true;
+        }
+        if strip_markup(&r.title).to_lowercase().contains(&raw_phrase)
+            || strip_markup(&r.excerpt)
+                .to_lowercase()
+                .contains(&raw_phrase)
         {
             return true;
         }
         match r.locations.as_deref() {
-            None | Some([]) => true,
-            Some(locs) => matches!(
+            Some(locs) if locs.len() >= n => matches!(
                 min_phrase_span(n, locs),
-                Some(span) if span < u32::try_from(n).unwrap_or(u32::MAX)
+                Some(span) if span < u32::try_from(raw_len).unwrap_or(u32::MAX)
             ),
+            _ => true,
         }
     });
 }
@@ -1878,6 +1926,86 @@ mod tests {
             1.0,
             Some(vec![3, 40]),
         );
+        let mut results = vec![r];
+        retain_forced_phrase_matches(&mut results, r#""boston massacre""#, &config);
+        assert_eq!(results.len(), 1);
+    }
+
+    // A quoted phrase with an interior stop word: the literal check runs on
+    // the raw phrase ("statue of liberty", not "statue liberty"), and the
+    // span budget comes from the raw token count, so the real document's
+    // positions (i and i+2, "of" occupying the index between) pass while
+    // scattered terms still fail.
+    #[test]
+    fn forced_phrase_with_interior_stop_word_keeps_exact_matches() {
+        let config = ScoringConfig::default();
+        let literal_title = make_result_with_excerpt_and_locations(
+            "/liberty",
+            "Visiting the Statue of Liberty",
+            "planning a trip",
+            1.0,
+            Some(vec![3, 90]),
+        );
+        let adjacent_locations = make_result_with_excerpt_and_locations(
+            "/monument",
+            "National Monuments",
+            "harbor landmarks and their history",
+            1.0,
+            Some(vec![10, 12]),
+        );
+        let scattered = make_result_with_excerpt_and_locations(
+            "/scattered",
+            "Liberty Bell Facts",
+            "a statue stands elsewhere in the city",
+            1.0,
+            Some(vec![3, 40]),
+        );
+        let mut results = vec![literal_title, adjacent_locations, scattered];
+        retain_forced_phrase_matches(&mut results, r#""statue of liberty""#, &config);
+        let urls: Vec<&str> = results.iter().map(|r| r.url.as_str()).collect();
+        assert_eq!(urls, vec!["/liberty", "/monument"]);
+    }
+
+    // A priority page whose keywords match the query is pinned editorially
+    // and exempt from the filter, whatever its locations say.
+    #[test]
+    fn forced_phrase_exempts_matched_priority_pages() {
+        let config = ScoringConfig {
+            priority_pages: vec![PriorityPage {
+                url_pattern: "/curated".to_string(),
+                keywords: vec!["boston massacre".to_string()],
+                boost: 10.0,
+                custom_excerpt: None,
+                page_id: None,
+            }],
+            ..ScoringConfig::default()
+        };
+        let curated = make_result_with_excerpt_and_locations(
+            "/curated",
+            "Teaching the Revolution",
+            "curated unit plan",
+            1.0,
+            Some(vec![3, 40]),
+        );
+        let scattered = make_result_with_excerpt_and_locations(
+            "/tulsa",
+            "Unspeakable: The Tulsa Race Massacre",
+            "written by Carole Weatherford",
+            1.0,
+            Some(vec![3, 40]),
+        );
+        let mut results = vec![curated, scattered];
+        retain_forced_phrase_matches(&mut results, r#""boston massacre""#, &config);
+        let urls: Vec<&str> = results.iter().map(|r| r.url.as_str()).collect();
+        assert_eq!(urls, vec!["/curated"]);
+    }
+
+    // Fewer positions than meaningful terms is too little evidence to judge
+    // adjacency — fail open, like absent or empty locations.
+    #[test]
+    fn forced_phrase_keeps_results_with_fewer_locations_than_terms() {
+        let config = ScoringConfig::default();
+        let r = make_result_with_excerpt_and_locations("/sparse", "A", "b", 1.0, Some(vec![5]));
         let mut results = vec![r];
         retain_forced_phrase_matches(&mut results, r#""boston massacre""#, &config);
         assert_eq!(results.len(), 1);

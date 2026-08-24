@@ -161,6 +161,36 @@ fn score_results_forced_phrase_excludes_scattered_terms() {
     assert_eq!(unquoted.as_array().unwrap().len(), 2);
 }
 
+#[test]
+fn score_results_forced_phrase_with_interior_stop_word_keeps_exact_matches() {
+    // "of" is a stop word: the literal check must run on the raw phrase and
+    // the span budget on the raw token count, or every exact-phrase document
+    // is dropped. The exact-title result and the one whose two matched
+    // positions sit one word apart (the "of" index between them) survive; the
+    // scattered result does not.
+    let quoted = inner::score_results(&json!({
+        "query": "\"statue of liberty\"",
+        "results": [
+            {"title": "Visiting the Statue of Liberty", "url": "/liberty",
+             "excerpt": "planning a trip", "locations": [3, 90]},
+            {"title": "National Monuments", "url": "/monument",
+             "excerpt": "harbor landmarks", "locations": [10, 12]},
+            {"title": "Liberty Bell Facts", "url": "/scattered",
+             "excerpt": "a statue stands elsewhere", "locations": [3, 40]}
+        ]
+    }))
+    .unwrap();
+    let urls: Vec<&str> = quoted
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["url"].as_str().unwrap())
+        .collect();
+    assert!(urls.contains(&"/liberty"));
+    assert!(urls.contains(&"/monument"));
+    assert!(!urls.contains(&"/scattered"));
+}
+
 // ── score_results: sort_override ──────────────────────────────────────────────
 
 #[test]
