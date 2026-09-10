@@ -177,6 +177,11 @@ pub mod inner {
             .get("sort_override")
             .and_then(|v| serde_json::from_value(v.clone()).ok());
 
+        // Quoted forced-phrase queries return only results that can contain
+        // the exact phrase — see retain_forced_phrase_matches. A no-op for
+        // every unquoted query.
+        scoring::retain_forced_phrase_matches(&mut results, query, &cfg);
+
         scoring::score_results_with_primary(&mut results, query, primary_terms.as_deref(), &cfg);
 
         if let Some(ref sort) = sort_override {
@@ -355,6 +360,10 @@ pub mod inner {
             let config_json = qobj.get("config").unwrap_or(default_config_json);
             let (cfg, warnings) = config::from_json_validated(config_json);
             emit_config_warnings("batch_score_results", &warnings);
+
+            // Same forced-phrase exclusion as score_results, so a quoted
+            // query scored through the batch path behaves identically.
+            scoring::retain_forced_phrase_matches(&mut results, query, &cfg);
 
             scoring::score_results(&mut results, query, &cfg);
 
