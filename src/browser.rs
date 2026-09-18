@@ -55,6 +55,15 @@ fn json_call<T: serde::Serialize>(
 /// Input: JSON string with shape:
 ///   `{ "query": "search terms", "results": [...], "config": {...} }`
 ///
+/// Optional `"debug": true` (default false) adds a `score_breakdown` object to
+/// every output result:
+///   `{ "base", "source_weight", "title_boost", "content_boost", "phrase_mult",
+///      "recency", "priority_boost", "matched_title_terms": [...],
+///      "matched_priority_patterns": [...] }`
+/// where `score = base*source_weight + title_boost + content_boost*phrase_mult
+/// + recency + priority_boost`. Without the flag the output is unchanged.
+/// `batch_score_results` accepts the same top-level flag.
+///
 /// Output: JSON string — array of scored results, sorted descending.
 ///
 /// # Errors
@@ -169,7 +178,9 @@ pub fn parse_expansion(input: &str) -> Result<String, JsError> {
 /// }
 /// ```
 ///
-/// Per-query `"config"` overrides `"default_config"` for that entry.
+/// Per-query `"config"` overrides `"default_config"` for that entry. A
+/// top-level `"debug": true` attaches `score_breakdown` to every result, as
+/// documented on [`score_results`].
 ///
 /// Output: JSON string — array of arrays of scored results, one inner array
 /// per input query, in the same order.
@@ -345,6 +356,59 @@ pub fn describe() -> Result<String, JsError> {
 #[cfg(test)]
 mod tests {
     use crate::inner;
+
+    #[test]
+    fn score_results_debug_flag_gates_score_breakdown() {
+        let results = serde_json::json!([
+            {"title": "Learn Rust", "url": "/rust", "excerpt": "Rust programming language", "date": "2025-01-01"},
+            {"title": "Go Tutorial", "url": "/go", "excerpt": "Go programming", "date": "2025-01-01"}
+        ]);
+        let plain = inner::score_results(&serde_json::json!({
+            "query": "rust programming", "results": results
+        }))
+        .unwrap();
+        let debug_false = inner::score_results(&serde_json::json!({
+            "query": "rust programming", "results": results, "debug": false
+        }))
+        .unwrap();
+        let debug_true = inner::score_results(&serde_json::json!({
+            "query": "rust programming", "results": results, "debug": true
+        }))
+        .unwrap();
+
+        assert_eq!(
+            plain, debug_false,
+            "debug:false must equal the unflagged output"
+        );
+        for r in plain.as_array().unwrap() {
+            assert!(r.get("score_breakdown").is_none());
+        }
+        for (p, d) in plain
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(debug_true.as_array().unwrap())
+        {
+            let bd = &d["score_breakdown"];
+            assert!(bd.is_object(), "debug:true must attach score_breakdown");
+            assert_eq!(p["score"], d["score"]);
+            assert!(bd["matched_title_terms"].is_array());
+            assert!(bd["matched_priority_patterns"].is_array());
+        }
+
+        // Same top-level flag on the batch entry point.
+        let batch = inner::batch_score_results(&serde_json::json!({
+            "queries": [{"query": "rust programming", "results": results}],
+            "debug": true
+        }))
+        .unwrap();
+        assert!(batch[0][0]["score_breakdown"].is_object());
+        let batch_plain = inner::batch_score_results(&serde_json::json!({
+            "queries": [{"query": "rust programming", "results": results}]
+        }))
+        .unwrap();
+        assert!(batch_plain[0][0].get("score_breakdown").is_none());
+    }
 
     #[test]
     fn score_results_json_roundtrip() {

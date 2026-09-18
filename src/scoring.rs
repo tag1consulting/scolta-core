@@ -793,19 +793,84 @@ pub fn score_result_with_query_info_and_primary(
     config: &ScoringConfig,
     priority_boost: f64,
 ) -> f64 {
-    let base_score = if result.score > 0.0 {
+    score_breakdown_with_query_info_and_primary(
+        result,
+        query_info,
+        primary_terms,
+        config,
+        priority_boost,
+        Vec::new(),
+    )
+    .total()
+}
+
+/// Per-component view of one result's score. Returned to callers as the
+/// `score_breakdown` field when `debug: true` is passed to `score_results` /
+/// `batch_score_results`. [`ScoreBreakdown::total`] is the final score.
+#[derive(Debug, Clone, Serialize)]
+pub struct ScoreBreakdown {
+    /// Incoming engine score, or 1.0 when it was absent/non-positive.
+    pub base: f64,
+    pub source_weight: f64,
+    pub title_boost: f64,
+    pub content_boost: f64,
+    pub phrase_mult: f64,
+    pub recency: f64,
+    pub priority_boost: f64,
+    /// Query terms found in the title (from whichever of query/primary term
+    /// set won the title boost).
+    pub matched_title_terms: Vec<String>,
+    /// `url_pattern` of each priority page whose boost was applied.
+    pub matched_priority_patterns: Vec<String>,
+}
+
+impl ScoreBreakdown {
+    /// `(base × source_weight) + title_boost + (content_boost × phrase_mult) + recency + priority_boost`
+    pub fn total(&self) -> f64 {
+        (self.base * self.source_weight)
+            + self.title_boost
+            + (self.content_boost * self.phrase_mult)
+            + self.recency
+            + self.priority_boost
+    }
+}
+
+fn matching_title_terms(terms: &[String], title: &str) -> Vec<String> {
+    let title_lower = title.to_lowercase();
+    terms
+        .iter()
+        .filter(|t| title_lower.contains(t.as_str()))
+        .cloned()
+        .collect()
+}
+
+/// Component-wise sibling of [`score_result_with_query_info_and_primary`];
+/// that function is `self.total()` of this one.
+pub fn score_breakdown_with_query_info_and_primary(
+    result: &SearchResult,
+    query_info: &common::QueryInfo,
+    primary_terms: Option<&[String]>,
+    config: &ScoringConfig,
+    priority_boost: f64,
+    matched_priority_patterns: Vec<String>,
+) -> ScoreBreakdown {
+    let base = if result.score > 0.0 {
         result.score
     } else {
         1.0
     };
     let source_weight = result.source_weight.unwrap_or(1.0);
     let query_title_boost = title_match_score_with_terms(&query_info.terms, &result.title, config);
-    let title_boost = match primary_terms {
+    let (title_boost, title_terms): (f64, &[String]) = match primary_terms {
         Some(pt) => {
             let primary_title_boost = title_match_score_with_terms(pt, &result.title, config);
-            query_title_boost.max(primary_title_boost)
+            if primary_title_boost > query_title_boost {
+                (primary_title_boost, pt)
+            } else {
+                (query_title_boost, &query_info.terms)
+            }
         }
-        None => query_title_boost,
+        None => (query_title_boost, &query_info.terms),
     };
     let content_boost = content_match_score_with_terms(&query_info.terms, &result.excerpt, config);
     let recency = recency_boost(&result.date, config);
@@ -818,11 +883,17 @@ pub fn score_result_with_query_info_and_primary(
     } else {
         1.0
     };
-    (base_score * source_weight)
-        + title_boost
-        + (content_boost * phrase_mult)
-        + recency
-        + priority_boost
+    ScoreBreakdown {
+        base,
+        source_weight,
+        title_boost,
+        content_boost,
+        phrase_mult,
+        recency,
+        priority_boost,
+        matched_title_terms: matching_title_terms(title_terms, &result.title),
+        matched_priority_patterns,
+    }
 }
 
 /// Calculate composite score using a [`QueryInfo`] and a pre-computed priority boost.
@@ -905,6 +976,19 @@ pub fn score_results_with_primary(
     primary_terms: Option<&[String]>,
     config: &ScoringConfig,
 ) {
+    score_results_with_primary_debug(results, query, primary_terms, config, false);
+}
+
+/// Like [`score_results_with_primary`]; when `debug` is true each result also
+/// gets a `score_breakdown` entry ([`ScoreBreakdown`]) in its `extra` map.
+/// With `debug == false` the output is identical to the plain variant.
+pub fn score_results_with_primary_debug(
+    results: &mut [SearchResult],
+    query: &str,
+    primary_terms: Option<&[String]>,
+    config: &ScoringConfig,
+    debug: bool,
+) {
     let query_info = if config.custom_stop_words.is_empty() {
         common::extract_query(query, &config.language)
     } else {
@@ -923,31 +1007,36 @@ pub fn score_results_with_primary(
         .collect();
 
     for result in results.iter_mut() {
-        let priority_boost: f64 = matched_priority_pages
+        let applied: Vec<&&PriorityPage> = matched_priority_pages
             .iter()
             .filter(|pp| result.url.contains(&pp.url_pattern))
-            .map(|pp| pp.boost)
-            .sum();
+            .collect();
+        let priority_boost: f64 = applied.iter().map(|pp| pp.boost).sum();
+        let matched_patterns = if debug {
+            applied.iter().map(|pp| pp.url_pattern.clone()).collect()
+        } else {
+            Vec::new()
+        };
 
         // Apply custom excerpt from the first matching priority page that has one.
-        if !matched_priority_pages.is_empty() {
-            for pp in &matched_priority_pages {
-                if result.url.contains(&pp.url_pattern) {
-                    if let Some(custom) = &pp.custom_excerpt {
-                        result.excerpt = custom.clone();
-                        break;
-                    }
-                }
-            }
+        if let Some(custom) = applied.iter().find_map(|pp| pp.custom_excerpt.as_ref()) {
+            result.excerpt = custom.clone();
         }
 
-        result.score = score_result_with_query_info_and_primary(
+        let breakdown = score_breakdown_with_query_info_and_primary(
             result,
             &query_info,
             primary_terms,
             config,
             priority_boost,
+            matched_patterns,
         );
+        result.score = breakdown.total();
+        if debug {
+            if let Ok(v) = serde_json::to_value(&breakdown) {
+                result.extra.insert("score_breakdown".to_string(), v);
+            }
+        }
     }
 
     results.sort_by(|a, b| {
@@ -1524,6 +1613,109 @@ mod tests {
             serde_json::to_value(&debug).unwrap(),
             "plain and debug merge variants must produce identical results"
         );
+    }
+
+    #[test]
+    fn test_score_breakdown_components_sum_to_score() {
+        // Every term of the formula is exercised: title match, content
+        // match, adjacent-phrase multiplier, recency, priority page,
+        // source_weight, and a non-unit base.
+        let config = ScoringConfig {
+            priority_pages: vec![PriorityPage {
+                url_pattern: "/fruit/".to_string(),
+                keywords: vec!["apple".to_string()],
+                boost: 3.0,
+                custom_excerpt: None,
+                page_id: None,
+            }],
+            ..Default::default()
+        };
+        let mut r = make_result_with_excerpt_and_locations(
+            "https://example.com/fruit/",
+            "Apple Harvest",
+            "apple orange pie",
+            0.8,
+            Some(vec![0, 1]),
+        );
+        r.date = days_ago(1);
+        r.source_weight = Some(0.5);
+        let mut results = vec![r];
+        score_results_with_primary_debug(&mut results, "apple orange", None, &config, true);
+
+        let score = results[0].score;
+        let bd = &results[0].extra["score_breakdown"];
+        let f = |k: &str| bd[k].as_f64().unwrap();
+        assert_eq!(f("base"), 0.8);
+        assert_eq!(f("source_weight"), 0.5);
+        assert!(f("title_boost") > 0.0);
+        assert!(f("content_boost") > 0.0);
+        assert_eq!(f("phrase_mult"), config.phrase_adjacent_multiplier);
+        assert!(f("recency") > 0.0);
+        assert_eq!(f("priority_boost"), 3.0);
+        assert_eq!(bd["matched_title_terms"], serde_json::json!(["apple"]));
+        assert_eq!(
+            bd["matched_priority_patterns"],
+            serde_json::json!(["/fruit/"])
+        );
+
+        let sum = f("base") * f("source_weight")
+            + f("title_boost")
+            + f("content_boost") * f("phrase_mult")
+            + f("recency")
+            + f("priority_boost");
+        assert!((sum - score).abs() < 1e-9, "sum {} != score {}", sum, score);
+    }
+
+    #[test]
+    fn test_score_results_identical_to_debug_variant() {
+        // score_results delegates to score_results_with_primary_debug(false);
+        // the plain output must not change, and debug=true must only add the
+        // score_breakdown field without altering scores or order.
+        let config = ScoringConfig {
+            priority_pages: vec![PriorityPage {
+                url_pattern: "/team/".to_string(),
+                keywords: vec!["team".to_string()],
+                boost: 5.0,
+                custom_excerpt: Some("custom".to_string()),
+                page_id: None,
+            }],
+            ..Default::default()
+        };
+        let make = || {
+            vec![
+                make_result("https://example.com/team/", "Team Page", 1.0),
+                make_result_with_excerpt_and_locations(
+                    "/b",
+                    "Members",
+                    "team members list",
+                    2.0,
+                    Some(vec![4, 5]),
+                ),
+                make_result("/c", "Unrelated", 0.5),
+            ]
+        };
+
+        let mut plain = make();
+        score_results(&mut plain, "team members", &config);
+        let mut not_debug = make();
+        score_results_with_primary_debug(&mut not_debug, "team members", None, &config, false);
+        assert_eq!(
+            serde_json::to_value(&plain).unwrap(),
+            serde_json::to_value(&not_debug).unwrap(),
+            "debug=false must be identical to the plain variant"
+        );
+        assert!(plain
+            .iter()
+            .all(|r| !r.extra.contains_key("score_breakdown")));
+
+        let mut debug = make();
+        score_results_with_primary_debug(&mut debug, "team members", None, &config, true);
+        for (p, d) in plain.iter().zip(&debug) {
+            assert_eq!(p.url, d.url);
+            assert_eq!(p.score, d.score);
+            assert_eq!(p.excerpt, d.excerpt);
+            assert!(d.extra.contains_key("score_breakdown"));
+        }
     }
 
     #[test]
