@@ -182,7 +182,14 @@ pub mod inner {
         // every unquoted query.
         scoring::retain_forced_phrase_matches(&mut results, query, &cfg);
 
-        scoring::score_results_with_primary(&mut results, query, primary_terms.as_deref(), &cfg);
+        let debug = obj.get("debug").and_then(|v| v.as_bool()).unwrap_or(false);
+        scoring::score_results_with_primary_debug(
+            &mut results,
+            query,
+            primary_terms.as_deref(),
+            &cfg,
+            debug,
+        );
 
         if let Some(ref sort) = sort_override {
             scoring::apply_sort_override(&mut results, sort);
@@ -324,6 +331,7 @@ pub mod inner {
 
         let empty_obj = serde_json::json!({});
         let default_config_json = obj.get("default_config").unwrap_or(&empty_obj);
+        let debug = obj.get("debug").and_then(|v| v.as_bool()).unwrap_or(false);
 
         let mut batch_results: Vec<serde_json::Value> = Vec::with_capacity(queries.len());
 
@@ -365,7 +373,7 @@ pub mod inner {
             // query scored through the batch path behaves identically.
             scoring::retain_forced_phrase_matches(&mut results, query, &cfg);
 
-            scoring::score_results(&mut results, query, &cfg);
+            scoring::score_results_with_primary_debug(&mut results, query, None, &cfg, debug);
 
             let scored = serde_json::to_value(&results)
                 .map_err(|e| ScoltaError::parse_error("batch_score_results", e))?;

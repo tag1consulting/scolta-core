@@ -42,6 +42,23 @@ Score and re-rank search results by relevance to a query.
 - `config` — optional `ScoringConfig` object (see Section 4). Missing fields use defaults.
 - `sort_override` — optional object `{ "field": "...", "direction": "asc"|"desc" }`. When present, results that lack the named metadata field are excluded, and the remaining results are sorted by that field's value (numeric strings compared numerically, others lexicographically). Relevance score is used as a tiebreaker for equal field values. Omit to use the default relevance-ranked behavior.
 - `primary_query` — optional string. When provided, the title boost for each result is the maximum of the title boost computed from `query` and from `primary_query`. Used by AI query expansion to award title boosts for results whose titles match the original user query.
+- `debug` — optional boolean (default false). When true, each output result also carries a `score_breakdown` object with the components of its score. Without it the output is unchanged. `batch_score_results` accepts the same top-level flag.
+
+```json
+"score_breakdown": {
+  "base": 0.85,
+  "source_weight": 1.0,
+  "title_boost": 2.0,
+  "content_boost": 1.0,
+  "phrase_mult": 1.0,
+  "recency": 0.18,
+  "priority_boost": 0.0,
+  "matched_title_terms": ["page"],
+  "matched_priority_patterns": []
+}
+```
+
+`score = base * source_weight + title_boost + content_boost * phrase_mult + recency + priority_boost`. `matched_title_terms` lists the query terms found in the title (from whichever of `query` / `primary_query` won the title boost); `matched_priority_patterns` lists the `url_pattern` of each priority page whose boost was applied. Metadata and exact-title boosts applied by `scolta.js` after this call are not included.
 
 **Output JSON:** Array of `SearchResult` objects sorted by computed score descending (or by `sort_override` field when specified). Each result gains a `score` field with the computed relevance value.
 
