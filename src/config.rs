@@ -115,6 +115,18 @@ pub fn from_json(json: &serde_json::Value) -> ScoringConfig {
             .get("priority_pages")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default(),
+        language_chain: obj
+            .get("language_chain")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default(),
+        language_affinity_multiplier: obj
+            .get("language_affinity_multiplier")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1.2),
+        language_affinity_decay: obj
+            .get("language_affinity_decay")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.5),
     }
 }
 
@@ -136,6 +148,32 @@ mod tests {
         assert_eq!(config.recency_strategy, "exponential");
         assert!(config.recency_curve.is_empty());
         assert!(config.priority_pages.is_empty());
+        assert!(config.language_chain.is_empty());
+        assert_eq!(config.language_affinity_multiplier, 1.2);
+        assert_eq!(config.language_affinity_decay, 0.5);
+    }
+
+    #[test]
+    fn test_from_json_language_affinity() {
+        let json = json!({
+            "language_chain": ["pt-br", "pt", "en"],
+            "language_affinity_multiplier": 1.5,
+            "language_affinity_decay": 0.3,
+        });
+        let config = from_json(&json);
+        assert_eq!(config.language_chain, vec!["pt-br", "pt", "en"]);
+        assert_eq!(config.language_affinity_multiplier, 1.5);
+        assert_eq!(config.language_affinity_decay, 0.3);
+    }
+
+    #[test]
+    fn test_from_json_validated_clamps_language_affinity() {
+        let json = json!({"language_affinity_multiplier": 0.5});
+        let (config, warnings) = from_json_validated(&json);
+        assert_eq!(config.language_affinity_multiplier, 1.0);
+        assert!(warnings
+            .iter()
+            .any(|w| w.field == "language_affinity_multiplier"));
     }
 
     #[test]

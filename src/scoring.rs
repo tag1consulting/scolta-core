@@ -8,7 +8,7 @@
 //! # Scoring formula
 //!
 //! ```text
-//! final_score = (base_score × source_weight) + title_boost + content_boost + recency_boost + priority_boost
+//! final_score = ((base_score × source_weight) + title_boost + content_boost + recency_boost + priority_boost) × language_affinity
 //! ```
 //!
 //! `base_score` is the upstream search engine score (e.g., from Pagefind).
@@ -68,6 +68,9 @@ pub struct PriorityPage {
 /// | `language` | ISO 639-1 code | "en" |
 /// | `custom_stop_words` | list of lowercase tokens | [] |
 /// | `priority_pages` | list of PriorityPage | [] |
+/// | `language_chain` | ordered langcodes, [] disables | [] |
+/// | `language_affinity_multiplier` | 1.0–5.0 | 1.2 |
+/// | `language_affinity_decay` | 0.0–1.0 | 0.5 |
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoringConfig {
     pub recency_boost_max: f64,
@@ -102,6 +105,42 @@ pub struct ScoringConfig {
     /// Default: empty (no priority pages).
     #[serde(default)]
     pub priority_pages: Vec<PriorityPage>,
+    /// Ordered language-preference chain for the page the visitor is
+    /// searching from, supplied per search by the caller — e.g.
+    /// `["pt-br", "pt", "en"]`: the current page langcode, then site
+    /// languages sharing its base language, then the default site language.
+    /// The chain is built by the CMS adapter (which owns langcode semantics);
+    /// scolta-core never parses or prefix-matches langcodes — a result's
+    /// `language` is compared against chain entries by exact match only
+    /// (ASCII case-insensitive). Earlier chain position = higher boost
+    /// (rank-decayed via `language_affinity_decay`); a language absent from
+    /// the chain gets no boost. Under a soft language filter this ranks the
+    /// page-language translation above an otherwise-equal result in a
+    /// fallback language. Default: empty (no language affinity).
+    ///
+    /// Distinct from `language`, which selects the stop-word list for term
+    /// extraction.
+    #[serde(default)]
+    pub language_chain: Vec<String>,
+    /// Multiplier applied to the final score of a result whose `language` is
+    /// first in `language_chain`. Values below 1.0 would penalize the
+    /// visitor's own language and are clamped up.
+    #[serde(default = "default_language_affinity_multiplier")]
+    pub language_affinity_multiplier: f64,
+    /// Per-position decay of the affinity boost down the chain: a result
+    /// matching chain position `i` gets `1 + (multiplier − 1) × decay^i`.
+    /// `0.0` boosts only the first chain entry; `1.0` boosts every chain
+    /// language equally.
+    #[serde(default = "default_language_affinity_decay")]
+    pub language_affinity_decay: f64,
+}
+
+fn default_language_affinity_multiplier() -> f64 {
+    1.2
+}
+
+fn default_language_affinity_decay() -> f64 {
+    0.5
 }
 
 impl Default for ScoringConfig {
@@ -127,6 +166,9 @@ impl Default for ScoringConfig {
             language: "en".to_string(),
             custom_stop_words: Vec::new(),
             priority_pages: Vec::new(),
+            language_chain: Vec::new(),
+            language_affinity_multiplier: 1.2,
+            language_affinity_decay: 0.5,
         }
     }
 }
@@ -190,6 +232,26 @@ impl ScoringConfig {
                 message: format!(
                     "value {} outside reasonable range (1–500)",
                     self.max_pagefind_results
+                ),
+            });
+        }
+
+        if self.language_affinity_multiplier < 1.0 || self.language_affinity_multiplier > 5.0 {
+            warnings.push(ConfigWarning {
+                field: "language_affinity_multiplier",
+                message: format!(
+                    "value {} outside reasonable range (1.0–5.0)",
+                    self.language_affinity_multiplier
+                ),
+            });
+        }
+
+        if self.language_affinity_decay < 0.0 || self.language_affinity_decay > 1.0 {
+            warnings.push(ConfigWarning {
+                field: "language_affinity_decay",
+                message: format!(
+                    "value {} outside reasonable range (0.0–1.0)",
+                    self.language_affinity_decay
                 ),
             });
         }
@@ -300,6 +362,30 @@ impl ScoringConfig {
             self.max_pagefind_results = clamped;
         }
 
+        if self.language_affinity_multiplier < 1.0 || self.language_affinity_multiplier > 5.0 {
+            let clamped = self.language_affinity_multiplier.clamp(1.0, 5.0);
+            warnings.push(ConfigWarning {
+                field: "language_affinity_multiplier",
+                message: format!(
+                    "value {} outside range (1.0–5.0), clamped to {clamped}",
+                    self.language_affinity_multiplier
+                ),
+            });
+            self.language_affinity_multiplier = clamped;
+        }
+
+        if self.language_affinity_decay < 0.0 || self.language_affinity_decay > 1.0 {
+            let clamped = self.language_affinity_decay.clamp(0.0, 1.0);
+            warnings.push(ConfigWarning {
+                field: "language_affinity_decay",
+                message: format!(
+                    "value {} outside range (0.0–1.0), clamped to {clamped}",
+                    self.language_affinity_decay
+                ),
+            });
+            self.language_affinity_decay = clamped;
+        }
+
         // Append non-clampable warnings from validate().
         warnings.extend(self.validate());
         warnings
@@ -332,6 +418,13 @@ pub struct SearchResult {
     /// that pre-date this field or come from non-Pagefind sources.
     #[serde(default)]
     pub locations: Option<Vec<u32>>,
+    /// Language of this result's document, from the Pagefind fragment's
+    /// `filters.language` value (the JS layer unwraps the single-element
+    /// filter array to a string). Compared case-insensitively against
+    /// `ScoringConfig::language_chain` for the language-affinity multiplier.
+    /// Absent for results that pre-date this field or non-multilingual sites.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
@@ -460,6 +553,46 @@ pub fn match_priority_pages<'a>(query: &str, pages: &'a [PriorityPage]) -> Vec<&
                 .any(|kw| query_lower.contains(&kw.to_lowercase()))
         })
         .collect()
+}
+
+/// Multiplier applied to a result's final score for language affinity.
+///
+/// Returns `1 + (language_affinity_multiplier − 1) × language_affinity_decay^i`
+/// when the result's `language` matches the entry at position `i` of
+/// `config.language_chain` (exact match, ASCII case-insensitive — no langcode
+/// parsing or prefix matching; the chain from the CMS adapter carries the
+/// fallback semantics, e.g. `["pt-br", "pt", "en"]`). Returns `1.0` when the
+/// chain is empty, the result has no `language`, or its language is not in
+/// the chain — so monolingual sites and pre-existing callers are unaffected.
+pub fn language_affinity_multiplier(result: &SearchResult, config: &ScoringConfig) -> f64 {
+    let Some(lang) = result.language.as_deref() else {
+        return 1.0;
+    };
+    match config
+        .language_chain
+        .iter()
+        .position(|c| c.eq_ignore_ascii_case(lang))
+    {
+        Some(i) => {
+            let decay = config
+                .language_affinity_decay
+                .powi(i32::try_from(i).unwrap_or(i32::MAX));
+            1.0 + (config.language_affinity_multiplier - 1.0) * decay
+        }
+        None => 1.0,
+    }
+}
+
+/// Multiply a composite score by the language-affinity factor. Applied only
+/// to positive scores: a >1 multiplier on a negative composite (e.g. zero
+/// source weight plus a recency penalty) would push the matching-language
+/// result *down*.
+fn apply_language_affinity(composite: f64, result: &SearchResult, config: &ScoringConfig) -> f64 {
+    if composite > 0.0 {
+        composite * language_affinity_multiplier(result, config)
+    } else {
+        composite
+    }
 }
 
 pub fn recency_boost(date: &str, config: &ScoringConfig) -> f64 {
@@ -818,11 +951,12 @@ pub fn score_result_with_query_info_and_primary(
     } else {
         1.0
     };
-    (base_score * source_weight)
+    let composite = (base_score * source_weight)
         + title_boost
         + (content_boost * phrase_mult)
         + recency
-        + priority_boost
+        + priority_boost;
+    apply_language_affinity(composite, result, config)
 }
 
 /// Calculate composite score using a [`QueryInfo`] and a pre-computed priority boost.
@@ -833,7 +967,7 @@ pub fn score_result_with_query_info_and_primary(
 ///
 /// Formula:
 /// ```text
-/// final = (base × source_weight) + title_boost + (content_boost × phrase_mult) + recency + priority
+/// final = ((base × source_weight) + title_boost + (content_boost × phrase_mult) + recency + priority) × language_affinity
 /// ```
 pub fn score_result_with_query_info(
     result: &SearchResult,
@@ -846,7 +980,7 @@ pub fn score_result_with_query_info(
 
 /// Calculate composite score using pre-extracted terms and a pre-computed priority boost.
 ///
-/// Formula: `(base_score × source_weight) + title_boost + content_boost + recency_boost + priority_boost`
+/// Formula: `((base_score × source_weight) + title_boost + content_boost + recency_boost + priority_boost) × language_affinity`
 pub fn score_result_with_terms(
     result: &SearchResult,
     terms: &[String],
@@ -863,7 +997,9 @@ pub fn score_result_with_terms(
     let content_boost = content_match_score_with_terms(terms, &result.excerpt, config);
     let recency = recency_boost(&result.date, config);
 
-    (base_score * source_weight) + title_boost + content_boost + recency + priority_boost
+    let composite =
+        (base_score * source_weight) + title_boost + content_boost + recency + priority_boost;
+    apply_language_affinity(composite, result, config)
 }
 
 /// Calculate composite score for a single result.
@@ -1203,6 +1339,7 @@ mod tests {
             content_type: String::new(),
             site_name: String::new(),
             source_weight: None,
+            language: None,
             locations: None,
             extra: serde_json::Map::new(),
         }
@@ -1224,6 +1361,7 @@ mod tests {
             content_type: String::new(),
             site_name: String::new(),
             source_weight: None,
+            language: None,
             locations,
             extra: serde_json::Map::new(),
         }
@@ -1237,6 +1375,9 @@ mod tests {
         assert_eq!(config.recency_half_life_days, 365);
         assert_eq!(config.content_all_terms_multiplier, 1.2);
         assert!(config.priority_pages.is_empty());
+        assert!(config.language_chain.is_empty());
+        assert_eq!(config.language_affinity_multiplier, 1.2);
+        assert_eq!(config.language_affinity_decay, 0.5);
     }
 
     #[test]
@@ -1368,6 +1509,151 @@ mod tests {
         let mut results = vec![make_result("https://example.com/team/", "Team", 1.0)];
         score_results(&mut results, "team leadership", &config);
         assert_eq!(results[0].excerpt, "Meet our expert team.");
+    }
+
+    fn make_result_with_language(url: &str, language: Option<&str>, score: f64) -> SearchResult {
+        let mut r = make_result(url, "Guía de migración", score);
+        r.language = language.map(str::to_string);
+        r
+    }
+
+    fn chain(langs: &[&str]) -> Vec<String> {
+        langs.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn test_language_affinity_chain_ranks_by_position() {
+        let config = ScoringConfig {
+            language_chain: chain(&["pt-br", "pt", "en"]),
+            ..Default::default()
+        };
+
+        // Same page in three languages, identical base scores: ranking must
+        // follow chain order, with a fourth language unboosted and last.
+        let mut results = vec![
+            make_result_with_language("https://example.com/de/guide/", Some("de"), 1.0),
+            make_result_with_language("https://example.com/guide/", Some("en"), 1.0),
+            make_result_with_language("https://example.com/pt/guide/", Some("pt"), 1.0),
+            make_result_with_language("https://example.com/pt-br/guide/", Some("pt-br"), 1.0),
+        ];
+
+        score_results(&mut results, "migração", &config);
+
+        let urls: Vec<&str> = results.iter().map(|r| r.url.as_str()).collect();
+        assert_eq!(
+            urls,
+            vec![
+                "https://example.com/pt-br/guide/",
+                "https://example.com/pt/guide/",
+                "https://example.com/guide/",
+                "https://example.com/de/guide/",
+            ]
+        );
+        // Rank-decayed boosts: 1.2, 1.1, 1.05 against the unboosted score.
+        let base = results[3].score;
+        assert!((results[0].score - base * 1.2).abs() < 0.001);
+        assert!((results[1].score - base * 1.1).abs() < 0.001);
+        assert!((results[2].score - base * 1.05).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_language_affinity_exact_match_no_langcode_parsing() {
+        // "pt-br" in the chain must not match a "pt" result or vice versa —
+        // the CMS-built chain carries the fallback semantics, not scolta-core.
+        let config = ScoringConfig {
+            language_chain: chain(&["pt-br"]),
+            ..Default::default()
+        };
+        let r_pt = make_result_with_language("https://a.com", Some("pt"), 1.0);
+        assert_eq!(language_affinity_multiplier(&r_pt, &config), 1.0);
+    }
+
+    #[test]
+    fn test_language_affinity_case_insensitive() {
+        let config = ScoringConfig {
+            language_chain: chain(&["ES"]),
+            ..Default::default()
+        };
+        let r = make_result_with_language("https://a.com", Some("es"), 1.0);
+        assert_eq!(
+            language_affinity_multiplier(&r, &config),
+            config.language_affinity_multiplier
+        );
+    }
+
+    #[test]
+    fn test_language_affinity_disabled_without_chain() {
+        let config = ScoringConfig::default();
+        let r_es = make_result_with_language("https://a.com", Some("es"), 1.0);
+        let r_none = make_result_with_language("https://b.com", None, 1.0);
+        assert_eq!(language_affinity_multiplier(&r_es, &config), 1.0);
+        assert_eq!(language_affinity_multiplier(&r_none, &config), 1.0);
+    }
+
+    #[test]
+    fn test_language_affinity_no_boost_for_missing_or_other_language() {
+        let config = ScoringConfig {
+            language_chain: chain(&["es"]),
+            ..Default::default()
+        };
+        let r_en = make_result_with_language("https://a.com", Some("en"), 1.0);
+        let r_none = make_result_with_language("https://b.com", None, 1.0);
+        assert_eq!(language_affinity_multiplier(&r_en, &config), 1.0);
+        assert_eq!(language_affinity_multiplier(&r_none, &config), 1.0);
+    }
+
+    #[test]
+    fn test_language_affinity_decay_extremes() {
+        let mut config = ScoringConfig {
+            language_chain: chain(&["es", "en"]),
+            language_affinity_decay: 0.0,
+            ..Default::default()
+        };
+        let r_en = make_result_with_language("https://a.com", Some("en"), 1.0);
+        // decay 0.0 → only the first chain entry boosts.
+        assert_eq!(language_affinity_multiplier(&r_en, &config), 1.0);
+        // decay 1.0 → every chain language boosts equally.
+        config.language_affinity_decay = 1.0;
+        assert_eq!(
+            language_affinity_multiplier(&r_en, &config),
+            config.language_affinity_multiplier
+        );
+    }
+
+    #[test]
+    fn test_language_affinity_not_applied_to_negative_composite() {
+        let config = ScoringConfig {
+            language_chain: chain(&["es"]),
+            ..Default::default()
+        };
+        // Zero source weight plus a recency penalty → negative composite.
+        // The multiplier must not push the matching-language result further down.
+        let mut r = make_result_with_language("https://a.com", Some("es"), 10.0);
+        r.source_weight = Some(0.0);
+        r.date = "2000-01-01".to_string();
+        let score = score_result_with_terms(&r, &[], &config, 0.0);
+        assert!(score < 0.0);
+        let mut r_en = r.clone();
+        r_en.language = Some("en".to_string());
+        assert_eq!(score, score_result_with_terms(&r_en, &[], &config, 0.0));
+    }
+
+    #[test]
+    fn test_language_affinity_clamped() {
+        let mut config = ScoringConfig {
+            language_affinity_multiplier: 0.2,
+            language_affinity_decay: 2.0,
+            ..Default::default()
+        };
+        let warnings = config.clamp_and_validate();
+        assert_eq!(config.language_affinity_multiplier, 1.0);
+        assert_eq!(config.language_affinity_decay, 1.0);
+        assert!(warnings
+            .iter()
+            .any(|w| w.field == "language_affinity_multiplier"));
+        assert!(warnings
+            .iter()
+            .any(|w| w.field == "language_affinity_decay"));
     }
 
     #[test]
@@ -1580,6 +1866,7 @@ mod tests {
             content_type: String::new(),
             site_name: String::new(),
             source_weight: None,
+            language: None,
             locations: None,
             extra: serde_json::Map::new(),
         };
@@ -2868,6 +3155,7 @@ mod tests {
                 content_type: String::new(),
                 site_name: String::new(),
                 source_weight: None,
+                language: None,
                 locations: None,
                 extra: serde_json::Map::new(),
             }

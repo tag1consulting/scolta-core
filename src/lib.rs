@@ -142,7 +142,9 @@ pub mod inner {
     ///
     /// Each result may include `"source_weight"` (f64, default 1.0) to dampen
     /// secondary-source results. The config may include `"priority_pages"` to
-    /// boost specific results when query keywords match.
+    /// boost specific results when query keywords match, and `"language_chain"`
+    /// (ordered langcodes) to rank-boost results whose `"language"` appears in
+    /// it (see `language_affinity_multiplier` in [`scoring::ScoringConfig`]).
     ///
     /// # Errors
     /// `InvalidJson` for non-object input, `MissingField`/`InvalidFieldType`
@@ -975,6 +977,22 @@ mod tests {
         });
         let result = inner::score_results(&input).unwrap();
         assert_eq!(result[0]["url"], "https://example.com/team/");
+    }
+
+    #[test]
+    fn test_score_results_language_affinity() {
+        let input = json!({
+            "query": "migración drupal",
+            "results": [
+                {"url": "https://example.com/guide/", "title": "Guide", "excerpt": "guide", "date": "2026-01-01", "score": 1.0, "language": "en"},
+                {"url": "https://example.com/es/guide/", "title": "Guía", "excerpt": "guía", "date": "2026-01-01", "score": 1.0, "language": "es"}
+            ],
+            "config": { "language_chain": ["es", "en"] }
+        });
+        let result = inner::score_results(&input).unwrap();
+        assert_eq!(result[0]["url"], "https://example.com/es/guide/");
+        // The language field round-trips so downstream passes can still see it.
+        assert_eq!(result[0]["language"], "es");
     }
 
     #[test]
