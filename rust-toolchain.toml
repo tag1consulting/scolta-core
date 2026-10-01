@@ -1,0 +1,8 @@
+[toolchain]
+# Last review: 20261001
+channel = "1.98.1"
+
+# Include extra linting tools.
+components = [ "rustfmt", "clippy" ]
+
+targets = [ "wasm32-unknown-unknown" ]

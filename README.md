@@ -83,7 +83,7 @@ In practice, the platform adapters (WordPress, Drupal, Laravel) call `score_resu
 ### WebAssembly build (for use in adapters)
 
 ```bash
-cargo install wasm-pack   # one-time
+cargo install wasm-pack --version 0.15.0 --locked   # one-time
 wasm-pack build --target web --release
 ```
 
