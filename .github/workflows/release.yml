@@ -39,9 +39,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v2
-
-      - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack@0.15.0
 
       - name: Build WASM
         run: wasm-pack build --target web --release
