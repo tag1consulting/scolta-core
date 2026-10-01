@@ -1,4 +1,3 @@
 /target/
 /pkg/
 /.phpunit.cache/
-Cargo.lock
