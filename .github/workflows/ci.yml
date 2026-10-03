@@ -21,6 +21,18 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Clippy (wasm32 target)
         run: cargo clippy --all-targets --target wasm32-unknown-unknown -- -D warnings
+      - name: Clippy (slim feature set)
+        run: |
+          cargo clippy --all-targets --no-default-features -- -D warnings
+          cargo clippy --all-targets --no-default-features --target wasm32-unknown-unknown -- -D warnings
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Type-check the measurement and browser-test tools (strict)
+        run: |
+          npm ci
+          npm run build:tools
 
   test:
     name: Unit tests
@@ -36,15 +48,25 @@ jobs:
             ~/.cargo/git/
             target/
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
-      - run: cargo test
+      - name: Full feature set (the default)
+        run: cargo test --locked
+      # The slim artifact's build: no regex engine, no AI helper exports. Its
+      # sanitizer is the same code, held to the regex crate by the same
+      # differential tests, which run here too.
+      - name: Slim feature set
+        run: cargo test --locked --no-default-features
 
   build:
     name: WASM build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned, with wasm-pack below: size-budgets.json is measured against
+      # exactly these versions, and a floating toolchain would move every
+      # number under every PR.
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.98.1"
           targets: wasm32-unknown-unknown
       - name: Cache cargo
         uses: actions/cache@v4
@@ -53,31 +75,52 @@ jobs:
             ~/.cargo/registry/
             ~/.cargo/git/
             target/
-          key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
-      - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-      - name: Build WASM
-        run: wasm-pack build --target web --release
-      - name: Verify output files
+          key: ${{ runner.os }}-cargo-wasm-1.98.1-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install wasm-pack (pinned)
+        run: ./scripts/install-wasm-pack.sh
+      - name: Build both artifacts
+        run: ./scripts/build.sh
+      - name: Pack and validate the release tarballs
         run: |
-          test -f pkg/scolta_core_bg.wasm
-          test -f pkg/scolta_core.js
-          test -f pkg/scolta_core.d.ts
-      - name: Check binary size
+          ./scripts/package-release.sh ci dist
+          ./scripts/validate-tarball.sh dist/scolta-core-ci.tar.gz
+          ./scripts/validate-tarball.sh dist/scolta-core-slim-ci.tar.gz
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install the measurement and browser-test tools
+        run: npm ci
+      - name: Size budgets (raw, gzip, Brotli) on the packed tarballs
+        run: npm run measure:size -- --tarball dist/scolta-core-ci.tar.gz --tarball dist/scolta-core-slim-ci.tar.gz
+      # The gate has to be able to fail: an artifact grown by 24 kB of
+      # incompressible bytes must breach its budget.
+      - name: Size budgets reject an inflated artifact
         run: |
-          SIZE=$(wc -c < pkg/scolta_core_bg.wasm)
-          echo "WASM size: $SIZE bytes"
-          if [ "$SIZE" -gt 512000 ]; then
-            echo "::warning::WASM binary exceeds 500KB ($SIZE bytes)"
+          cp -r pkg-slim inflated
+          head -c 24000 /dev/urandom >> inflated/scolta_core_slim_bg.wasm
+          if npm run -s measure:size -- --dir inflated > /dev/null; then
+            echo "FAIL: measure:size passed an artifact 24 kB over budget"
+            exit 1
           fi
+          echo "measure:size rejected the inflated artifact, as it must"
+      - name: Install browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+      # Loads both artifacts from the extracted tarballs above, so a member
+      # the packager drops fails here, in Chromium, Firefox and WebKit.
+      - name: Browser tests
+        env:
+          SCOLTA_CORE_TARBALLS: dist/scolta-core-ci.tar.gz,dist/scolta-core-slim-ci.tar.gz
+        run: npm run test:browser
 
   tarball-allowlist:
     name: Release tarball content sweep
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.98.1"
           targets: wasm32-unknown-unknown
       - name: Cache cargo
         uses: actions/cache@v4
@@ -86,21 +129,22 @@ jobs:
             ~/.cargo/registry/
             ~/.cargo/git/
             target/
-          key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
-      - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-      - name: Build WASM
-        run: wasm-pack build --target web --release
+          key: ${{ runner.os }}-cargo-wasm-1.98.1-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install wasm-pack (pinned)
+        run: ./scripts/install-wasm-pack.sh
+      - name: Build both artifacts
+        run: ./scripts/build.sh
 
-      # Sweep the WHOLE wasm-pack output dir, not just the four files release.yml
-      # names. release.yml selects members by name, so wasm-pack drift cruft
-      # (package.json, README.md, LICENSE, .gitignore, snippets/ ...) would slip
-      # past a name-selected tar unnoticed. Catch any NEW unexpected file here,
-      # at PR time, before it can ride along after a wasm-pack upgrade.
-      - name: Detect unexpected files in pkg/
+      # Sweep the WHOLE wasm-pack output dirs, not just the files
+      # package-release.sh names. It selects members by name, so wasm-pack
+      # drift cruft (package.json, README.md, LICENSE, .gitignore, snippets/
+      # ...) would slip past a name-selected tar unnoticed. Catch any NEW
+      # unexpected file here, at PR time, before it can ride along after a
+      # wasm-pack upgrade.
+      - name: Detect unexpected files in pkg/ and pkg-slim/
         run: |
-          # Mirror the allowlist in scripts/validate-tarball.sh.
-          ALLOWED="scolta_core_bg.wasm scolta_core.js scolta_core.d.ts scolta_core_bg.wasm.d.ts"
+          # Mirror the allowlists in scripts/validate-tarball.sh.
+          ALLOWED="scolta_core_bg.wasm scolta_core.js scolta_core.d.ts scolta_core_bg.wasm.d.ts scolta_core_slim_bg.wasm scolta_core_slim.js scolta_core_slim.d.ts scolta_core_slim_bg.wasm.d.ts"
           UNEXPECTED=""
           while IFS= read -r f; do
             name="$(basename "$f")"
@@ -108,20 +152,20 @@ jobs:
               *" $name "*) ;;
               *) UNEXPECTED="$UNEXPECTED $f" ;;
             esac
-          done < <(find pkg -type f | sort)
+          done < <(find pkg pkg-slim -type f | sort)
           if [ -n "$UNEXPECTED" ]; then
-            echo "NOTE: wasm-pack also emitted these files into pkg/ (expected:"
-            echo "package.json, README.md, LICENSE, .gitignore — NOT shipped):"
+            echo "NOTE: wasm-pack also emitted these files (expected:"
+            echo "package.json, README.md, LICENSE — NOT shipped):"
             for f in $UNEXPECTED; do echo "  $f"; done
-            echo "This is informational; the artifact below is built from the"
-            echo "named allowlist only. If wasm-pack starts emitting something new"
+            echo "This is informational; the artifacts below are built from the"
+            echo "named allowlists only. If wasm-pack starts emitting something new"
             echo "that SHOULD ship, update scripts/validate-tarball.sh."
           fi
 
-      # Build the artifact exactly as release.yml does, then run the same
-      # fail-closed validator release.yml runs. PR-time parity: breakage is
-      # caught before the tag, not after.
-      - name: Build release tarball
+      # The default artifact's shape, exactly as every release has shipped
+      # it and as downstream updaters expect it, then both tarballs as
+      # release.yml packs them, through the same fail-closed validator.
+      - name: Build release tarballs
         run: |
           tar -czf test-release.tar.gz \
             -C pkg \
@@ -129,8 +173,13 @@ jobs:
             scolta_core.js \
             scolta_core.d.ts \
             scolta_core_bg.wasm.d.ts
-      - name: Validate release tarball
-        run: ./scripts/validate-tarball.sh test-release.tar.gz
+          ./scripts/package-release.sh test dist
+      - name: Validate release tarballs
+        run: |
+          ./scripts/validate-tarball.sh test-release.tar.gz
+          cmp <(tar -tzf test-release.tar.gz | sort) <(tar -tzf dist/scolta-core-test.tar.gz | sort)
+          ./scripts/validate-tarball.sh dist/scolta-core-test.tar.gz
+          ./scripts/validate-tarball.sh dist/scolta-core-slim-test.tar.gz
 
   changelog:
     name: CHANGELOG enforcement
@@ -143,7 +192,7 @@ jobs:
       - name: Check CHANGELOG updated
         run: |
           CODE_CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- \
-            'src/' 'Cargo.toml' 'tests/' | head -1)
+            'src/' 'Cargo.toml' 'Cargo.lock' 'tests/' 'tools/' 'scripts/' 'package.json' | head -1)
           if [ -n "$CODE_CHANGED" ]; then
             CHANGELOG_CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- CHANGELOG.md)
             if [ -z "$CHANGELOG_CHANGED" ]; then

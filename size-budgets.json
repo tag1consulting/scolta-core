@@ -1,0 +1,18 @@
+{
+  "$comment": [
+    "Size budgets for the release artifacts, in bytes, enforced by `npm run measure:size` in ci.yml and release.yml on the packed tarballs.",
+    "served_total is what a browser downloads to initialize: the .wasm and its .js glue. gzip is zlib level 9, brotli is quality 11 (window 22); both are laboratory sizes, not what a server sends.",
+    "Each budget is the measured size plus about 2% headroom, measured 2026-10-03 with rustc 1.98.1, wasm-pack 0.15.0 and wasm-bindgen 0.2.126 (the versions ci.yml pins). Open core PR #70 adds 2,872 Brotli bytes to the full artifact and none to slim, inside this headroom.",
+    "Raise a budget only deliberately, in the same PR as the growth, and say why in the CHANGELOG."
+  ],
+  "artifacts": {
+    "full": {
+      "scolta_core_bg.wasm": { "raw": 1254200, "gzip": 427600, "brotli": 309900 },
+      "served_total": { "raw": 1281100, "gzip": 432200, "brotli": 313900 }
+    },
+    "slim": {
+      "scolta_core_slim_bg.wasm": { "raw": 334500, "gzip": 130700, "brotli": 108600 },
+      "served_total": { "raw": 355000, "gzip": 134500, "brotli": 111900 }
+    }
+  }
+}
