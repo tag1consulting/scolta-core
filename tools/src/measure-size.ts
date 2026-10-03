@@ -4,13 +4,15 @@
 // every member of each artifact and the sum of what a browser downloads (the
 // module and its glue), then fails if any size is over its budget in
 // size-budgets.json. With no --tarball or --dir it measures the build
-// directories scripts/build.sh writes. Compression is Node's zlib with fixed
-// parameters and no timestamp, so the numbers are reproducible; they are
-// laboratory sizes, not what any server sends.
+// directories scripts/build.sh writes. gzip is a pinned pure-JS deflate and
+// Brotli is the one bundled with Node, both with fixed parameters and no
+// timestamp, so the numbers reproduce on any machine; they are laboratory
+// sizes, not what any server sends.
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { constants, brotliCompressSync, gzipSync } from "node:zlib";
+import { gzipSync } from "fflate";
+import { constants, brotliCompressSync } from "node:zlib";
 import {
   ARTIFACTS,
   type ArtifactName,
@@ -32,7 +34,12 @@ const SIZE_KEYS = ["raw", "gzip", "brotli"] as const;
 export function measureBytes(bytes: Uint8Array): Sizes {
   return {
     raw: bytes.byteLength,
-    gzip: gzipSync(bytes, { level: 9 }).byteLength,
+    // fflate, not node:zlib: Node links whichever zlib its build chose (the
+    // system one, or Chromium's fork, whose output also varies by CPU), and
+    // those differ by about 2% at level 9. A pinned pure-JS deflate gives
+    // the same bytes everywhere. Brotli is bundled with Node, the same 1.2.0
+    // on every supported version, with no CPU-dependent output.
+    gzip: gzipSync(bytes, { level: 9, mem: 12, mtime: 0 }).byteLength,
     brotli: brotliCompressSync(bytes, {
       params: {
         [constants.BROTLI_PARAM_QUALITY]: 11,
@@ -134,9 +141,8 @@ function main(argv: readonly string[]): number {
   const output = {
     tool: "scolta-core measure:size",
     node: process.version,
-    zlib: process.versions.zlib,
     brotli: process.versions.brotli,
-    compression: { gzip: "zlib level 9", brotli: "quality 11, lgwin 22" },
+    compression: { gzip: "fflate 0.8.3 level 9", brotli: "node:zlib brotli quality 11, lgwin 22" },
     artifacts: reports,
     pass: breaches.length === 0,
   };

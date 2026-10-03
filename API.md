@@ -550,7 +550,7 @@ npm run test:browser                 # both artifacts in Chromium, Firefox and W
 
 ### WASM binary size
 
-The release binaries are built with `opt-level = "s"`, LTO, symbol stripping, `codegen-units = 1`, `panic = "abort"` and wasm-opt off. `size-budgets.json` holds the current budgets in raw, gzip and Brotli bytes, and CI fails a pull request whose packed artifacts exceed them. At this writing the slim artifact (module plus glue) is 348 KB raw, 132 KB gzip and 110 KB Brotli, and the full one 1,256 KB, 424 KB and 308 KB; most of the difference is the `regex` engine the full artifact keeps for custom patterns.
+The release binaries are built with `opt-level = "s"`, LTO, symbol stripping, `codegen-units = 1`, `panic = "abort"` and wasm-opt off. `size-budgets.json` holds the current budgets in raw, gzip and Brotli bytes, and CI fails a pull request whose packed artifacts exceed them. At this writing the slim artifact (module plus glue) is 348 KB raw, 136 KB gzip and 110 KB Brotli, and the full one 1,256 KB, 438 KB and 308 KB; most of the difference is the `regex` engine the full artifact keeps for custom patterns.
 
 `opt-level = "z"` and wasm-opt were measured and rejected. `z` saves about 3 KB of Brotli on the slim artifact but costs about 20% on warm scoring in Chromium and up to 40% on cold initialization in WebKit; wasm-opt (`-Os` or `-Oz`) shrinks the raw module but grows it by 2 to 5 KB compressed at either level.
 

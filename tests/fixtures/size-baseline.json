@@ -1,13 +1,13 @@
 {
- "$comment": "Baseline measurements for the slim-artifact change, kept as test data. Sizes are laboratory compressions from `npm run measure:size` (zlib gzip level 9, Brotli quality 11), not HTTP transfers. Latency is `npm run bench:browser` on one desktop machine over loopback; compare builds within this file, not with other machines.",
+ "$comment": "Baseline measurements for the slim-artifact change, kept as test data. Sizes are laboratory compressions from `npm run measure:size` (gzip: fflate 0.8.3 level 9; Brotli: quality 11, window 22), not HTTP transfers. Latency is `npm run bench:browser` on one desktop machine over loopback; compare builds within this file, not with other machines.",
  "measured": "2026-10-03",
  "toolchain": {
   "rustc": "1.98.1",
   "wasm_pack": "0.15.0",
   "wasm_bindgen": "0.2.126",
   "node": "v26.7.0",
-  "zlib": "1.2.12",
-  "brotli": "1.2.0"
+  "gzip": "fflate 0.8.3 level 9",
+  "brotli": "node:zlib brotli 1.2.0"
  },
  "machine": "Apple M5 Max, macOS 26.6.2; Playwright 1.63.0 bundled engines (desktop, no mobile device or emulation)",
  "builds": {
@@ -21,18 +21,18 @@
    "files": {
     "scolta_core_bg.wasm": {
      "raw": 1219824,
-     "gzip": 413387,
+     "gzip": 429534,
      "brotli": 302260
     },
     "scolta_core.js": {
      "raw": 26393,
-     "gzip": 4454,
+     "gzip": 4550,
      "brotli": 3829
     }
    },
    "served_total": {
     "raw": 1246217,
-    "gzip": 417841,
+    "gzip": 434084,
     "brotli": 306089
    }
   },
@@ -40,18 +40,18 @@
    "files": {
     "scolta_core_bg.wasm": {
      "raw": 393695,
-     "gzip": 152905,
+     "gzip": 158193,
      "brotli": 128316
     },
     "scolta_core.js": {
      "raw": 26393,
-     "gzip": 4454,
+     "gzip": 4550,
      "brotli": 3829
     }
    },
    "served_total": {
     "raw": 420088,
-    "gzip": 157359,
+    "gzip": 162743,
     "brotli": 132145
    }
   },
@@ -59,18 +59,18 @@
    "files": {
     "scolta_core_bg.wasm": {
      "raw": 1229578,
-     "gzip": 419216,
+     "gzip": 433003,
      "brotli": 303823
     },
     "scolta_core.js": {
      "raw": 26393,
-     "gzip": 4454,
+     "gzip": 4550,
      "brotli": 3829
     }
    },
    "served_total": {
     "raw": 1255971,
-    "gzip": 423670,
+    "gzip": 437553,
     "brotli": 307652
    }
   },
@@ -78,18 +78,18 @@
    "files": {
     "scolta_core_slim_bg.wasm": {
      "raw": 327888,
-     "gzip": 128106,
+     "gzip": 131936,
      "brotli": 106400
     },
     "scolta_core_slim.js": {
      "raw": 20110,
-     "gzip": 3712,
+     "gzip": 3785,
      "brotli": 3223
     }
    },
    "served_total": {
     "raw": 347998,
-    "gzip": 131818,
+    "gzip": 135721,
     "brotli": 109623
    }
   }
