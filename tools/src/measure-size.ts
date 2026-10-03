@@ -1,4 +1,4 @@
-// npm run measure:size -- [--tarball FILE]... [--dir DIR]... [--budgets FILE] [--no-budget]
+// npm run measure:size -- [--tarball FILE]... [--dir DIR]... [--budgets FILE] [--no-budget] [--artifacts full,slim]
 //
 // Prints a machine-readable matrix of raw, gzip -9 and Brotli 11 bytes for
 // every member of each artifact and the sum of what a browser downloads (the
@@ -108,6 +108,7 @@ function main(argv: readonly string[]): number {
   const dirs: string[] = [];
   let budgetsPath = "size-budgets.json";
   let enforce = true;
+  let required: string[] | undefined;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const value = (): string => {
@@ -119,6 +120,7 @@ function main(argv: readonly string[]): number {
     else if (arg === "--dir") dirs.push(value());
     else if (arg === "--budgets") budgetsPath = value();
     else if (arg === "--no-budget") enforce = false;
+    else if (arg === "--artifacts") required = value().split(",");
     else throw new Error(`unknown argument: ${arg}`);
   }
   if (tarballs.length === 0 && dirs.length === 0) {
@@ -129,15 +131,33 @@ function main(argv: readonly string[]): number {
     : null;
 
   const reports: ArtifactReport[] = [];
-  for (const tarball of tarballs) {
-    const dir = extractTarball(tarball);
-    reports.push(measureArtifact(identifyDir(dir), dir, tarball, budgets));
-  }
-  for (const dir of dirs) {
-    reports.push(measureArtifact(identifyDir(dir), dir, dir, budgets));
-  }
+  // A source that cannot be read or identified is a breach in the report,
+  // not a crash that leaves CI with no JSON to read.
+  const unreadable: string[] = [];
+  const measure = (source: string, dir: () => string) => {
+    try {
+      const path = dir();
+      reports.push(measureArtifact(identifyDir(path), path, source, budgets));
+    } catch (e) {
+      unreadable.push(`${source}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  for (const tarball of tarballs) measure(tarball, () => extractTarball(tarball));
+  for (const dir of dirs) measure(dir, () => dir);
 
-  const breaches = reports.flatMap((r) => r.breaches);
+  // Every budgeted artifact must have been measured, or a run handed one
+  // tarball would pass without checking the other. --artifacts narrows the
+  // set deliberately.
+  const measured = new Set(reports.map((r) => r.artifact));
+  const missing =
+    budgets === null
+      ? []
+      : (required ?? Object.keys(budgets))
+          .filter((name) => !measured.has(name as ArtifactName))
+          .map((name) => `${name}: not measured; pass its tarball or build directory`);
+
+  const breaches = [...unreadable, ...missing, ...reports.flatMap((r) => r.breaches)];
+
   const output = {
     tool: "scolta-core measure:size",
     node: process.version,
