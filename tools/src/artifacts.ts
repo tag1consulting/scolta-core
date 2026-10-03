@@ -21,6 +21,8 @@ export interface ArtifactSpec {
   readonly buildDir: string;
   /** Release tarball name for a version. */
   tarball(version: string): string;
+  /** Whether it ships the module pre-gzipped, with a loader for it. */
+  readonly pregzipped: boolean;
 }
 
 export const ARTIFACTS: Readonly<Record<ArtifactName, ArtifactSpec>> = {
@@ -29,23 +31,40 @@ export const ARTIFACTS: Readonly<Record<ArtifactName, ArtifactSpec>> = {
     stem: "scolta_core",
     buildDir: "pkg",
     tarball: (version) => `scolta-core-${version}.tar.gz`,
+    pregzipped: false,
   },
   slim: {
     name: "slim",
     stem: "scolta_core_slim",
     buildDir: "pkg-slim",
     tarball: (version) => `scolta-core-slim-${version}.tar.gz`,
+    pregzipped: true,
   },
 };
 
 /** Every member of an artifact, in tarball order. */
 export function members(spec: ArtifactSpec): string[] {
-  return [`${spec.stem}_bg.wasm`, `${spec.stem}.js`, `${spec.stem}.d.ts`, `${spec.stem}_bg.wasm.d.ts`];
+  const wasmPack = [`${spec.stem}_bg.wasm`, `${spec.stem}.js`, `${spec.stem}.d.ts`, `${spec.stem}_bg.wasm.d.ts`];
+  return spec.pregzipped ? [...wasmPack, ...pregzippedMembers(spec)] : wasmPack;
 }
 
-/** The members a browser downloads: the module and its glue. */
+/** What scripts/build.sh adds to a pre-gzipped artifact after wasm-pack. */
+export function pregzippedMembers(spec: ArtifactSpec): string[] {
+  return [`${spec.stem}_bg.wasm.gz`, `${spec.stem}_load.js`, `${spec.stem}_load.d.ts`];
+}
+
+/** The members a browser downloads through the glue: the module and its glue. */
 export function servedMembers(spec: ArtifactSpec): string[] {
   return [`${spec.stem}_bg.wasm`, `${spec.stem}.js`];
+}
+
+/**
+ * The members a browser downloads through the loader: the gzipped module,
+ * the loader and the glue it imports. The .gz is already compressed, so its
+ * raw size is what crosses the wire whatever the server does.
+ */
+export function servedPregzippedMembers(spec: ArtifactSpec): string[] {
+  return spec.pregzipped ? [`${spec.stem}_bg.wasm.gz`, `${spec.stem}_load.js`, `${spec.stem}.js`] : [];
 }
 
 /** Which artifact a set of member names belongs to, or undefined. */

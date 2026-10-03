@@ -54,10 +54,18 @@ fi
 #
 # If a future wasm-pack version emits a different set, this list must be reviewed
 # and updated deliberately — do not just append the new file.
+#
+# The slim artifact adds three files scripts/build.sh writes after wasm-pack:
+# the module pre-gzipped (${stem}_bg.wasm.gz, checked below to inflate to the
+# module byte for byte) and the loader that fetches it, with its .d.ts. The
+# full artifact never gains a member: downstream updaters reject any extra.
 # ---------------------------------------------------------------------------
 allowed_for() {
     local stem="$1"
     printf '%s\n' "${stem}_bg.wasm" "${stem}.js" "${stem}.d.ts" "${stem}_bg.wasm.d.ts"
+    if [ "$stem" = "scolta_core_slim" ]; then
+        printf '%s\n' "${stem}_bg.wasm.gz" "${stem}_load.js" "${stem}_load.d.ts"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -161,6 +169,19 @@ if [ -f "$WASM_PATH" ]; then
         echo "      $WASM_MAX_BYTES-byte runaway cap (about 2x its expected size)." >&2
         echo "      Likely cause: $WASM_HINT, an unstripped/debug build, or a" >&2
         echo "      large new dependency. Cap lives in scripts/validate-tarball.sh." >&2
+        FAIL=1
+    fi
+fi
+
+# 4. A pre-gzipped module must be the module: a stale or corrupt .gz would
+#    load a different build than the one beside it, or none.
+GZ_PATH="$WORKDIR/${STEM}_bg.wasm.gz"
+if [ -f "$GZ_PATH" ] && [ -f "$WASM_PATH" ]; then
+    if gzip -dc "$GZ_PATH" | cmp -s - "$WASM_PATH"; then
+        echo "${STEM}_bg.wasm.gz: $(wc -c < "$GZ_PATH" | tr -d '[:space:]') bytes, inflates to ${STEM}_bg.wasm"
+    else
+        echo "FAIL: ${STEM}_bg.wasm.gz does not inflate to ${STEM}_bg.wasm." >&2
+        echo "      scripts/build.sh writes it after wasm-pack; rebuild both together." >&2
         FAIL=1
     fi
 fi

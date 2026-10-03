@@ -96,7 +96,11 @@ pkg/scolta_core.d.ts
 pkg-slim/scolta_core_slim_bg.wasm    slim: search and built-in PII redaction only
 pkg-slim/scolta_core_slim.js
 pkg-slim/scolta_core_slim.d.ts
+pkg-slim/scolta_core_slim_bg.wasm.gz the slim module, pre-gzipped
+pkg-slim/scolta_core_slim_load.js    the loader for it (and its .d.ts)
 ```
+
+`build.sh` writes the last two with the pinned dev tools, so run `npm ci` once before it.
 
 The **full** artifact is the default and the one every release has shipped as
 `scolta-core-<version>.tar.gz`. The **slim** artifact (`scolta-core-slim-<version>.tar.gz`) is built
@@ -106,6 +110,23 @@ download. It rejects `custom_patterns` in `sanitize_query` with an error rather 
 built-in redaction is the same code as the full artifact's. A consumer opts in by loading the slim files
 instead of the full ones, before initialization, and can confirm which it loaded from `describe()`'s
 `artifact` and `capabilities` fields. See `size-budgets.json` for current sizes.
+
+The slim artifact also ships its module **pre-gzipped**, `scolta_core_slim_bg.wasm.gz` (121 KB), with a
+small loader, `scolta_core_slim_load.js`. Many servers compress JavaScript but send `application/wasm` as
+it is, so a visitor downloads the raw 328 KB module; the `.gz` is 121 KB from any server. The loader
+fetches it and inflates it in the browser with `DecompressionStream`, or uses the bytes as they are when
+the server already decoded them (`Content-Encoding: gzip`): it tells the two apart by their first bytes.
+It re-exports the glue, so it replaces `scolta_core_slim.js` one for one:
+
+```js
+import init, { score_results } from "./scolta_core_slim_load.js";
+await init();   // fetches scolta_core_slim_bg.wasm.gz from beside the loader
+```
+
+It throws, naming the URL, on an HTTP error, a corrupt gzip stream, or a file that is neither a module
+nor gzip. On a server that does compress `application/wasm`, loading the raw module through the glue is
+still slightly faster, because the browser compiles it while it downloads: over loopback the loader
+costs 1 to 2 ms more in Chromium, Firefox and WebKit.
 
 Every platform adapter serves a pre-built copy of these files — some commit one, others deploy it out of
 `scolta-php`'s `assets/` at run time. Build from source only when modifying the core.
@@ -277,15 +298,18 @@ cargo fmt --check                      # formatting
 The built artifacts have their own checks, run by CI on the packed release tarballs (Node 22 or later):
 
 ```bash
-./scripts/build.sh && npm ci
+npm ci && ./scripts/build.sh
 npm run measure:size     # raw, gzip and Brotli per file; fails over size-budgets.json
-npm run test:browser     # both artifacts in Chromium, Firefox and WebKit, under a strict CSP
+npm run test:browser     # both artifacts and the slim loader in Chromium, Firefox and WebKit, under a strict CSP
 npm run bench:browser -- full=pkg slim=pkg-slim   # cold and warm timings, compared
 ```
 
+
 `test:browser` replays `tests/fixtures/search-parity.json` (outputs captured from the build before the
 slim artifact existed) and `tests/fixtures/sanitize-differential.json` (outputs of the `regex` crate
-implementation the sanitizer replaced) against both artifacts. Run `npx playwright install` once first.
+implementation the sanitizer replaced) against both artifacts, and loads the slim one through its loader
+from the `.gz` served plain, the `.gz` served with `Content-Encoding: gzip`, the raw `.wasm`, and files it
+must refuse. Run `npx playwright install` once first.
 
 Adding a new public function requires:
 

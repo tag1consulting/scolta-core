@@ -32,6 +32,7 @@ const TYPES: Record<string, string> = {
   ".json": "application/json; charset=utf-8",
   ".html": "text/html; charset=utf-8",
   ".ts": "text/plain; charset=utf-8",
+  ".gz": "application/gzip",
 };
 
 /** Route name (`full`, `slim`, or a benchmark label) to served directory. */
@@ -58,6 +59,16 @@ function artifactDirs(): Map<string, string> {
   return dirs;
 }
 
+/**
+ * Files the loader must refuse: an HTML page served where the module was
+ * expected (what a misrouted URL usually returns), and a file that starts
+ * like gzip but is not.
+ */
+const BAD_BYTES: Record<string, Buffer> = {
+  "page.html": Buffer.from("<!doctype html><title>Not the module</title>"),
+  "corrupt.gz": Buffer.concat([Buffer.from([0x1f, 0x8b, 0x08, 0x00, 0, 0, 0, 0, 0, 0x03]), Buffer.from("not deflate")]),
+};
+
 const PAGE = `<!doctype html>
 <meta charset="utf-8">
 <title>scolta-core harness</title>
@@ -69,11 +80,12 @@ export function serve(port: number): void {
   const routes: Record<string, string> = Object.fromEntries(dirs);
   createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
-    const send = (status: number, type: string, body: string | Buffer) => {
+    const send = (status: number, type: string, body: string | Buffer, extra: Record<string, string> = {}) => {
       res.writeHead(status, {
         "content-type": type,
         "content-security-policy": CSP,
         "cache-control": "no-store",
+        ...extra,
       });
       res.end(body);
     };
@@ -81,6 +93,13 @@ export function serve(port: number): void {
       const path = normalize(join(base, rel));
       if (!path.startsWith(base) || !existsSync(path) || !statSync(path).isFile()) {
         send(404, "text/plain", "not found");
+        return;
+      }
+      // ?encoding=gzip sends a .gz the way a server configured for
+      // pre-compressed files does: as the module, with Content-Encoding, so
+      // the browser inflates it before the page sees it.
+      if (path.endsWith(".wasm.gz") && url.searchParams.get("encoding") === "gzip") {
+        send(200, TYPES[".wasm"] ?? "application/wasm", readFileSync(path), { "content-encoding": "gzip" });
         return;
       }
       send(200, TYPES[extname(path)] ?? "application/octet-stream", readFileSync(path));
@@ -96,6 +115,8 @@ export function serve(port: number): void {
       file(PAGE_DIR, [name, ...rest].join("/"));
     } else if (top === "fixtures") {
       file(FIXTURE_DIR, [name, ...rest].join("/"));
+    } else if (top === "bytes" && name !== undefined && name in BAD_BYTES) {
+      send(200, "application/octet-stream", BAD_BYTES[name] ?? Buffer.alloc(0));
     } else {
       send(404, "text/plain", "not found");
     }

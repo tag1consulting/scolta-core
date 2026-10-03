@@ -15,6 +15,7 @@
     "fixtures:capture": "npm run build:tools && node tools/dist/capture-fixtures.js"
   },
   "devDependencies": {
+    "@gfx/zopfli": "1.0.15",
     "@playwright/test": "1.63.0",
     "@types/node": "26.6.4",
     "fflate": "0.8.3",

@@ -3,7 +3,9 @@
 // Times each build in real browser engines, all with the same fixed inputs:
 //
 //   cold   fetch, compile and initialize the module, in a fresh context
-//          each sample (nothing cached)
+//          each sample (nothing cached). A build that ships a pre-gzipped
+//          module is timed twice: through its glue (`slim`) and through its
+//          loader (`slim+loader`)
 //   first  the first score_results call after initialization
 //   warm   score_results and sanitize_query after a warm-up, each sample
 //          the mean of 50 calls so a 1 ms timer can resolve it
@@ -12,20 +14,54 @@
 // this machine over loopback, not a phone and not a network: compare builds
 // with each other within one run, never with numbers from another machine.
 
-import { chromium, firefox, webkit, type BrowserType } from "@playwright/test";
-import { resolve } from "node:path";
+import { chromium, firefox, webkit, type BrowserType, type Page } from "@playwright/test";
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { identifyDir } from "./artifacts.js";
 import { FIXED_NOW_MS, argument, parityCases } from "./fixture-inputs.js";
 
 const ENGINES: Record<string, BrowserType> = { chromium, firefox, webkit };
 
-interface Stats {
+export interface Variant {
+  /** Report key: the build's label, plus `+loader` for the loader path. */
+  name: string;
+  /** Server route, the build's label. */
+  label: string;
+  stem: string;
+  /** Load through the pre-gzipped loader instead of the glue. */
+  loader: boolean;
+}
+
+/**
+ * Each build loaded through its glue, which streams the raw .wasm with
+ * instantiateStreaming, and a build that ships a loader also through that:
+ * fetch the .gz, inflate it with DecompressionStream, instantiate the bytes.
+ */
+export function variants(builds: Readonly<Record<string, string>>): Variant[] {
+  return Object.entries(builds).flatMap(([label, dir]) => {
+    const { stem, pregzipped } = identifyDir(dir);
+    const glue = { name: label, label, stem, loader: false };
+    return pregzipped && existsSync(join(dir, `${stem}_load.js`))
+      ? [glue, { name: `${label}+loader`, label, stem, loader: true }]
+      : [glue];
+  });
+}
+
+/** Load and initialize one variant in a fresh page; resolves to ms. */
+export async function coldLoad(page: Page, label: string, stem: string, loader: boolean): Promise<number> {
+  if (!loader) return page.evaluate(({ label, stem }) => window.scolta.load(label, stem), { label, stem });
+  const result = await page.evaluate(({ label, stem }) => window.scolta.loadVia(label, stem), { label, stem });
+  if (result.ms === undefined) throw new Error(`${label} loader failed: ${result.error ?? "no error"}`);
+  return result.ms;
+}
+
+export interface Stats {
   median: number;
   p95: number;
   n: number;
 }
 
-function stats(samples: readonly number[]): Stats {
+export function stats(samples: readonly number[]): Stats {
   const sorted = [...samples].sort((a, b) => a - b);
   const at = (q: number) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] ?? NaN;
   const round = (x: number) => Math.round(x * 1000) / 1000;
@@ -75,8 +111,7 @@ async function main(argv: readonly string[]): Promise<void> {
     if (type === undefined) throw new Error(`unknown engine ${engine}`);
     const browser = await type.launch();
     report[engine] = {};
-    for (const [label, dir] of Object.entries(builds)) {
-      const stem = identifyDir(dir).stem;
+    for (const { name, label, stem, loader } of variants(builds)) {
       const coldSamples: number[] = [];
       const firstSamples: number[] = [];
       let warmScore: number[] = [];
@@ -90,7 +125,7 @@ async function main(argv: readonly string[]): Promise<void> {
         }, FIXED_NOW_MS);
         await page.goto(`http://127.0.0.1:${port}/`);
         await page.waitForFunction(() => window.scolta !== undefined);
-        coldSamples.push(await page.evaluate(({ label, stem }) => window.scolta.load(label, stem), { label, stem }));
+        coldSamples.push(await coldLoad(page, label, stem, loader));
         const [first] = await page.evaluate((arg) => window.scolta.time("score_results", arg, 1), scoreArg);
         firstSamples.push(first ?? NaN);
         if (i === cold - 1) {
@@ -111,14 +146,14 @@ async function main(argv: readonly string[]): Promise<void> {
         }
         await context.close();
       }
-      report[engine][label] = {
+      report[engine][name] = {
         cold_init_ms: stats(coldSamples),
         first_score_ms: stats(firstSamples),
         warm_score_ms: stats(warmScore),
         warm_sanitize_ms: stats(warmSanitize),
         warm_sanitize_plain_ms: stats(warmSanitizePlain),
       };
-      process.stderr.write(`${engine} ${label} done\n`);
+      process.stderr.write(`${engine} ${name} done\n`);
     }
     await browser.close();
   }
@@ -128,4 +163,6 @@ async function main(argv: readonly string[]): Promise<void> {
   process.exit(0);
 }
 
-await main(process.argv.slice(2));
+if (import.meta.url === `file://${process.argv[1]}`) {
+  await main(process.argv.slice(2));
+}

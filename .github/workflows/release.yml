@@ -69,6 +69,16 @@ jobs:
       - name: Install wasm-pack (pinned)
         run: ./scripts/install-wasm-pack.sh
 
+      # Before the build: scripts/build.sh writes the slim .gz and loader
+      # with the pinned dev tools.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install the build and measurement tools
+        run: npm ci
+
       - name: Build both artifacts
         run: ./scripts/build.sh
 
@@ -88,16 +98,10 @@ jobs:
           ./scripts/validate-tarball.sh scolta-core-${VERSION}.tar.gz
           ./scripts/validate-tarball.sh scolta-core-slim-${VERSION}.tar.gz
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "24"
-          cache: npm
-
       # Raw, gzip and Brotli budgets on the exact files being published.
       - name: Size budgets
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          npm ci
           npm run measure:size -- --tarball scolta-core-${VERSION}.tar.gz --tarball scolta-core-slim-${VERSION}.tar.gz
 
       - name: Extract CHANGELOG entry

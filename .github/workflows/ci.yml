@@ -78,19 +78,28 @@ jobs:
           key: ${{ runner.os }}-cargo-wasm-1.98.1-${{ hashFiles('**/Cargo.lock') }}
       - name: Install wasm-pack (pinned)
         run: ./scripts/install-wasm-pack.sh
+      # Before the build: scripts/build.sh writes the slim .gz and loader
+      # with the pinned dev tools.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install the build, measurement and browser-test tools
+        run: npm ci
       - name: Build both artifacts
         run: ./scripts/build.sh
+      # The .gz must be a function of the module alone. The hashes are
+      # printed so a local build of the same commit can be compared with CI's.
+      - name: Pre-gzipped module is deterministic
+        run: |
+          node tools/dist/gzip-module.js pkg-slim/scolta_core_slim_bg.wasm again.gz
+          cmp pkg-slim/scolta_core_slim_bg.wasm.gz again.gz
+          sha256sum pkg-slim/scolta_core_slim_bg.wasm pkg-slim/scolta_core_slim_bg.wasm.gz
       - name: Pack and validate the release tarballs
         run: |
           ./scripts/package-release.sh ci dist
           ./scripts/validate-tarball.sh dist/scolta-core-ci.tar.gz
           ./scripts/validate-tarball.sh dist/scolta-core-slim-ci.tar.gz
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "24"
-          cache: npm
-      - name: Install the measurement and browser-test tools
-        run: npm ci
       - name: Size budgets (raw, gzip, Brotli) on the packed tarballs
         run: npm run measure:size -- --tarball dist/scolta-core-ci.tar.gz --tarball dist/scolta-core-slim-ci.tar.gz
       # The gate has to be able to fail: an artifact grown by 24 kB of
@@ -106,6 +115,18 @@ jobs:
           cat breaches.txt
           grep -q "slim: scolta_core_slim_bg.wasm brotli is" breaches.txt
           echo "measure:size rejected the inflated artifact on size, as it must"
+      # The same for the pre-gzipped module, whose raw size is its wire size.
+      - name: Size budgets reject an inflated .gz
+        run: |
+          cp -r pkg-slim inflated-gz
+          head -c 24000 /dev/urandom >> inflated-gz/scolta_core_slim_bg.wasm.gz
+          if npm run -s measure:size -- --artifacts slim --dir inflated-gz > /dev/null 2> breaches-gz.txt; then
+            echo "FAIL: measure:size passed a .gz 24 kB over budget"
+            exit 1
+          fi
+          cat breaches-gz.txt
+          grep -q "slim: scolta_core_slim_bg.wasm.gz raw is" breaches-gz.txt
+          echo "measure:size rejected the inflated .gz on size, as it must"
       - name: Install browsers
         run: npx playwright install --with-deps chromium firefox webkit
       # Loads both artifacts from the extracted tarballs above, so a member
@@ -134,6 +155,12 @@ jobs:
           key: ${{ runner.os }}-cargo-wasm-1.98.1-${{ hashFiles('**/Cargo.lock') }}
       - name: Install wasm-pack (pinned)
         run: ./scripts/install-wasm-pack.sh
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install the build tools
+        run: npm ci
       - name: Build both artifacts
         run: ./scripts/build.sh
 
@@ -146,7 +173,7 @@ jobs:
       - name: Detect unexpected files in pkg/ and pkg-slim/
         run: |
           # Mirror the allowlists in scripts/validate-tarball.sh.
-          ALLOWED="scolta_core_bg.wasm scolta_core.js scolta_core.d.ts scolta_core_bg.wasm.d.ts scolta_core_slim_bg.wasm scolta_core_slim.js scolta_core_slim.d.ts scolta_core_slim_bg.wasm.d.ts"
+          ALLOWED="scolta_core_bg.wasm scolta_core.js scolta_core.d.ts scolta_core_bg.wasm.d.ts scolta_core_slim_bg.wasm scolta_core_slim.js scolta_core_slim.d.ts scolta_core_slim_bg.wasm.d.ts scolta_core_slim_bg.wasm.gz scolta_core_slim_load.js scolta_core_slim_load.d.ts"
           UNEXPECTED=""
           while IFS= read -r f; do
             name="$(basename "$f")"

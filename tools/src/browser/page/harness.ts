@@ -16,13 +16,24 @@ export interface DeadlineResult {
 }
 
 interface Glue {
-  default: () => Promise<unknown>;
+  default: (url?: string) => Promise<unknown>;
   [name: string]: unknown;
+}
+
+export interface LoadResult {
+  ms?: number;
+  error?: string;
 }
 
 export interface Harness {
   /** Load and initialize an artifact; resolves to the init time in ms. */
   load(route: string, stem: string): Promise<number>;
+  /**
+   * Load a pre-gzipped artifact through its loader, from `url` or, without
+   * one, from the .gz beside the loader. Never rejects: a failure comes
+   * back as its message.
+   */
+  loadVia(route: string, stem: string, url?: string): Promise<LoadResult>;
   call(fn: string, arg: string): CallResult;
   /**
    * Time `n` samples of `fn` on `arg`, each the mean over `batch` calls, in
@@ -59,6 +70,17 @@ window.scolta = {
     glue = (await import(`/artifact/${route}/${stem}.js`)) as Glue;
     await glue.default();
     return performance.now() - start;
+  },
+  async loadVia(route, stem, url) {
+    const start = performance.now();
+    try {
+      const loader = (await import(`/artifact/${route}/${stem}_load.js`)) as Glue;
+      await (url === undefined ? loader.default() : loader.default(url));
+      glue = loader;
+      return { ms: performance.now() - start };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) };
+    }
   },
   call(fn, arg) {
     const f = required()[fn];

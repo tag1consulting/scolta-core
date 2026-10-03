@@ -125,6 +125,38 @@ committed bytes against the resolved upstream, and nothing rewrites the file bef
 is not an argument against an adapter deploying assets from vendor at run time, which is what
 scolta-drupal does: that code places the file and never claims to be checking one.
 
+## The slim artifact and its pre-gzipped module
+
+scolta-core releases two tarballs. `scolta-core-<version>.tar.gz` is the full artifact, the four files
+the bundle above has always carried, and its shape never changes: tag1.com's updater rejects any extra
+member. `scolta-core-slim-<version>.tar.gz` is the slim artifact, opt-in, with seven files:
+
+```
+scolta_core_slim_bg.wasm        the module (no regex engine, no AI helper exports)
+scolta_core_slim.js             wasm-bindgen glue
+scolta_core_slim.d.ts
+scolta_core_slim_bg.wasm.d.ts
+scolta_core_slim_bg.wasm.gz     the module pre-gzipped, 121 KB against 328 KB raw
+scolta_core_slim_load.js        the loader that fetches and inflates the .gz
+scolta_core_slim_load.d.ts
+```
+
+No Scolta package carries the slim artifact yet; scolta-php still vendors the full one. When one does, it
+serves the loader, the glue and the `.gz` side by side and points the page's `wasmPath` at
+`scolta_core_slim_load.js`. The loader re-exports the glue and its default export initializes the module,
+so code that does `const wasm = await import(wasmPath); await wasm.default();` needs no change.
+
+The point of the `.gz` is servers that compress JavaScript but send `application/wasm` as it is; the local
+DDEV demos' nginx is one. The `.gz` arrives at 121 KB from any of them. The loader needs no server
+configuration either way: a server that recognizes `.gz` and sends it with `Content-Encoding: gzip` (Apache
+with `AddEncoding`, for one) hands the page bytes the browser already inflated, and the loader sees the
+WebAssembly magic number and uses them as they are. A CSP needs nothing beyond what the glue needs. Copy
+the `.gz` as it is: re-compressing it, or a server that gzips it again with `Content-Encoding`, gains
+nothing.
+
+`scripts/build.sh` writes the `.gz` with zopfli (pinned dev dependency), and `scripts/validate-tarball.sh`
+fails a slim tarball whose `.gz` does not inflate to the `.wasm` beside it byte for byte.
+
 ## The version floor (why the check resolves `dev-main`)
 
 Composer honors a stability flag only in the root package. So during a cycle an adapter's floor is

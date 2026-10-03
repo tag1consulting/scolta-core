@@ -2,7 +2,8 @@
 //
 // Prints a machine-readable matrix of raw, gzip -9 and Brotli 11 bytes for
 // every member of each artifact and the sum of what a browser downloads (the
-// module and its glue), then fails if any size is over its budget in
+// module and its glue; for the slim artifact, also the pre-gzipped module,
+// its loader and the glue), then fails if any size is over its budget in
 // size-budgets.json. With no --tarball or --dir it measures the build
 // directories scripts/build.sh writes. gzip is a pinned pure-JS deflate and
 // Brotli is the one bundled with Node, both with fixed parameters and no
@@ -21,6 +22,7 @@ import {
   identifyDir,
   members,
   servedMembers,
+  servedPregzippedMembers,
 } from "./artifacts.js";
 
 export interface Sizes {
@@ -63,11 +65,19 @@ interface ArtifactReport {
   source: string;
   files: Record<string, Sizes & { served: boolean }>;
   served_total: Sizes;
-  budget: Record<string, Sizes> | null;
+  /**
+   * Through the loader: the .gz counts at its raw size under every key,
+   * because it is already compressed and crosses the wire as it is, and the
+   * loader and glue count as JavaScript a server may compress. Absent for
+   * an artifact that is not pre-gzipped.
+   */
+  served_pregzipped_total?: Sizes;
+  budget: Record<string, Partial<Sizes>> | null;
   breaches: string[];
 }
 
-type Budgets = Partial<Record<ArtifactName, Record<string, Sizes>>>;
+/** A budget may leave a key out: a .gz has only a meaningful raw size. */
+type Budgets = Partial<Record<ArtifactName, Record<string, Partial<Sizes>>>>;
 
 function measureArtifact(spec: ArtifactSpec, dir: string, source: string, budgets: Budgets | null): ArtifactReport {
   const files: ArtifactReport["files"] = {};
@@ -82,25 +92,53 @@ function measureArtifact(spec: ArtifactSpec, dir: string, source: string, budget
     files[name] = { ...measureBytes(readFileSync(path)), served: served.includes(name) };
   }
   const servedTotal = sum(served.flatMap((name) => (files[name] ? [files[name]] : [])));
+  const pregzipped = servedPregzippedMembers(spec);
+  const pregzippedTotal =
+    pregzipped.length === 0
+      ? undefined
+      : sum(
+          pregzipped.flatMap((name) => {
+            const sizes = files[name];
+            if (sizes === undefined) return [];
+            return [name.endsWith(".gz") ? { raw: sizes.raw, gzip: sizes.raw, brotli: sizes.raw } : sizes];
+          }),
+        );
+  const totals: Record<string, Sizes | undefined> = {
+    served_total: servedTotal,
+    served_pregzipped_total: pregzippedTotal,
+  };
   const budget = budgets?.[spec.name] ?? null;
   if (budgets !== null && budget === null) {
     breaches.push(`${spec.name}: no budget in size-budgets.json`);
   }
   if (budget !== null) {
     for (const [name, limit] of Object.entries(budget)) {
-      const actual = name === "served_total" ? servedTotal : files[name];
+      const actual = name in totals ? totals[name] : files[name];
       if (actual === undefined) {
         breaches.push(`${spec.name}: budget names ${name}, which the artifact does not have`);
         continue;
       }
-      for (const key of SIZE_KEYS) {
-        if (actual[key] > limit[key]) {
-          breaches.push(`${spec.name}: ${name} ${key} is ${actual[key]} bytes, over its ${limit[key]}-byte budget`);
+      const keys = SIZE_KEYS.filter((key) => limit[key] !== undefined);
+      if (keys.length === 0) {
+        breaches.push(`${spec.name}: budget for ${name} sets no raw, gzip or brotli limit`);
+      }
+      for (const key of keys) {
+        const max = limit[key] ?? 0;
+        if (actual[key] > max) {
+          breaches.push(`${spec.name}: ${name} ${key} is ${actual[key]} bytes, over its ${max}-byte budget`);
         }
       }
     }
   }
-  return { artifact: spec.name, source, files, served_total: servedTotal, budget, breaches };
+  return {
+    artifact: spec.name,
+    source,
+    files,
+    served_total: servedTotal,
+    ...(pregzippedTotal === undefined ? {} : { served_pregzipped_total: pregzippedTotal }),
+    budget,
+    breaches,
+  };
 }
 
 function main(argv: readonly string[]): number {
