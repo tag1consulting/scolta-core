@@ -120,7 +120,11 @@ function main(argv: readonly string[]): number {
     else if (arg === "--dir") dirs.push(value());
     else if (arg === "--budgets") budgetsPath = value();
     else if (arg === "--no-budget") enforce = false;
-    else if (arg === "--artifacts") required = value().split(",");
+    else if (arg === "--artifacts")
+      required = value()
+        .split(",")
+        .map((name) => name.trim())
+        .filter((name) => name !== "");
     else throw new Error(`unknown argument: ${arg}`);
   }
   if (tarballs.length === 0 && dirs.length === 0) {
@@ -148,15 +152,24 @@ function main(argv: readonly string[]): number {
   // Every budgeted artifact must have been measured, or a run handed one
   // tarball would pass without checking the other. --artifacts narrows the
   // set deliberately.
+  const unknown =
+    budgets === null || required === undefined
+      ? []
+      : required
+          .filter((name) => !(name in budgets))
+          .map((name) => `--artifacts names ${name}, which has no budget in size-budgets.json`);
+  if (required !== undefined && required.length === 0) {
+    unknown.push("--artifacts names no artifact");
+  }
   const measured = new Set(reports.map((r) => r.artifact));
   const missing =
     budgets === null
       ? []
       : (required ?? Object.keys(budgets))
-          .filter((name) => !measured.has(name as ArtifactName))
+          .filter((name) => name in (budgets ?? {}) && !measured.has(name as ArtifactName))
           .map((name) => `${name}: not measured; pass its tarball or build directory`);
 
-  const breaches = [...unreadable, ...missing, ...reports.flatMap((r) => r.breaches)];
+  const breaches = [...unknown, ...unreadable, ...missing, ...reports.flatMap((r) => r.breaches)];
 
   const output = {
     tool: "scolta-core measure:size",
