@@ -302,8 +302,13 @@ npm ci && ./scripts/build.sh
 npm run measure:size     # raw, gzip and Brotli per file; fails over size-budgets.json
 npm run test:browser     # both artifacts and the slim loader in Chromium, Firefox and WebKit, under a strict CSP
 npm run bench:browser -- full=pkg slim=pkg-slim   # cold and warm timings, compared
+npm run bench:throttled -- main=DIR slim=pkg-slim # Chromium with CPU and network throttled
 ```
 
+`bench:throttled` is not part of CI: it takes several minutes. It slows Chromium's CPU 4× and 6× through
+the DevTools protocol and emulates two networks (fast 4G: 9 Mbps down, 1.5 Mbps up, 60 ms latency; slow
+4G: 1.6 Mbps, 750 kbps, 150 ms), and reports download plus compile plus initialization, and warm scoring
+time, as the median and p95 in milliseconds. It is desktop Chromium on emulated conditions, not a phone.
 
 `test:browser` replays `tests/fixtures/search-parity.json` (outputs captured from the build before the
 slim artifact existed) and `tests/fixtures/sanitize-differential.json` (outputs of the `regex` crate
