@@ -1,4 +1,16 @@
 #!/usr/bin/env bash
+#
+# Build both browser WASM artifacts:
+#
+#   pkg/       scolta_core       full API: every export, custom PII patterns
+#   pkg-slim/  scolta_core_slim  search and built-in PII redaction only; no
+#                                regex engine, no AI helper exports
+#
+# The slim artifact is opt-in. A consumer selects it by loading its files
+# instead of the full ones, before initialization, and can confirm what it
+# loaded with describe(): `artifact` and `capabilities` say which build it is.
+# scripts/package-release.sh packs both; tools/src/artifacts.ts describes them.
+
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -10,10 +22,20 @@ fi
 
 wasm-pack build \
     --target web \
-    --release
+    --release \
+    --locked
 
-rm -f pkg/.gitignore
+wasm-pack build \
+    --target web \
+    --release \
+    --out-dir pkg-slim \
+    --out-name scolta_core_slim \
+    --locked \
+    --no-default-features
+
+rm -f pkg/.gitignore pkg-slim/.gitignore
 
 echo "WASM built successfully:"
-ls -la pkg/scolta_core_bg.wasm pkg/scolta_core.js
-echo "Size: $(wc -c < pkg/scolta_core_bg.wasm) bytes"
+for f in pkg/scolta_core_bg.wasm pkg/scolta_core.js pkg-slim/scolta_core_slim_bg.wasm pkg-slim/scolta_core_slim.js; do
+    echo "  $f: $(wc -c < "$f" | tr -d '[:space:]') bytes"
+done

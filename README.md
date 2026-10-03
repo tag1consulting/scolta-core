@@ -84,16 +84,28 @@ In practice, the platform adapters (WordPress, Drupal, Laravel) call `score_resu
 
 ```bash
 cargo install wasm-pack   # one-time
-wasm-pack build --target web --release
+./scripts/build.sh
 ```
 
-Output files:
+That builds two artifacts from the same source:
 
 ```text
-pkg/scolta_core_bg.wasm
+pkg/scolta_core_bg.wasm              full: every export, including custom PII patterns
 pkg/scolta_core.js
 pkg/scolta_core.d.ts
+pkg-slim/scolta_core_slim_bg.wasm    slim: search and built-in PII redaction only
+pkg-slim/scolta_core_slim.js
+pkg-slim/scolta_core_slim.d.ts
 ```
+
+The **full** artifact is the default and the one every release has shipped as
+`scolta-core-<version>.tar.gz`. The **slim** artifact (`scolta-core-slim-<version>.tar.gz`) is built
+without the `regex` engine and without the four AI helper exports no browser consumer calls
+(`get_prompt`, `resolve_prompt`, `parse_expansion`, `truncate_conversation`); it is about a third of the
+download. It rejects `custom_patterns` in `sanitize_query` with an error rather than skipping them, and its
+built-in redaction is the same code as the full artifact's. A consumer opts in by loading the slim files
+instead of the full ones, before initialization, and can confirm which it loaded from `describe()`'s
+`artifact` and `capabilities` fields. See `size-budgets.json` for current sizes.
 
 Every platform adapter serves a pre-built copy of these files — some commit one, others deploy it out of
 `scolta-php`'s `assets/` at run time. Build from source only when modifying the core.
@@ -223,6 +235,7 @@ stop_words.rs   Language-specific stop word lists (30 languages)
 ```
 
 **Browser WASM exports (13 functions):** `score_results`, `merge_results`, `match_priority_pages`, `parse_expansion`, `batch_score_results`, `resolve_prompt`, `get_prompt`, `extract_context`, `batch_extract_context`, `sanitize_query`, `truncate_conversation`, `version`, `describe`.
+The slim artifact exports nine of them, leaving out `get_prompt`, `resolve_prompt`, `parse_expansion` and `truncate_conversation`.
 
 `describe()` is the runtime function catalog. Platform adapters call it at startup to verify interface compatibility.
 
@@ -255,10 +268,24 @@ Stop word changes affect both this crate and the PHP indexer in scolta-php. Run 
 ## Testing
 
 ```bash
-cargo test                       # all unit tests
-cargo clippy -- -D warnings      # lint
-cargo fmt --check                # formatting
+cargo test                             # all unit tests, full feature set
+cargo test --no-default-features       # the slim artifact's feature set
+cargo clippy -- -D warnings            # lint
+cargo fmt --check                      # formatting
 ```
+
+The built artifacts have their own checks, run by CI on the packed release tarballs (Node 22 or later):
+
+```bash
+./scripts/build.sh && npm ci
+npm run measure:size     # raw, gzip and Brotli per file; fails over size-budgets.json
+npm run test:browser     # both artifacts in Chromium, Firefox and WebKit, under a strict CSP
+npm run bench:browser -- full=pkg slim=pkg-slim   # cold and warm timings, compared
+```
+
+`test:browser` replays `tests/fixtures/search-parity.json` (outputs captured from the build before the
+slim artifact existed) and `tests/fixtures/sanitize-differential.json` (outputs of the `regex` crate
+implementation the sanitizer replaced) against both artifacts. Run `npx playwright install` once first.
 
 Adding a new public function requires:
 

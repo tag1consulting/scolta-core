@@ -13,14 +13,10 @@ fn describe_lists_all_functions() {
         "score_results",
         "merge_results",
         "match_priority_pages",
-        "parse_expansion",
         "batch_score_results",
-        "resolve_prompt",
-        "get_prompt",
         "extract_context",
         "batch_extract_context",
         "sanitize_query",
-        "truncate_conversation",
         "version",
         "describe",
     ] {
@@ -28,6 +24,15 @@ fn describe_lists_all_functions() {
             names.contains(expected),
             "describe() missing function: {}",
             expected
+        );
+    }
+    // The AI helpers are in every build of the Rust API, but exported (and so
+    // listed) only by builds with the `ai-exports` feature.
+    for name in scolta_core::AI_EXPORT_NAMES {
+        assert_eq!(
+            names.contains(&name),
+            scolta_core::AI_EXPORTS,
+            "describe() and the ai-exports feature disagree about {name}"
         );
     }
 
@@ -50,8 +55,16 @@ fn stability_doc_blocks_match_describe() {
     let mut documented: std::collections::HashMap<String, (String, String)> =
         std::collections::HashMap::new();
     let (mut status, mut since): (Option<String>, Option<String>) = (None, None);
+    // Exports behind a feature this build lacks are documented in browser.rs
+    // but absent from describe(), by design.
+    let mut gated_off: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut gate_pending = false;
     for line in browser_rs.lines() {
         let trimmed = line.trim();
+        if trimmed == "#[cfg(feature = \"ai-exports\")]" {
+            gate_pending = !scolta_core::AI_EXPORTS;
+            continue;
+        }
         if let Some(rest) = trimmed.strip_prefix("///") {
             let rest = rest.trim();
             if let Some(v) = rest.strip_prefix("Status:") {
@@ -66,6 +79,9 @@ fn stability_doc_blocks_match_describe() {
                 .expect("fn line must have a name")
                 .trim()
                 .to_string();
+            if std::mem::take(&mut gate_pending) {
+                gated_off.insert(name.clone());
+            }
             if let (Some(st), Some(si)) = (status.take(), since.take()) {
                 documented.insert(name, (st, si));
             } else {
@@ -93,7 +109,7 @@ fn stability_doc_blocks_match_describe() {
     }
     for name in documented.keys() {
         assert!(
-            functions.contains_key(name),
+            functions.contains_key(name) != gated_off.contains(name),
             "browser.rs exports `{name}` but describe() does not list it"
         );
     }
