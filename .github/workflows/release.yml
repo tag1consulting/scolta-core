@@ -39,7 +39,8 @@ jobs:
             ~/.cargo/git/
             target/
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
-      - run: cargo test
+      - run: cargo test --locked
+      - run: cargo test --locked --no-default-features
 
   release:
     name: Build and publish release
@@ -50,8 +51,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      # The versions size-budgets.json is measured against; see ci.yml.
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master, 2026-10-03
         with:
+          toolchain: "1.98.1"
           targets: wasm32-unknown-unknown
 
       - name: Cache cargo
@@ -61,37 +64,45 @@ jobs:
             ~/.cargo/registry/
             ~/.cargo/git/
             target/
-          key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-wasm-1.98.1-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Install wasm-pack (pinned)
+        run: ./scripts/install-wasm-pack.sh
 
-      - name: Build WASM
-        run: wasm-pack build --target web --release
+      # Before the build: scripts/build.sh writes the slim .gz and loader
+      # with the pinned dev tools.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
 
-      - name: Verify output files
-        run: |
-          test -f pkg/scolta_core_bg.wasm
-          test -f pkg/scolta_core.js
-          test -f pkg/scolta_core.d.ts
+      - name: Install the build and measurement tools
+        run: npm ci
 
-      - name: Create release archive
+      - name: Build both artifacts
+        run: ./scripts/build.sh
+
+      # scolta-core-<version>.tar.gz keeps the four-file shape every release
+      # has shipped; scolta-core-slim-<version>.tar.gz is the opt-in slim one.
+      - name: Create release archives
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          tar -czf scolta-core-${VERSION}.tar.gz \
-            -C pkg \
-            scolta_core_bg.wasm \
-            scolta_core.js \
-            scolta_core.d.ts \
-            scolta_core_bg.wasm.d.ts
+          ./scripts/package-release.sh "$VERSION" .
 
-      # Fail-closed content sweep of the artifact we are about to publish:
+      # Fail-closed content sweep of the artifacts we are about to publish:
       # rejects any unexpected member (wasm-pack drift cruft) and enforces the
-      # WASM size cap. Single source of truth shared with ci.yml.
-      - name: Validate release tarball
+      # runaway caps. Single source of truth shared with ci.yml.
+      - name: Validate release tarballs
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           ./scripts/validate-tarball.sh scolta-core-${VERSION}.tar.gz
+          ./scripts/validate-tarball.sh scolta-core-slim-${VERSION}.tar.gz
+
+      # Raw, gzip and Brotli budgets on the exact files being published.
+      - name: Size budgets
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          npm run measure:size -- --tarball scolta-core-${VERSION}.tar.gz --tarball scolta-core-slim-${VERSION}.tar.gz
 
       - name: Extract CHANGELOG entry
         run: |

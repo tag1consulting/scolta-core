@@ -84,16 +84,49 @@ In practice, the platform adapters (WordPress, Drupal, Laravel) call `score_resu
 
 ```bash
 cargo install wasm-pack   # one-time
-wasm-pack build --target web --release
+./scripts/build.sh
 ```
 
-Output files:
+That builds two artifacts from the same source:
 
 ```text
-pkg/scolta_core_bg.wasm
+pkg/scolta_core_bg.wasm              full: every export, including custom PII patterns
 pkg/scolta_core.js
 pkg/scolta_core.d.ts
+pkg-slim/scolta_core_slim_bg.wasm    slim: search and built-in PII redaction only
+pkg-slim/scolta_core_slim.js
+pkg-slim/scolta_core_slim.d.ts
+pkg-slim/scolta_core_slim_bg.wasm.gz the slim module, pre-gzipped
+pkg-slim/scolta_core_slim_load.js    the loader for it (and its .d.ts)
 ```
+
+`build.sh` writes the last two with the pinned dev tools, so run `npm ci` once before it.
+
+The **full** artifact is the default and the one every release has shipped as
+`scolta-core-<version>.tar.gz`. The **slim** artifact (`scolta-core-slim-<version>.tar.gz`) is built
+without the `regex` engine and without the four AI helper exports no browser consumer calls
+(`get_prompt`, `resolve_prompt`, `parse_expansion`, `truncate_conversation`); it is about a third of the
+download. It rejects `custom_patterns` in `sanitize_query` with an error rather than skipping them, and its
+built-in redaction is the same code as the full artifact's. A consumer opts in by loading the slim files
+instead of the full ones, before initialization, and can confirm which it loaded from `describe()`'s
+`artifact` and `capabilities` fields. See `size-budgets.json` for current sizes.
+
+The slim artifact also ships its module **pre-gzipped**, `scolta_core_slim_bg.wasm.gz` (121 KB), with a
+small loader, `scolta_core_slim_load.js`. Many servers compress JavaScript but send `application/wasm` as
+it is, so a visitor downloads the raw 328 KB module; the `.gz` is 121 KB from any server. The loader
+fetches it and inflates it in the browser with `DecompressionStream`, or uses the bytes as they are when
+the server already decoded them (`Content-Encoding: gzip`): it tells the two apart by their first bytes.
+It re-exports the glue, so it replaces `scolta_core_slim.js` one for one:
+
+```js
+import init, { score_results } from "./scolta_core_slim_load.js";
+await init();   // fetches scolta_core_slim_bg.wasm.gz from beside the loader
+```
+
+It throws, naming the URL, on an HTTP error, a corrupt gzip stream, or a file that is neither a module
+nor gzip. On a server that does compress `application/wasm`, loading the raw module through the glue is
+still slightly faster, because the browser compiles it while it downloads: over loopback the loader
+costs 1 to 2 ms more in Chromium, Firefox and WebKit.
 
 Every platform adapter serves a pre-built copy of these files — some commit one, others deploy it out of
 `scolta-php`'s `assets/` at run time. Build from source only when modifying the core.
@@ -223,6 +256,7 @@ stop_words.rs   Language-specific stop word lists (30 languages)
 ```
 
 **Browser WASM exports (13 functions):** `score_results`, `merge_results`, `match_priority_pages`, `parse_expansion`, `batch_score_results`, `resolve_prompt`, `get_prompt`, `extract_context`, `batch_extract_context`, `sanitize_query`, `truncate_conversation`, `version`, `describe`.
+The slim artifact exports nine of them, leaving out `get_prompt`, `resolve_prompt`, `parse_expansion` and `truncate_conversation`.
 
 `describe()` is the runtime function catalog. Platform adapters call it at startup to verify interface compatibility.
 
@@ -255,10 +289,32 @@ Stop word changes affect both this crate and the PHP indexer in scolta-php. Run 
 ## Testing
 
 ```bash
-cargo test                       # all unit tests
-cargo clippy -- -D warnings      # lint
-cargo fmt --check                # formatting
+cargo test                             # all unit tests, full feature set
+cargo test --no-default-features       # the slim artifact's feature set
+cargo clippy -- -D warnings            # lint
+cargo fmt --check                      # formatting
 ```
+
+The built artifacts have their own checks, run by CI on the packed release tarballs (Node 22 or later):
+
+```bash
+npm ci && ./scripts/build.sh
+npm run measure:size     # raw, gzip and Brotli per file; fails over size-budgets.json
+npm run test:browser     # both artifacts and the slim loader in Chromium, Firefox and WebKit, under a strict CSP
+npm run bench:browser -- full=pkg slim=pkg-slim   # cold and warm timings, compared
+npm run bench:throttled -- main=DIR slim=pkg-slim # Chromium with CPU and network throttled
+```
+
+`bench:throttled` is not part of CI: it takes several minutes. It slows Chromium's CPU 4× and 6× through
+the DevTools protocol and emulates two networks (fast 4G: 9 Mbps down, 1.5 Mbps up, 60 ms latency; slow
+4G: 1.6 Mbps, 750 kbps, 150 ms), and reports download plus compile plus initialization, and warm scoring
+time, as the median and p95 in milliseconds. It is desktop Chromium on emulated conditions, not a phone.
+
+`test:browser` replays `tests/fixtures/search-parity.json` (outputs captured from the build before the
+slim artifact existed) and `tests/fixtures/sanitize-differential.json` (outputs of the `regex` crate
+implementation the sanitizer replaced) against both artifacts, and loads the slim one through its loader
+from the `.gz` served plain, the `.gz` served with `Content-Encoding: gzip`, the raw `.wasm`, and files it
+must refuse. Run `npx playwright install` once first.
 
 Adding a new public function requires:
 

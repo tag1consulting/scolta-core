@@ -145,6 +145,7 @@ pub fn match_priority_pages(input: &str) -> Result<String, JsError> {
 /// `JsError` only if the term array cannot be serialized back to JSON;
 /// unparseable LLM responses fall back to plain-text splitting instead of
 /// erroring.
+#[cfg(feature = "ai-exports")]
 #[wasm_bindgen]
 pub fn parse_expansion(input: &str) -> Result<String, JsError> {
     let terms = inner::parse_expansion(input);
@@ -196,6 +197,7 @@ pub fn batch_score_results(input: &str) -> Result<String, JsError> {
 /// # Errors
 /// `JsError` if the input is not valid JSON, `prompt_name` is missing or
 /// wrong-typed, or the template name is not recognized.
+#[cfg(feature = "ai-exports")]
 #[wasm_bindgen]
 pub fn resolve_prompt(input: &str) -> Result<String, JsError> {
     let value: serde_json::Value =
@@ -214,6 +216,7 @@ pub fn resolve_prompt(input: &str) -> Result<String, JsError> {
 ///
 /// # Errors
 /// `JsError` if the template name is not recognized.
+#[cfg(feature = "ai-exports")]
 #[wasm_bindgen]
 pub fn get_prompt(name: &str) -> Result<String, JsError> {
     inner::get_prompt(name).map_err(|e| JsError::new(&e.to_string()))
@@ -312,6 +315,7 @@ pub fn sanitize_query(input: &str) -> Result<String, JsError> {
 /// # Errors
 /// `JsError` if the input is not valid JSON or `messages` is missing or
 /// unparseable.
+#[cfg(feature = "ai-exports")]
 #[wasm_bindgen]
 pub fn truncate_conversation(input: &str) -> Result<String, JsError> {
     json_call(input, inner::truncate_conversation)

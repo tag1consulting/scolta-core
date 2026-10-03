@@ -1,6 +1,6 @@
 [package]
 name = "scolta-core"
-version = "1.0.2-dev"
+version = "1.1.0-dev"
 edition = "2021"
 # Floor set by wasm-bindgen/js-sys (1.77); our own code needs only 1.70 (OnceLock).
 rust-version = "1.77"
@@ -12,6 +12,18 @@ readme = "README.md"
 keywords = ["wasm", "search", "scoring", "pagefind"]
 categories = ["wasm", "web-programming"]
 exclude = ["tests/", ".github/", "CLAUDE.md", ".editorconfig"]
+
+[features]
+default = ["custom-patterns", "ai-exports"]
+# Site-specific `custom_patterns` in sanitize_query, evaluated by the regex
+# crate. The slim browser artifact is built without it (and so without regex)
+# and rejects custom patterns with an error rather than ignoring them.
+custom-patterns = ["dep:regex"]
+# The four AI helper exports: get_prompt, resolve_prompt, parse_expansion and
+# truncate_conversation. Every current adapter does that work on its server,
+# so no browser consumer calls them; the slim artifact leaves them out. The
+# Rust API keeps them either way.
+ai-exports = []
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -31,10 +43,14 @@ wasm-bindgen = "0.2"
 js-sys = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-regex = "1"
+regex = { version = "1", optional = true }
 
 [dev-dependencies]
 serde_json = "1"
+# Reference engine for the differential tests of the built-in patterns, which
+# run in every feature combination, and the source of their Unicode tables.
+regex = "1"
+regex-syntax = "0.8"
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false
