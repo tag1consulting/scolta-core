@@ -896,6 +896,35 @@ mod tests {
     }
 
     #[test]
+    fn test_overflow_order_is_rarest_term_then_position() {
+        // Four terms matched 1, 2, 2 and 3 times, and room for three windows
+        // (85 characters after the intro, each window 26 with its separator).
+        // "kiwi" goes first; "pear" and "plum" tie on two matches, so their
+        // windows go by position: "pear one", then "plum one", and the budget
+        // is spent before "pear two" or any "lime". The kept windows come out
+        // in page order. "plum" is named before "pear" in the query, so its
+        // matches are found first: ordering by count alone would keep both
+        // "plum" windows.
+        let content = format!(
+            "Intro sentence here. {}lime one {}pear one {}plum one {}lime two {}pear two {}plum two {}lime six {}kiwi one {}",
+            "a ".repeat(40),
+            "b ".repeat(40),
+            "c ".repeat(40),
+            "d ".repeat(40),
+            "e ".repeat(40),
+            "f ".repeat(40),
+            "g ".repeat(40),
+            "h ".repeat(40),
+            "i ".repeat(40)
+        );
+        let result = extract_context(&content, "lime plum pear kiwi", &cfg(105, 25, 10, "|"));
+        assert_eq!(
+            result,
+            "Intro sentence here.|b b b b b pear one c c c|c c c c c plum one d d d|h h h h h kiwi one i i i"
+        );
+    }
+
+    #[test]
     fn test_unchanged_when_no_window_fits() {
         // The intro leaves too little room for any window: page order and the
         // final truncation, as on main e3bdf44, byte for byte. The second case
