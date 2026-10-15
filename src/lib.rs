@@ -29,6 +29,7 @@ pub mod prompts;
 pub mod sanitize;
 pub mod scoring;
 pub mod stop_words;
+mod unicode_class;
 
 use error::ScoltaError;
 use serde_json::json;
@@ -40,6 +41,27 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Increment when function signatures or calling conventions change in a way
 /// that breaks binary compatibility with host wrappers (scolta-php, scolta.js).
 pub const WASM_INTERFACE_VERSION: u32 = 4;
+
+/// Whether this build exports the AI helper functions in [`AI_EXPORT_NAMES`]
+/// (the `ai-exports` feature). False in the slim browser artifact.
+pub const AI_EXPORTS: bool = cfg!(feature = "ai-exports");
+
+/// The WASM exports the `ai-exports` feature adds. The Rust functions behind
+/// them in [`inner`] exist in every build.
+pub const AI_EXPORT_NAMES: [&str; 4] = [
+    "parse_expansion",
+    "resolve_prompt",
+    "get_prompt",
+    "truncate_conversation",
+];
+
+/// Which published artifact this build is: `"full"` with every default
+/// feature, `"slim"` with none, `"custom"` for any other combination.
+pub const ARTIFACT: &str = match (sanitize::CUSTOM_PATTERNS_SUPPORTED, AI_EXPORTS) {
+    (true, true) => "full",
+    (false, false) => "slim",
+    _ => "custom",
+};
 
 /// Forward config-clamp warnings to the host: `console.warn` in the browser,
 /// stderr on native targets (tests, tooling).
@@ -642,7 +664,16 @@ pub mod inner {
                     .map_err(|e| {
                         ScoltaError::parse_error(
                             "sanitize_query",
-                            format!("custom_patterns[{}]: invalid regex: {}", i, e),
+                            format!(
+                                "custom_patterns[{}]: {}{}",
+                                i,
+                                if sanitize::CUSTOM_PATTERNS_SUPPORTED {
+                                    "invalid regex: "
+                                } else {
+                                    ""
+                                },
+                                e
+                            ),
                         )
                     })?;
                     patterns.push(compiled);
@@ -717,11 +748,20 @@ pub mod inner {
     /// Build the runtime function manifest: name, version, WASM interface
     /// version, and per-function `since`/`stability`/IO metadata. This is the
     /// single source of truth host adapters read at startup.
+    ///
+    /// `artifact` and `capabilities` say which build this is, and `functions`
+    /// lists only what this build exports: the slim artifact omits the
+    /// [`AI_EXPORT_NAMES`] and reports `custom_patterns: false`.
     pub fn describe() -> serde_json::Value {
-        json!({
+        let mut manifest = json!({
             "name": "scolta-core",
             "version": VERSION,
             "wasm_interface_version": WASM_INTERFACE_VERSION,
+            "artifact": ARTIFACT,
+            "capabilities": {
+                "custom_patterns": sanitize::CUSTOM_PATTERNS_SUPPORTED,
+                "ai_exports": AI_EXPORTS
+            },
             "description": "Scolta browser WASM — client-side search scoring, prompt management, query expansion, context extraction, PII sanitization, and conversation trimming",
             "functions": {
                 "score_results": {
@@ -816,7 +856,15 @@ pub mod inner {
                     "output_type": "json"
                 }
             }
-        })
+        });
+        if !AI_EXPORTS {
+            if let Some(functions) = manifest["functions"].as_object_mut() {
+                for name in AI_EXPORT_NAMES {
+                    functions.remove(name);
+                }
+            }
+        }
+        manifest
     }
 }
 
@@ -1220,6 +1268,7 @@ mod tests {
         assert!(result.contains("555-867-5309")); // phone not redacted
     }
 
+    #[cfg(feature = "custom-patterns")]
     #[test]
     fn test_sanitize_query_custom_pattern_redacts() {
         let input = json!({
@@ -1235,6 +1284,7 @@ mod tests {
         assert!(!result.contains("MRN-12345"));
     }
 
+    #[cfg(feature = "custom-patterns")]
     #[test]
     fn test_sanitize_query_invalid_custom_pattern_is_err() {
         // A typo'd regex must be a hard error, not a silently skipped redaction.
@@ -1248,6 +1298,28 @@ mod tests {
         });
         let err = inner::sanitize_query(&input).unwrap_err();
         assert!(err.to_string().contains("invalid regex"));
+    }
+
+    #[cfg(not(feature = "custom-patterns"))]
+    #[test]
+    fn test_sanitize_query_custom_pattern_is_err_in_slim_build() {
+        // The slim artifact has no engine to evaluate a custom pattern with. It
+        // must refuse the call, never return the query with the pattern skipped.
+        let input = json!({
+            "query": "patient MRN-12345 admitted",
+            "config": {
+                "custom_patterns": [
+                    {"regex": r"\bMRN-\d{5}\b", "replacement": "[PATIENT_ID]"}
+                ]
+            }
+        });
+        let err = inner::sanitize_query(&input).unwrap_err().to_string();
+        assert!(err.contains("custom_patterns[0]"), "{err}");
+        assert!(err.contains("not supported"), "{err}");
+        assert!(!err.contains("invalid regex"), "{err}");
+        // An empty list asks for nothing the build lacks.
+        let input = json!({"query": "plain", "config": {"custom_patterns": []}});
+        assert_eq!(inner::sanitize_query(&input).unwrap(), "plain");
     }
 
     #[test]
@@ -1273,6 +1345,7 @@ mod tests {
             .contains("'custom_patterns' must be an array"));
     }
 
+    #[cfg(feature = "custom-patterns")]
     #[test]
     fn test_sanitize_query_custom_pattern_not_recompiled_per_call() {
         let input = json!({
@@ -1381,11 +1454,19 @@ mod tests {
         assert!(functions.contains_key("extract_context"));
         assert!(functions.contains_key("batch_extract_context"));
         assert!(functions.contains_key("sanitize_query"));
-        assert!(functions.contains_key("truncate_conversation"));
         // Stable functions still present
         assert!(functions.contains_key("score_results"));
         assert!(functions.contains_key("merge_results"));
-        assert!(functions.contains_key("parse_expansion"));
+        // The AI helpers are listed exactly when this build exports them.
+        for name in AI_EXPORT_NAMES {
+            assert_eq!(functions.contains_key(name), AI_EXPORTS, "{name}");
+        }
+        assert_eq!(desc["artifact"], ARTIFACT);
+        assert_eq!(
+            desc["capabilities"]["custom_patterns"],
+            sanitize::CUSTOM_PATTERNS_SUPPORTED
+        );
+        assert_eq!(desc["capabilities"]["ai_exports"], AI_EXPORTS);
         // Removed
         assert!(!functions.contains_key("to_js_scoring_config"));
         // All functions have required metadata

@@ -1,0 +1,25 @@
+{
+  "name": "scolta-core-dev-tools",
+  "private": true,
+  "description": "Size measurement and browser tests for the scolta-core WASM artifacts. Never published; the artifacts are the release tarballs.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build:tools": "tsc -p tools/tsconfig.json",
+    "measure:size": "npm run build:tools && node tools/dist/measure-size.js",
+    "test:browser": "npm run build:tools && playwright test -c tools/dist/browser/playwright.config.js",
+    "bench:browser": "npm run build:tools && node tools/dist/bench.js",
+    "bench:throttled": "npm run build:tools && node tools/dist/bench-throttled.js",
+    "fixtures:capture": "npm run build:tools && node tools/dist/capture-fixtures.js"
+  },
+  "devDependencies": {
+    "@gfx/zopfli": "1.0.15",
+    "@playwright/test": "1.63.0",
+    "@types/node": "26.6.4",
+    "fflate": "0.8.3",
+    "typescript": "7.0.2"
+  }
+}

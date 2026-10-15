@@ -8,6 +8,17 @@ Version: 1.0.0 · Target: wasm32-unknown-unknown · Framework: wasm-bindgen
 
 **Architecture:** `browser.rs` contains 13 `#[wasm_bindgen]` exports that form the public API. Each export is a thin serialization wrapper delegating to a corresponding function in the `inner::` module (`lib.rs`). The `inner::` functions are plain Rust — testable with `cargo test` without a WASM runtime — and are the sole implementation of all business logic. Modules `scoring`, `config`, `prompts`, `expansion`, `context`, `conversation`, `sanitize`, `error`, `common`, and `stop_words` contain the algorithmic details.
 
+**Two artifacts.** The full artifact (`scolta_core`, the default build) has all 13 exports. The slim artifact (`scolta_core_slim`, built with `--no-default-features`) has nine: it leaves out the AI helpers `get_prompt`, `resolve_prompt`, `parse_expansion` and `truncate_conversation` (Cargo feature `ai-exports`), and links no regex engine, so `sanitize_query` rejects `custom_patterns` (Cargo feature `custom-patterns`). Every export it does have behaves identically. A consumer selects it by loading its files, and `describe()` reports which build is loaded. The Rust API in `inner::` is complete in every build.
+
+**The slim loader.** The slim artifact also ships its module gzipped (`scolta_core_slim_bg.wasm.gz`) and a loader for it, `scolta_core_slim_load.js` with its `.d.ts`, for servers that send `application/wasm` uncompressed. The loader re-exports every export of `scolta_core_slim.js` and replaces only the default initializer:
+
+```ts
+export default function init(url?: string | URL): Promise<InitOutput>;
+export function fetchModuleBytes(url: string | URL): Promise<Uint8Array>;
+```
+
+`init()` with no argument fetches `scolta_core_slim_bg.wasm.gz` from beside the loader. It reads the response's first bytes: a WebAssembly module (`00 61 73 6d`, because the server sent the file with `Content-Encoding: gzip` and the browser already inflated it, or because `url` names the raw `.wasm`) is used as it is; gzip (`1f 8b`) is inflated with `DecompressionStream("gzip")`; anything else throws an `Error` naming the URL and the first eight bytes. An HTTP error or a corrupt gzip stream also throws, naming the URL. Later calls return the first call's result, and a failed call can be retried. It needs `fetch` and `DecompressionStream` and no CSP source beyond the glue's (`script-src 'self' 'wasm-unsafe-eval'`, and `connect-src` for the URL). The loader is not a WebAssembly export and is not in `describe()`.
+
 ---
 
 ## 2. Browser WASM Exports
@@ -298,7 +309,9 @@ Redact PII from a query string before analytics logging.
 ```
 
 - `query` — required string.
-- `config` — optional. All boolean fields default to `true`. Custom patterns use the `regex` crate syntax.
+- `config` — optional. All boolean fields default to `true`. Custom patterns use the `regex` crate syntax, and `$1`-style capture references in `replacement` are expanded. **Slim artifact:** any non-empty `custom_patterns` is a `JsError` (`custom patterns are not supported by this build`), never a silently skipped redaction; an empty array is accepted.
+
+The built-in classes are matched by bounded hand-written matchers, not a regex engine. Each one keeps the semantics of the `regex` crate pattern it replaced, including that crate's Unicode classes: `\d` is any decimal digit (Arabic-Indic, Devanagari and full-width digits included), `\s` any Unicode white space (no-break spaces included), and `\b` a Unicode word boundary, so a digit run glued to a letter, a combining mark or `_` is not redacted. The unit tests hold every matcher to its original pattern in the `regex` crate, and the browser tests replay those outputs against both built artifacts. Work is linear in the query length.
 
 Built-in classes and the forms each one covers:
 
@@ -314,7 +327,7 @@ Custom patterns are validated up front: an entry with a missing or non-string `r
 
 **Output JSON:** Sanitized query string.
 
-**Error:** `JsError` if `query` is missing or any custom pattern is malformed or invalid.
+**Error:** `JsError` if `query` is missing or any custom pattern is malformed or invalid. In the slim artifact, also if `custom_patterns` is non-empty.
 
 ---
 
@@ -353,6 +366,8 @@ Return a JSON manifest of all exported functions with metadata. Used by platform
   "name": "scolta-core",
   "version": "1.0.0-rc4",
   "wasm_interface_version": 4,
+  "artifact": "full",
+  "capabilities": { "custom_patterns": true, "ai_exports": true },
   "description": "Scolta browser WASM — client-side search scoring, prompt management, query expansion, context extraction, PII sanitization, and conversation trimming",
   "functions": {
     "score_results": { "since": "0.1.0", "stability": "stable", "input_type": "json", "output_type": "json" },
@@ -373,6 +388,8 @@ Return a JSON manifest of all exported functions with metadata. Used by platform
 ```
 
 `wasm_interface_version` tracks binary compatibility. Platform adapters check this value at load time and throw if it doesn't match the expected version.
+
+`artifact` is `"full"` or `"slim"` (`"custom"` for any other feature combination) and `capabilities` says what that build supports. `functions` lists only what the loaded build exports: the slim artifact's manifest omits the four AI helpers and reports `"capabilities": { "custom_patterns": false, "ai_exports": false }`.
 
 ---
 
@@ -517,26 +534,39 @@ cargo install wasm-pack
 ```bash
 cd packages/scolta-core
 
-# Release build (optimized for size)
-wasm-pack build --target web --release
+# Both release builds (full into pkg/, slim into pkg-slim/)
+./scripts/build.sh
 
 # Output files:
-pkg/scolta_core_bg.wasm   # The WASM binary
-pkg/scolta_core.js        # ES module wrapper + wasm-bindgen glue
-pkg/scolta_core.d.ts      # TypeScript definitions
+pkg/scolta_core_bg.wasm             # The WASM binary (full)
+pkg/scolta_core.js                  # ES module wrapper + wasm-bindgen glue
+pkg/scolta_core.d.ts                # TypeScript definitions
+pkg-slim/scolta_core_slim_bg.wasm   # The same three for the slim artifact
+pkg-slim/scolta_core_slim.js
+pkg-slim/scolta_core_slim.d.ts
+pkg-slim/scolta_core_slim_bg.wasm.gz   # The slim module, pre-gzipped (zopfli)
+pkg-slim/scolta_core_slim_load.js      # Its loader, compiled from loader/scolta_core_slim_load.ts
+pkg-slim/scolta_core_slim_load.d.ts
 ```
+
+`build.sh` writes the `.gz` and the loader with the pinned dev tools in `package.json`, so run `npm ci` first.
 
 ### Run tests
 
 ```bash
 cargo test                           # unit + integration tests
+cargo test --no-default-features     # the same, as the slim artifact is built
 cargo clippy -- -D warnings          # lint
 cargo fmt --check                    # formatting
+npm run measure:size                 # artifact sizes against size-budgets.json
+npm run test:browser                 # both artifacts in Chromium, Firefox and WebKit
 ```
 
 ### WASM binary size
 
-The release binary is optimized with `opt-level = "s"`, LTO, symbol stripping, and `codegen-units = 1`. Typical size is under 500 KB. The CI build job reports the binary size and warns if it exceeds 500 KB.
+The release binaries are built with `opt-level = "s"`, LTO, symbol stripping, `codegen-units = 1`, `panic = "abort"` and wasm-opt off. `size-budgets.json` holds the current budgets in raw, gzip and Brotli bytes, and CI fails a pull request whose packed artifacts exceed them. At this writing the slim artifact (module plus glue) is 348 KB raw, 136 KB gzip and 110 KB Brotli, and the full one 1,256 KB, 438 KB and 308 KB; most of the difference is the `regex` engine the full artifact keeps for custom patterns. The slim module pre-gzipped is 121 KB, and its budget is on that raw size, because the file crosses the wire as it is.
+
+`opt-level = "z"` and wasm-opt were measured and rejected. `z` saves about 3 KB of Brotli on the slim artifact but costs about 20% on warm scoring in Chromium and up to 40% on cold initialization in WebKit; wasm-opt (`-Os` or `-Oz`) shrinks the raw module but grows it by 2 to 5 KB compressed at either level.
 
 ---
 
@@ -548,4 +578,4 @@ The release binary is optimized with `opt-level = "s"`, LTO, symbol stripping, a
 | `js-sys` | 0.3 | JavaScript type bindings |
 | `serde` | 1 | Serialization framework (with derive feature) |
 | `serde_json` | 1 | JSON parsing and serialization |
-| `regex` | 1 | Pattern matching for PII redaction |
+| `regex` | 1 | Custom PII patterns in `sanitize_query`. Optional, behind the default `custom-patterns` feature; the slim artifact does not link it. The built-in patterns do not use it. |

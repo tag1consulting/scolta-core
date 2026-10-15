@@ -1,4 +1,8 @@
 /target/
 /pkg/
+/pkg-slim/
 /.phpunit.cache/
-Cargo.lock
+/node_modules/
+/tools/dist/
+/test-results/
+/dist/

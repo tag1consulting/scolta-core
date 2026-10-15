@@ -1,0 +1,22 @@
+{
+  "//": "Compiles the slim artifact's loader into pkg-slim/ beside the glue it imports. rootDirs lets ./scolta_core_slim.js resolve to the wasm-pack output, so the loader is type-checked against the real generated .d.ts. scripts/build.sh runs it after wasm-pack.",
+  "compilerOptions": {
+    "target": "es2020",
+    "module": "es2020",
+    "moduleResolution": "bundler",
+    "rootDir": ".",
+    "rootDirs": [".", "../pkg-slim"],
+    "outDir": "../pkg-slim",
+    "declaration": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": false,
+    "removeComments": false,
+    "types": [],
+    "lib": ["es2020", "dom", "dom.iterable"]
+  },
+  "files": ["scolta_core_slim_load.ts"]
+}
