@@ -5,7 +5,6 @@
 //! overlapping ranges.
 
 use crate::common;
-use std::collections::BTreeMap;
 
 /// Configuration for context extraction.
 #[derive(Debug, Clone)]
@@ -206,14 +205,15 @@ fn choose_ranges(
 /// walk goes on, since a later one may fit or may extend a kept range.
 ///
 /// Cost: one sort of the matches and one pass over `remaining` to count the
-/// characters before each byte; then, per match, a lookup in the kept ranges
-/// (a `BTreeMap` from start to end) and the ranges it absorbs, each absorbed
-/// once. A window that is refused also walks the kept ranges it overlaps;
-/// since every window has the same radius and kept ranges begin and end at
-/// spaces, that is a handful per window. Returns merged ranges in page order.
+/// characters before each byte; then, per match, a binary search of the kept
+/// ranges and the ranges it absorbs, each absorbed once. A window that is
+/// refused also walks the kept ranges it overlaps; since every window has the
+/// same radius and kept ranges begin and end at spaces, that is a handful per
+/// window. A kept window shifts the ranges after it, but the budget bounds how
+/// many are kept. Returns merged ranges in page order.
 fn select_snippets(
     remaining: &str,
-    mut matches: Vec<Match>,
+    matches: Vec<Match>,
     term_count: usize,
     sep_len: usize,
     budget: usize,
@@ -222,7 +222,23 @@ fn select_snippets(
     for m in &matches {
         counts[m.term] += 1;
     }
-    matches.sort_by_key(|m| (counts[m.term], m.pos));
+    // Rarest term first, then by position: two stable sorts, by position and
+    // then by count, order the matches as one stable sort on (count, pos).
+    // Both go through `sorted`, whose code the module already has; a sort of
+    // `Match` itself cost the slim module about 7 KB.
+    let by_pos = sorted(
+        matches
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (m.pos, i))
+            .collect(),
+    );
+    let order = sorted(
+        by_pos
+            .into_iter()
+            .map(|(_, i)| (counts[matches[i].term], i))
+            .collect(),
+    );
 
     // Characters before each byte offset, so a range's length is a
     // subtraction (u32: a page of four billion characters is not a page).
@@ -235,34 +251,32 @@ fn select_snippets(
     before[remaining.len()] = n;
     let chars = |s: usize, e: usize| (before[e] - before[s]) as usize;
 
-    // Disjoint kept ranges, start to end; ranges that touch are merged, as
-    // merge_ranges does.
-    let mut kept: BTreeMap<usize, usize> = BTreeMap::new();
+    // Disjoint kept ranges, sorted by start (and so by end); ranges that
+    // touch are merged, as merge_ranges does. A sorted Vec rather than a
+    // BTreeMap: the map's code cost the slim module about 10 KB.
+    let mut kept: Vec<(usize, usize)> = Vec::new();
     let mut used = 0usize;
-    let mut absorbed: Vec<(usize, usize)> = Vec::new();
-    for m in &matches {
-        // The kept ranges this window overlaps or touches, right to left.
-        absorbed.clear();
-        absorbed.extend(
-            kept.range(..=m.end)
-                .rev()
-                .take_while(|(_, end)| **end >= m.start)
-                .map(|(s, e)| (*s, *e)),
-        );
-        let start = absorbed.last().map_or(m.start, |r| r.0.min(m.start));
-        let end = absorbed.first().map_or(m.end, |r| r.1.max(m.end));
+    for &(_, i) in &order {
+        let m = &matches[i];
+        // The kept ranges this window overlaps or touches: kept[lo..hi].
+        let hi = kept.partition_point(|r| r.0 <= m.end);
+        let mut lo = hi;
+        while lo > 0 && kept[lo - 1].1 >= m.start {
+            lo -= 1;
+        }
+        let absorbed = &kept[lo..hi];
+        let start = absorbed.first().map_or(m.start, |r| r.0.min(m.start));
+        let end = absorbed.last().map_or(m.end, |r| r.1.max(m.end));
         let old: usize = absorbed.iter().map(|&(s, e)| sep_len + chars(s, e)).sum();
         let new = sep_len + chars(start, end);
         if used + new <= budget + old {
-            for (s, _) in &absorbed {
-                kept.remove(s);
-            }
-            kept.insert(start, end);
+            kept.drain(lo..hi);
+            kept.insert(lo, (start, end));
             used = used + new - old;
         }
     }
 
-    kept.into_iter().collect()
+    kept
 }
 
 fn sorted(mut ranges: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
@@ -893,6 +907,35 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_overflow_order_is_rarest_term_then_position() {
+        // Four terms matched 1, 2, 2 and 3 times, and room for three windows
+        // (85 characters after the intro, each window 26 with its separator).
+        // "kiwi" goes first; "pear" and "plum" tie on two matches, so their
+        // windows go by position: "pear one", then "plum one", and the budget
+        // is spent before "pear two" or any "lime". The kept windows come out
+        // in page order. "plum" is named before "pear" in the query, so its
+        // matches are found first: ordering by count alone would keep both
+        // "plum" windows.
+        let content = format!(
+            "Intro sentence here. {}lime one {}pear one {}plum one {}lime two {}pear two {}plum two {}lime six {}kiwi one {}",
+            "a ".repeat(40),
+            "b ".repeat(40),
+            "c ".repeat(40),
+            "d ".repeat(40),
+            "e ".repeat(40),
+            "f ".repeat(40),
+            "g ".repeat(40),
+            "h ".repeat(40),
+            "i ".repeat(40)
+        );
+        let result = extract_context(&content, "lime plum pear kiwi", &cfg(105, 25, 10, "|"));
+        assert_eq!(
+            result,
+            "Intro sentence here.|b b b b b pear one c c c|c c c c c plum one d d d|h h h h h kiwi one i i i"
+        );
     }
 
     #[test]

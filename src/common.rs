@@ -170,14 +170,51 @@ pub fn extract_query_with_custom(query: &str, language: &str, custom: &[String])
 /// are kept. Guillemets and the “ ‘ marks are trimmed from both ends, since
 /// German opens with » or „ and closes with « or “, and French the reverse.
 fn trim_term_punctuation(word: &str) -> &str {
-    word.trim_start_matches([
-        '(', '[', '{', '"', '\'', '\u{201C}', '\u{2018}', '\u{201E}', '\u{201A}', '\u{00AB}',
-        '\u{00BB}', '\u{2039}', '\u{203A}', '\u{00BF}', '\u{00A1}',
-    ])
-    .trim_end_matches([
-        '.', ',', ';', ':', '!', '?', ')', ']', '}', '"', '\'', '\u{201D}', '\u{2019}', '\u{201C}',
-        '\u{2018}', '\u{00BB}', '\u{00AB}', '\u{203A}', '\u{2039}', '\u{2026}',
-    ])
+    // Closures over `matches!` rather than char arrays: the array patterns
+    // generated more code in the slim module for the same characters.
+    word.trim_start_matches(|c| {
+        matches!(
+            c,
+            '(' | '['
+                | '{'
+                | '"'
+                | '\''
+                | '\u{201C}'
+                | '\u{2018}'
+                | '\u{201E}'
+                | '\u{201A}'
+                | '\u{00AB}'
+                | '\u{00BB}'
+                | '\u{2039}'
+                | '\u{203A}'
+                | '\u{00BF}'
+                | '\u{00A1}'
+        )
+    })
+    .trim_end_matches(|c| {
+        matches!(
+            c,
+            '.' | ','
+                | ';'
+                | ':'
+                | '!'
+                | '?'
+                | ')'
+                | ']'
+                | '}'
+                | '"'
+                | '\''
+                | '\u{201D}'
+                | '\u{2019}'
+                | '\u{201C}'
+                | '\u{2018}'
+                | '\u{00BB}'
+                | '\u{00AB}'
+                | '\u{203A}'
+                | '\u{2039}'
+                | '\u{2026}'
+        )
+    })
 }
 
 /// Extract meaningful search terms from a query string.
