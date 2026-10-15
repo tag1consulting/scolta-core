@@ -213,7 +213,7 @@ fn choose_ranges(
 /// many are kept. Returns merged ranges in page order.
 fn select_snippets(
     remaining: &str,
-    mut matches: Vec<Match>,
+    matches: Vec<Match>,
     term_count: usize,
     sep_len: usize,
     budget: usize,
@@ -222,7 +222,23 @@ fn select_snippets(
     for m in &matches {
         counts[m.term] += 1;
     }
-    matches.sort_by_key(|m| (counts[m.term], m.pos));
+    // Rarest term first, then by position: two stable sorts, by position and
+    // then by count, order the matches as one stable sort on (count, pos).
+    // Both go through `sorted`, whose code the module already has; a sort of
+    // `Match` itself cost the slim module about 7 KB.
+    let by_pos = sorted(
+        matches
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (m.pos, i))
+            .collect(),
+    );
+    let order = sorted(
+        by_pos
+            .into_iter()
+            .map(|(_, i)| (counts[matches[i].term], i))
+            .collect(),
+    );
 
     // Characters before each byte offset, so a range's length is a
     // subtraction (u32: a page of four billion characters is not a page).
@@ -240,7 +256,8 @@ fn select_snippets(
     // BTreeMap: the map's code cost the slim module about 10 KB.
     let mut kept: Vec<(usize, usize)> = Vec::new();
     let mut used = 0usize;
-    for m in &matches {
+    for &(_, i) in &order {
+        let m = &matches[i];
         // The kept ranges this window overlaps or touches: kept[lo..hi].
         let hi = kept.partition_point(|r| r.0 <= m.end);
         let mut lo = hi;
