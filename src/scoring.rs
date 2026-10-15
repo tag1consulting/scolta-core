@@ -1281,6 +1281,25 @@ mod tests {
     }
 
     #[test]
+    fn test_question_mark_does_not_hide_the_last_word() {
+        // "sailboat?" used to be the term, and it is in no title or excerpt.
+        let cfg = ScoringConfig::default();
+        let asked = "Did Jeremy live on a sailboat?";
+        let plain = "Did Jeremy live on a sailboat";
+        let title = "Living on a sailboat";
+        let excerpt = "He stayed aboard a sailboat.";
+        assert!(title_match_score(asked, title, &cfg) > 0.0);
+        assert_eq!(
+            title_match_score(asked, title, &cfg),
+            title_match_score(plain, title, &cfg)
+        );
+        assert_eq!(
+            content_match_score(asked, excerpt, &cfg),
+            content_match_score(plain, excerpt, &cfg)
+        );
+    }
+
+    #[test]
     fn test_title_match_score_all_terms() {
         let config = ScoringConfig::default();
         let score = title_match_score("hello world", "Hello World Page", &config);
@@ -1852,6 +1871,25 @@ mod tests {
         retain_forced_phrase_matches(&mut results, r#""boston massacre""#, &config);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].url, "/boston");
+    }
+
+    // A trimmed word that turns out to be a stop word no longer counts as a
+    // term: "you?" used to be a third term, so two locations were too few to
+    // judge and the result was kept; now there are two terms, the span check
+    // runs, and two scattered locations are dropped.
+    #[test]
+    fn forced_phrase_term_count_ignores_a_trailing_stop_word() {
+        let config = ScoringConfig::default();
+        let scattered = make_result_with_excerpt_and_locations(
+            "/far",
+            "Unrelated title",
+            "no phrase here",
+            1.0,
+            Some(vec![10, 50]),
+        );
+        let mut results = vec![scattered];
+        retain_forced_phrase_matches(&mut results, r#""boston massacre you?""#, &config);
+        assert!(results.is_empty());
     }
 
     // An unquoted query must be a no-op, whatever the locations say.

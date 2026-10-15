@@ -162,6 +162,24 @@ pub fn extract_query_with_custom(query: &str, language: &str, custom: &[String])
     }
 }
 
+/// Strip the punctuation a query word carries from its sentence: "sailboat?"
+/// becomes "sailboat", "(drupal," becomes "drupal", "¿qué?" becomes "qué".
+/// Only opening brackets and quotes are trimmed from
+/// the front, so ".net", "-wordpress" and "$100" keep their leading character;
+/// only closing punctuation is trimmed from the back, so "c++", "c#" and "50%"
+/// are kept. Guillemets and the “ ‘ marks are trimmed from both ends, since
+/// German opens with » or „ and closes with « or “, and French the reverse.
+fn trim_term_punctuation(word: &str) -> &str {
+    word.trim_start_matches([
+        '(', '[', '{', '"', '\'', '\u{201C}', '\u{2018}', '\u{201E}', '\u{201A}', '\u{00AB}',
+        '\u{00BB}', '\u{2039}', '\u{203A}', '\u{00BF}', '\u{00A1}',
+    ])
+    .trim_end_matches([
+        '.', ',', ';', ':', '!', '?', ')', ']', '}', '"', '\'', '\u{201D}', '\u{2019}', '\u{201C}',
+        '\u{2018}', '\u{00BB}', '\u{00AB}', '\u{203A}', '\u{2039}', '\u{2026}',
+    ])
+}
+
 /// Extract meaningful search terms from a query string.
 ///
 /// Splits on whitespace, lowercases, and filters stop words and
@@ -177,6 +195,7 @@ pub fn extract_terms(query: &str, language: &str) -> Vec<String> {
     query
         .to_lowercase()
         .split_whitespace()
+        .map(trim_term_punctuation)
         // The query is already lowercased — skip the per-term re-lowercasing.
         .filter(|term| !is_stop_word_lower(term, language) && term.len() > 1)
         .map(|s| s.to_string())
@@ -198,6 +217,7 @@ pub fn extract_terms_with_custom(query: &str, language: &str, custom: &[String])
     query
         .to_lowercase()
         .split_whitespace()
+        .map(trim_term_punctuation)
         // The query is already lowercased — skip the per-term re-lowercasing.
         .filter(|term| !is_stop_word_with_custom_lower(term, language, custom) && term.len() > 1)
         .map(|s| s.to_string())
@@ -207,6 +227,64 @@ pub fn extract_terms_with_custom(query: &str, language: &str, custom: &[String])
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_extract_terms_trims_sentence_punctuation() {
+        assert_eq!(
+            extract_terms("Did Jeremy live on a sailboat?", "en"),
+            vec!["jeremy", "live", "sailboat"]
+        );
+        // Each trimmed character, once.
+        let trimmed = extract_terms(
+            "(aa) [bb] {cc} \"dd\" 'ee' \u{201C}ff\u{201D} \u{2018}gg\u{2019} \u{201E}hh\u{201C} \u{201A}ii\u{2018} \
+             \u{00AB}jj\u{00BB} \u{00BB}kk\u{00AB} \u{2039}ll\u{203A} \u{203A}mm\u{2039} \u{00BF}nn? \u{00A1}oo! \
+             pp. qq, rr; ss: tt\u{2026}",
+            "en",
+        );
+        let expected: Vec<String> = [
+            "aa", "bb", "cc", "dd", "ee", "ff", "gg", "hh", "ii", "jj", "kk", "ll", "mm", "nn",
+            "oo", "pp", "qq", "rr", "ss", "tt",
+        ]
+        .iter()
+        .map(|t| t.to_string())
+        .collect();
+        assert_eq!(trimmed, expected);
+        // What stays as it was.
+        assert_eq!(
+            extract_terms(
+                "c++ c# node.js .net -wordpress $100 u.s. 50% foo( pre- x* ?!",
+                "en"
+            ),
+            vec![
+                "c++",
+                "c#",
+                "node.js",
+                ".net",
+                "-wordpress",
+                "$100",
+                "u.s",
+                "50%",
+                "foo(",
+                "pre-",
+                "x*"
+            ]
+        );
+        assert_eq!(
+            extract_terms_with_custom("news on sailboats?", "en", &["news".to_string()]),
+            vec!["sailboats"]
+        );
+        // Trimmed before the stop word and length checks: "it?" is "it".
+        // Runs of marks go too.
+        assert_eq!(
+            extract_terms(
+                "really?! (drupal). sailboat... \u{00BF}\u{00AB}qu\u{00E9}\u{00BB}?",
+                "en"
+            ),
+            vec!["really", "drupal", "sailboat", "qu\u{00E9}"]
+        );
+        assert!(extract_terms("what is it?", "en").is_empty());
+        assert!(extract_terms_with_custom("what is it?", "en", &[]).is_empty());
+    }
 
     #[test]
     fn test_is_stop_word_en() {

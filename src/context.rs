@@ -5,6 +5,7 @@
 //! overlapping ranges.
 
 use crate::common;
+use std::collections::BTreeMap;
 
 /// Configuration for context extraction.
 #[derive(Debug, Clone)]
@@ -56,8 +57,10 @@ pub struct ContextResult {
 /// 2. Extract query terms; if none, return truncated-at-sentence content.
 /// 3. Take the intro (first `intro_length` chars, truncated at sentence boundary).
 /// 4. Find all keyword matches in the remainder; build ±`snippet_radius` ranges.
-/// 5. Merge overlapping/adjacent ranges.
-/// 6. Join intro + separator + snippets; trim to `max_length` at sentence boundary.
+/// 5. If every merged range fits after the intro, keep them all. Otherwise keep
+///    the windows of the rarest terms first (see `select_snippets`).
+/// 6. Join intro + separator + snippets in page order; trim to `max_length` at
+///    a sentence boundary as a final guard.
 pub fn extract_context(content: &str, query: &str, config: &ContextConfig) -> String {
     let max_len = config.max_length as usize;
     let intro_len = config.intro_length as usize;
@@ -84,15 +87,52 @@ pub fn extract_context(content: &str, query: &str, config: &ContextConfig) -> St
     let intro_byte_end = intro.len();
     let remaining = &content[intro_byte_end..];
 
-    // Find all keyword match ranges (byte offsets in `remaining`).
-    //
-    // The search runs over a lowercased copy, but `to_lowercase` is not
-    // length-preserving ('İ' U+0130 grows 2 → 3 bytes), so positions found in
-    // the lowered text are mapped back to original byte offsets before slicing.
-    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    let matches = find_matches(remaining, &terms, radius);
+
+    if matches.is_empty() {
+        // No matches found in the remainder — return truncated intro + all of remaining.
+        let combined = format!("{}{}{}", intro, sep, remaining);
+        return truncate_at_sentence(&combined, max_len).to_string();
+    }
+
+    let budget = max_len.saturating_sub(char_len(&intro));
+    let merged = choose_ranges(remaining, matches, terms.len(), char_len(sep), budget);
+
+    // Build output, snippets in document order.
+    let mut result = intro.clone();
+    for (s, e) in &merged {
+        result.push_str(sep);
+        result.push_str(&remaining[*s..*e]);
+    }
+
+    if char_len(&result) > max_len {
+        return truncate_at_sentence(&result, max_len).to_string();
+    }
+
+    result
+}
+
+/// One keyword match: its snippet window and position, as byte offsets into
+/// the text after the intro, and the index of the query term it matched.
+#[derive(Clone)]
+struct Match {
+    start: usize,
+    end: usize,
+    pos: usize,
+    term: usize,
+}
+
+/// Every match of every term in `remaining`, each with its ±`radius` window
+/// snapped to word boundaries.
+///
+/// The search runs over a lowercased copy, but `to_lowercase` is not
+/// length-preserving ('İ' U+0130 grows 2 → 3 bytes), so positions found in
+/// the lowered text are mapped back to original byte offsets before slicing.
+fn find_matches(remaining: &str, terms: &[String], radius: usize) -> Vec<Match> {
+    let mut matches: Vec<Match> = Vec::new();
     let (remaining_lower, lower_to_orig) = lowercase_with_offsets(remaining);
 
-    for term in &terms {
+    for (term_idx, term) in terms.iter().enumerate() {
         let term_lower = term.to_lowercase();
         let mut search_from = 0usize;
         while search_from < remaining_lower.len() {
@@ -106,36 +146,128 @@ pub fn extract_context(content: &str, query: &str, config: &ContextConfig) -> St
                     let start =
                         word_boundary_start(remaining, byte_sub(remaining, orig_pos, radius));
                     let end = word_boundary_end(remaining, byte_add(remaining, orig_end, radius));
-                    ranges.push((start, end));
+                    matches.push(Match {
+                        start,
+                        end,
+                        pos: orig_pos,
+                        term: term_idx,
+                    });
                     // Advance by at least one character to prevent infinite loops.
                     search_from = lower_pos + term_lower.len().max(1);
                 }
             }
         }
     }
+    matches
+}
 
-    if ranges.is_empty() {
-        // No matches found in the remainder — return truncated intro + all of remaining.
-        let combined = format!("{}{}{}", intro, sep, remaining);
-        return truncate_at_sentence(&combined, max_len).to_string();
+/// The ranges of `remaining` to emit after the intro, merged, in page order.
+///
+/// If every merged window fits in `budget` characters (each with its
+/// separator), all of them, exactly as before. This check is not just a
+/// shortcut: taken one at a time in rarity order, a window can be refused
+/// before a later one arrives that would have bridged it to a kept range, so
+/// with three or more windows the walk can keep less than everything even
+/// when everything fits. If not, the rarest terms' windows
+/// ([`select_snippets`]). If not even one window fits, all of them
+/// again, for the caller's final truncation, as before.
+fn choose_ranges(
+    remaining: &str,
+    matches: Vec<Match>,
+    term_count: usize,
+    sep_len: usize,
+    budget: usize,
+) -> Vec<(usize, usize)> {
+    let all = merge_ranges(sorted(matches.iter().map(|m| (m.start, m.end)).collect()));
+    let all_len: usize = all
+        .iter()
+        .map(|(s, e)| sep_len + char_len(&remaining[*s..*e]))
+        .sum();
+    if all_len <= budget {
+        return all;
+    }
+    let kept = select_snippets(remaining, matches, term_count, sep_len, budget);
+    if kept.is_empty() {
+        all
+    } else {
+        kept
+    }
+}
+
+/// Choose the snippets that fit `budget` characters when not all of them do.
+///
+/// Snippets used to be kept in page order until the budget ran out, so a term
+/// that occurs often near the top of a long page (six "Jeremy" matches before
+/// character 2,263 of a team page) filled the budget before a term that occurs
+/// once or twice, further down ("sailboat"), was reached. Windows are now
+/// taken rarest term first: by how many times their term matched, then by
+/// position. A window is kept when the merged result, each range preceded by
+/// the separator, still fits; one that does not fit is passed over and the
+/// walk goes on, since a later one may fit or may extend a kept range.
+///
+/// Cost: one sort of the matches and one pass over `remaining` to count the
+/// characters before each byte; then, per match, a lookup in the kept ranges
+/// (a `BTreeMap` from start to end) and the ranges it absorbs, each absorbed
+/// once. A window that is refused also walks the kept ranges it overlaps;
+/// since every window has the same radius and kept ranges begin and end at
+/// spaces, that is a handful per window. Returns merged ranges in page order.
+fn select_snippets(
+    remaining: &str,
+    mut matches: Vec<Match>,
+    term_count: usize,
+    sep_len: usize,
+    budget: usize,
+) -> Vec<(usize, usize)> {
+    let mut counts = vec![0usize; term_count];
+    for m in &matches {
+        counts[m.term] += 1;
+    }
+    matches.sort_by_key(|m| (counts[m.term], m.pos));
+
+    // Characters before each byte offset, so a range's length is a
+    // subtraction (u32: a page of four billion characters is not a page).
+    let mut before = vec![0u32; remaining.len() + 1];
+    let mut n = 0u32;
+    for (i, ch) in remaining.char_indices() {
+        before[i..i + ch.len_utf8()].fill(n);
+        n += 1;
+    }
+    before[remaining.len()] = n;
+    let chars = |s: usize, e: usize| (before[e] - before[s]) as usize;
+
+    // Disjoint kept ranges, start to end; ranges that touch are merged, as
+    // merge_ranges does.
+    let mut kept: BTreeMap<usize, usize> = BTreeMap::new();
+    let mut used = 0usize;
+    let mut absorbed: Vec<(usize, usize)> = Vec::new();
+    for m in &matches {
+        // The kept ranges this window overlaps or touches, right to left.
+        absorbed.clear();
+        absorbed.extend(
+            kept.range(..=m.end)
+                .rev()
+                .take_while(|(_, end)| **end >= m.start)
+                .map(|(s, e)| (*s, *e)),
+        );
+        let start = absorbed.last().map_or(m.start, |r| r.0.min(m.start));
+        let end = absorbed.first().map_or(m.end, |r| r.1.max(m.end));
+        let old: usize = absorbed.iter().map(|&(s, e)| sep_len + chars(s, e)).sum();
+        let new = sep_len + chars(start, end);
+        if used + new <= budget + old {
+            for (s, _) in &absorbed {
+                kept.remove(s);
+            }
+            kept.insert(start, end);
+            used = used + new - old;
+        }
     }
 
-    // Sort and merge overlapping ranges.
+    kept.into_iter().collect()
+}
+
+fn sorted(mut ranges: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
     ranges.sort_by_key(|r| r.0);
-    let merged = merge_ranges(ranges);
-
-    // Build output.
-    let mut result = intro.clone();
-    for (s, e) in &merged {
-        result.push_str(sep);
-        result.push_str(&remaining[*s..*e]);
-    }
-
-    if char_len(&result) > max_len {
-        return truncate_at_sentence(&result, max_len).to_string();
-    }
-
-    result
+    ranges
 }
 
 /// Extract context from multiple items in a single call.
@@ -522,6 +654,327 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // Snippet selection when not every snippet fits
+    // -----------------------------------------------------------------------
+
+    fn cfg(max: u32, intro: u32, radius: u32, sep: &str) -> ContextConfig {
+        ContextConfig {
+            max_length: max,
+            intro_length: intro,
+            snippet_radius: radius,
+            separator: sep.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_rare_late_term_beats_common_early_term() {
+        // The shape of a long team page: the person's name is everywhere near
+        // the top, the fact asked about appears once, far down. Snippets used
+        // to be kept in page order, so the name's windows filled the budget
+        // and "sailboat" never made it in.
+        let mut content = "Our team. ".to_string();
+        for i in 0..20 {
+            content.push_str(&format!("Jeremy note {i} {} ", "filler ".repeat(40)));
+        }
+        content.push_str("He once lived aboard a sailboat in the Caribbean. ");
+        content.push_str(&"tail ".repeat(400));
+        let result = extract_context(&content, "jeremy sailboat", &cfg(1200, 200, 80, "\n\n"));
+        assert!(result.contains("aboard a sailboat"), "got: {result}");
+        assert!(
+            result.contains("Jeremy note"),
+            "the common term still gets room"
+        );
+        assert!(result.chars().count() <= 1200);
+    }
+
+    #[test]
+    fn test_selected_snippets_keep_page_order_and_earliest_on_a_tie() {
+        // Over budget (55 characters after the intro): room for two windows. "beta" (one match) goes first,
+        // then the earliest of the three "alpha" windows; they come out in
+        // page order, alpha before beta.
+        let content = format!(
+            "Intro sentence here. {}alpha one {}beta two {}alpha three {}alpha four {}",
+            "x ".repeat(40),
+            "y ".repeat(40),
+            "z ".repeat(40),
+            "v ".repeat(40),
+            "w ".repeat(40)
+        );
+        let result = extract_context(&content, "alpha beta", &cfg(75, 25, 10, "|"));
+        assert_eq!(
+            result,
+            "Intro sentence here.|x x x x x alpha one y y y|y y y y y beta two z z z"
+        );
+    }
+
+    #[test]
+    fn test_unchanged_when_every_snippet_fits() {
+        // The output main e3bdf44 gives for this input, byte for byte.
+        let content = format!(
+            "Intro sentence here. {}drupal one {}drupal two {}",
+            "a ".repeat(60),
+            "b ".repeat(60),
+            "c ".repeat(60)
+        );
+        assert_eq!(
+            extract_context(&content, "drupal", &cfg(300, 30, 10, "|")),
+            "Intro sentence here.|a a a a a drupal one b b b|b b b b b drupal two c c c"
+        );
+    }
+
+    #[test]
+    fn test_separator_counts_against_the_budget() {
+        // The windows are 24, 26 and 26 characters and the separator 9. The
+        // budget after the intro (100 - 20 = 80) holds two windows with their
+        // separators (68), not three (103). Without the separators the three
+        // would come to 76 and all be kept.
+        let content = format!(
+            "Intro sentence here. {}rare one {}common two {}common three {}",
+            "a ".repeat(40),
+            "b ".repeat(40),
+            "c ".repeat(40),
+            "d ".repeat(40)
+        );
+        let two = "Intro sentence here.\n\n[...]\n\na a a a a rare one b b b\n\n[...]\n\nb b b b b common two c c c";
+        let one = "Intro sentence here.\n\n[...]\n\na a a a a rare one b b b";
+        let sep = "\n\n[...]\n\n";
+        assert_eq!(
+            extract_context(&content, "rare common", &cfg(100, 25, 10, sep)),
+            two
+        );
+        // Exactly 68 characters of budget hold the same two; 67 only one.
+        assert_eq!(
+            extract_context(&content, "rare common", &cfg(88, 25, 10, sep)),
+            two
+        );
+        assert_eq!(
+            extract_context(&content, "rare common", &cfg(87, 25, 10, sep)),
+            one
+        );
+        // A separator is counted in characters: "…" is three bytes, one character.
+        assert_eq!(
+            extract_context(&content, "rare common", &cfg(84, 25, 10, "\n\n[…]\n\n")),
+            two.replace("[...]", "[…]")
+        );
+    }
+
+    #[test]
+    fn test_budget_is_what_the_intro_leaves() {
+        // A 188 character intro leaves 62 of 250: room for the rare window and
+        // one common one, not for all three. The intro is counted in
+        // characters, accented ones included.
+        for sentence in ["Long intro sentence. ", "Lóng íntró séntéñcé. "] {
+            let intro = sentence.repeat(9);
+            let content = format!(
+                "{intro}{}rare one {}common two {}common three {}",
+                "a ".repeat(40),
+                "b ".repeat(40),
+                "c ".repeat(40),
+                "d ".repeat(40)
+            );
+            let result = extract_context(&content, "rare common", &cfg(250, 190, 10, "|"));
+            assert_eq!(
+                result,
+                format!(
+                    "{}|a a a a a rare one b b b|b b b b b common two c c c",
+                    intro.trim_end()
+                )
+            );
+        }
+    }
+
+    /// The selection the long way: try each window in rarity order, re-merge
+    /// everything kept, and recount every character. `choose_ranges` must
+    /// agree with it on every input.
+    fn naive_choose(
+        remaining: &str,
+        matches: &[Match],
+        term_count: usize,
+        sep_len: usize,
+        budget: usize,
+    ) -> Vec<(usize, usize)> {
+        let cost = |ranges: &[(usize, usize)]| -> usize {
+            merge_ranges(sorted(ranges.to_vec()))
+                .iter()
+                .map(|(s, e)| sep_len + char_len(&remaining[*s..*e]))
+                .sum()
+        };
+        let all: Vec<(usize, usize)> = matches.iter().map(|m| (m.start, m.end)).collect();
+        if cost(&all) <= budget {
+            return merge_ranges(sorted(all));
+        }
+        let mut counts = vec![0usize; term_count];
+        for m in matches {
+            counts[m.term] += 1;
+        }
+        let mut order: Vec<&Match> = matches.iter().collect();
+        order.sort_by_key(|m| (counts[m.term], m.pos));
+        let mut kept: Vec<(usize, usize)> = Vec::new();
+        for m in order {
+            let mut trial = kept.clone();
+            trial.push((m.start, m.end));
+            if cost(&trial) <= budget {
+                kept = trial;
+            }
+        }
+        if kept.is_empty() {
+            merge_ranges(sorted(all))
+        } else {
+            merge_ranges(sorted(kept))
+        }
+    }
+
+    #[test]
+    fn test_selection_matches_the_naive_reference() {
+        // 5,000 seeded pseudo random pages over a small vocabulary, with multibyte
+        // and four byte characters, double spaces (ranges that touch) and
+        // long tokens, at many budgets, radii and separator lengths.
+        let words = [
+            "alpha",
+            "beta",
+            "gamma",
+            "delta",
+            "x",
+            "yy",
+            "caffè",
+            "日本",
+            "🇮🇹",
+            "😀😀",
+            "",
+            "zzzzzzzzzzzzzzzzzzzz",
+        ];
+        let terms: Vec<String> = ["alpha", "beta", "gamma", "caffè", "日本", "😀"]
+            .iter()
+            .map(|t| t.to_string())
+            .collect();
+        let mut seed: u64 = 0x5eed;
+        let mut next = |n: usize| -> usize {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((seed >> 33) as usize) % n
+        };
+        let mut checked = 0;
+        while checked < 5000 {
+            let len = 5 + next(120);
+            let page: Vec<&str> = (0..len).map(|_| words[next(words.len())]).collect();
+            let remaining = page.join(" ");
+            let used_terms: Vec<String> = terms.iter().filter(|_| next(2) == 0).cloned().collect();
+            if used_terms.is_empty() {
+                continue;
+            }
+            let radius = next(40);
+            let sep_len = next(12);
+            let matches = find_matches(&remaining, &used_terms, radius);
+            if matches.is_empty() {
+                continue;
+            }
+            // A random budget, and the exact cost of keeping every window.
+            let all: Vec<(usize, usize)> = matches.iter().map(|m| (m.start, m.end)).collect();
+            let exact: usize = merge_ranges(sorted(all))
+                .iter()
+                .map(|(s, e)| sep_len + char_len(&remaining[*s..*e]))
+                .sum();
+            checked += 1;
+            for budget in [next(250), exact] {
+                let expected =
+                    naive_choose(&remaining, &matches, used_terms.len(), sep_len, budget);
+                let got = choose_ranges(
+                    &remaining,
+                    matches.clone(),
+                    used_terms.len(),
+                    sep_len,
+                    budget,
+                );
+                assert_eq!(
+                    got, expected,
+                    "page {remaining:?} terms {used_terms:?} radius {radius} sep {sep_len} budget {budget}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_unchanged_when_no_window_fits() {
+        // The intro leaves too little room for any window: page order and the
+        // final truncation, as on main e3bdf44, byte for byte. The second case
+        // has an intro longer than max_length, which nothing clamps (a JSON
+        // config of only max_length keeps the default intro of 2000).
+        let content = format!(
+            "One. Two. Three. Four. {} sailboat story {}",
+            "x ".repeat(100),
+            "y ".repeat(100)
+        );
+        assert_eq!(
+            extract_context(&content, "sailboat", &cfg(30, 30, 10, "|")),
+            "One. Two. Three."
+        );
+        assert_eq!(
+            extract_context(&content, "sailboat", &cfg(15, 100, 10, "|")),
+            "One. Two."
+        );
+    }
+
+    #[test]
+    fn test_window_too_big_is_passed_over() {
+        // The rarest term's window is stretched by a long token past the 60
+        // characters of room (to 415 or 95 characters). Either way it is
+        // refused, the walk goes on, and the two "beta" windows, which
+        // overlap and merge, are kept.
+        for long in [400, 80] {
+            let content = format!(
+                "Intro sentence here. {}beta one beta two {}alpha{} {}",
+                "a ".repeat(40),
+                "b ".repeat(40),
+                "z".repeat(long),
+                "c ".repeat(40)
+            );
+            assert_eq!(
+                extract_context(&content, "alpha beta", &cfg(80, 25, 10, "|")),
+                "Intro sentence here.|a a a a a beta one beta two b b b",
+                "token of {long}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_windows_are_measured_in_characters() {
+        // Emoji are four bytes a character, so this window is more than three
+        // bytes per character. Counted in characters it fits the room
+        // exactly; counted in bytes no window fits, and the output would fall
+        // back to page order cut at max_length.
+        let content = format!(
+            "Intro sentence here. {}rare {}{}common",
+            "😀😀😀😀 ".repeat(20),
+            "😀😀😀😀 ".repeat(20),
+            "o ".repeat(40)
+        );
+        let probe = extract_context(&content, "rare", &cfg(300, 25, 40, "|"));
+        let window = probe.split('|').nth(1).expect("the rare window");
+        assert!(window.len() > 3 * window.chars().count());
+        let max = 21 + u32::try_from(window.chars().count()).unwrap();
+        assert_eq!(
+            extract_context(&content, "rare common", &cfg(max, 25, 40, "|")),
+            format!("Intro sentence here.|{window}")
+        );
+    }
+
+    #[test]
+    fn test_goose_post_keeps_the_core_count() {
+        // The tag1.com post "A Goose In The Clouds" (2021), as Pagefind
+        // indexes it. "goose" matches 29 times; the sentence that answers
+        // "how many of the 32 cores?" sits at character 6,495. Page order
+        // spent the budget on early "goose" windows; this is the chat's
+        // per result budget with the upstream intro, radius and separator.
+        let content = include_str!("../tests/fixtures/goose_clouds_post.txt");
+        let query = "According to this article, how many of the 32 cores did Goose need to avoid being CPU-throttled?";
+        let result = extract_context(content, query, &cfg(1200, 200, 80, "\n\n"));
+        assert!(result.contains("22 of the 32"), "got: {result}");
+        assert!(result.chars().count() <= 1200);
+    }
+
+    // -----------------------------------------------------------------------
     // UTF-8 safety — snippet boundaries must never split a multi-byte char
     // -----------------------------------------------------------------------
 
@@ -631,6 +1084,54 @@ mod tests {
                 "result must not exceed max_chars"
             );
             assert!(is_valid_utf8(result), "result must be valid UTF-8");
+        }
+
+        // The selection path with multibyte text: a common accented term early,
+        // a rare one late, a budget that holds only some windows.
+        #[test]
+        fn selection_with_multibyte_content() {
+            let mut content = "Già detto. ".to_string();
+            for _ in 0..30 {
+                content.push_str("perché città caffè è qui ");
+            }
+            content.push_str(&"ò ".repeat(200));
+            content.push_str(" İstanbul 日本語 🇮🇹 Ünïcödé finale ");
+            content.push_str(&"ù ".repeat(200));
+            let cfg = ContextConfig {
+                max_length: 400,
+                intro_length: 50,
+                snippet_radius: 30,
+                separator: "\n\n[...]\n\n".to_string(),
+                ..Default::default()
+            };
+            let result = extract_context(&content, "caffè ünïcödé", &cfg);
+            assert!(is_valid_utf8(&result));
+            assert!(result.contains("Ünïcödé"), "rare term kept: {result}");
+            assert!(result.contains("caffè"));
+            assert!(result.chars().count() <= 400);
+        }
+
+        // A query term that starts with a multibyte character, on text with
+        // no spaces, where every window stretches past the budget.
+        #[test]
+        fn multibyte_initial_term_on_spaceless_text() {
+            let content = format!(
+                "{}東京タワー{}",
+                "日本語のページです。".repeat(900),
+                "おわりです。".repeat(900)
+            );
+            for (max, intro) in [(1200, 200), (3000, 200), (6000, 2000)] {
+                let cfg = ContextConfig {
+                    max_length: max,
+                    intro_length: intro,
+                    snippet_radius: 80,
+                    separator: "\n\n".to_string(),
+                    ..Default::default()
+                };
+                let result = extract_context(&content, "東京タワー", &cfg);
+                assert!(is_valid_utf8(&result));
+                assert!(result.chars().count() <= max as usize);
+            }
         }
 
         // Two terms separated by a 100-char run of è (200 bytes).  With a radius

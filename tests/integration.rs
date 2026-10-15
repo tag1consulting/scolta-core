@@ -405,6 +405,32 @@ fn batch_extract_context_returns_all_items() {
     assert_eq!(arr[1]["url"], "/b");
 }
 
+#[test]
+fn batch_extract_context_over_budget_keeps_the_rare_term() {
+    // Through the JSON layer the adapters call, with scolta.js's chat config
+    // shape: a common term early, a rare one late, a budget too small for all.
+    // Only "sailboat" anchors the late sentence, so this also needs the "?"
+    // trimmed from the query's last word.
+    let mut content = "Our team. ".to_string();
+    for i in 0..20 {
+        content.push_str(&format!("Jeremy note {i} {} ", "filler ".repeat(40)));
+    }
+    content.push_str("He once stayed aboard a sailboat in the Caribbean. ");
+    content.push_str(&"tail ".repeat(400));
+    let input = json!({
+        "items": [{"content": content, "url": "/team/", "title": "Team"}],
+        "query": "Did Jeremy really live on a sailboat?",
+        "config": {"max_length": 1200, "intro_length": 200, "snippet_radius": 80, "separator": "\n\n"}
+    });
+    let result = inner::batch_extract_context(&input).unwrap();
+    let context = result[0]["context"].as_str().unwrap();
+    assert!(
+        context.contains("stayed aboard a sailboat"),
+        "got: {context}"
+    );
+    assert!(context.chars().count() <= 1200);
+}
+
 // ── sanitize_query ────────────────────────────────────────────────────────────
 
 #[test]
