@@ -5,7 +5,6 @@
 //! overlapping ranges.
 
 use crate::common;
-use std::collections::BTreeMap;
 
 /// Configuration for context extraction.
 #[derive(Debug, Clone)]
@@ -206,11 +205,12 @@ fn choose_ranges(
 /// walk goes on, since a later one may fit or may extend a kept range.
 ///
 /// Cost: one sort of the matches and one pass over `remaining` to count the
-/// characters before each byte; then, per match, a lookup in the kept ranges
-/// (a `BTreeMap` from start to end) and the ranges it absorbs, each absorbed
-/// once. A window that is refused also walks the kept ranges it overlaps;
-/// since every window has the same radius and kept ranges begin and end at
-/// spaces, that is a handful per window. Returns merged ranges in page order.
+/// characters before each byte; then, per match, a binary search of the kept
+/// ranges and the ranges it absorbs, each absorbed once. A window that is
+/// refused also walks the kept ranges it overlaps; since every window has the
+/// same radius and kept ranges begin and end at spaces, that is a handful per
+/// window. A kept window shifts the ranges after it, but the budget bounds how
+/// many are kept. Returns merged ranges in page order.
 fn select_snippets(
     remaining: &str,
     mut matches: Vec<Match>,
@@ -235,34 +235,31 @@ fn select_snippets(
     before[remaining.len()] = n;
     let chars = |s: usize, e: usize| (before[e] - before[s]) as usize;
 
-    // Disjoint kept ranges, start to end; ranges that touch are merged, as
-    // merge_ranges does.
-    let mut kept: BTreeMap<usize, usize> = BTreeMap::new();
+    // Disjoint kept ranges, sorted by start (and so by end); ranges that
+    // touch are merged, as merge_ranges does. A sorted Vec rather than a
+    // BTreeMap: the map's code cost the slim module about 10 KB.
+    let mut kept: Vec<(usize, usize)> = Vec::new();
     let mut used = 0usize;
-    let mut absorbed: Vec<(usize, usize)> = Vec::new();
     for m in &matches {
-        // The kept ranges this window overlaps or touches, right to left.
-        absorbed.clear();
-        absorbed.extend(
-            kept.range(..=m.end)
-                .rev()
-                .take_while(|(_, end)| **end >= m.start)
-                .map(|(s, e)| (*s, *e)),
-        );
-        let start = absorbed.last().map_or(m.start, |r| r.0.min(m.start));
-        let end = absorbed.first().map_or(m.end, |r| r.1.max(m.end));
+        // The kept ranges this window overlaps or touches: kept[lo..hi].
+        let hi = kept.partition_point(|r| r.0 <= m.end);
+        let mut lo = hi;
+        while lo > 0 && kept[lo - 1].1 >= m.start {
+            lo -= 1;
+        }
+        let absorbed = &kept[lo..hi];
+        let start = absorbed.first().map_or(m.start, |r| r.0.min(m.start));
+        let end = absorbed.last().map_or(m.end, |r| r.1.max(m.end));
         let old: usize = absorbed.iter().map(|&(s, e)| sep_len + chars(s, e)).sum();
         let new = sep_len + chars(start, end);
         if used + new <= budget + old {
-            for (s, _) in &absorbed {
-                kept.remove(s);
-            }
-            kept.insert(start, end);
+            kept.drain(lo..hi);
+            kept.insert(lo, (start, end));
             used = used + new - old;
         }
     }
 
-    kept.into_iter().collect()
+    kept
 }
 
 fn sorted(mut ranges: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
