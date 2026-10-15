@@ -264,6 +264,8 @@ Extract the most relevant portion of article content for LLM context.
 - `query` — required string. Search query for keyword anchoring.
 - `config` — optional object. `max_length` (default 6000), `intro_length` (default 2000), `snippet_radius` (default 500), `separator` (default `"\n\n[...]\n\n"`), `language` (ISO 639-1 code for query stop-word filtering, default `"en"`).
 
+When the content is longer than `max_length` and the query has terms, the output starts with the intro (up to `intro_length` characters, cut at a sentence). Each match gets a window of `snippet_radius` bytes on each side, widened to word boundaries, and overlapping windows merge. If every merged window fits in what the intro leaves of `max_length`, each counted with its separator, all of them follow. If not, the windows of the rarest query terms are kept first (fewest matches after the intro, then earliest); one that does not fit is passed over and the rest are still tried. If none fits, the windows follow in page order and the whole is truncated at a sentence within `max_length`. Kept windows are always emitted in page order. Query words lose closing punctuation from the end and opening brackets, quotes, `¿` and `¡` from the start, so `sailboat?` matches `sailboat`.
+
 **Output JSON:** Extracted context string.
 
 ---
